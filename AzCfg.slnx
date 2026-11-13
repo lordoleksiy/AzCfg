@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AzCfg.Cli/AzCfg.Cli.csproj" />
+    <Project Path="src/AzCfg.Core/AzCfg.Core.csproj" />
+    <Project Path="src/AzCfg.Infrastructure/AzCfg.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AzCfg.Core.Tests/AzCfg.Core.Tests.csproj" />
+    <Project Path="tests/AzCfg.Infrastructure.Tests/AzCfg.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>
