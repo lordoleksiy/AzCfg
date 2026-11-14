@@ -160,6 +160,32 @@ public sealed class AppSettingsLocalTargetTests : IDisposable
         Assert.False(option.IsSafeForSecrets);
     }
 
+    [Fact]
+    public async Task InspectAsync_RelativeProjectPathIgnoredAndUntracked_IsSafeForSecretsIsTrue()
+    {
+        // ProjectPath is relative (e.g. "src/Api/Api.csproj"), so GetFilePath() produces a relative path too;
+        // git must still be asked about the full path, not one resolved against the file's own directory.
+        RunGit("init");
+        File.WriteAllText(Path.Combine(_root, ".gitignore"), "appsettings.local.json\n");
+        Directory.CreateDirectory(Path.Combine(_root, "src", "Api"));
+        var relativeProjectPath = Path.Combine("src", "Api", "Api.csproj");
+        var binding = new LocalTargetBinding(LocalTargetKind.AppSettingsLocal, relativeProjectPath, LocalFileFormat.NestedJson);
+
+        var originalDirectory = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = _root;
+
+            var option = await _target.InspectAsync(binding, CancellationToken.None);
+
+            Assert.True(option.IsSafeForSecrets);
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalDirectory;
+        }
+    }
+
     private LocalTargetBinding Binding() =>
         new(LocalTargetKind.AppSettingsLocal, CsprojPath(), LocalFileFormat.NestedJson);
 

@@ -39,19 +39,20 @@ public sealed class AppSettingsLocalTarget : JsonFileTarget
 
     private static async Task<bool> IsSafeForSecretsAsync(string path, CancellationToken ct)
     {
-        var directory = Path.GetDirectoryName(Path.GetFullPath(path));
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath);
         if (directory is null)
         {
             return false;
         }
 
-        var ignored = await RunGitAsync(directory, ["check-ignore", "-q", path], ct);
+        var ignored = await RunGitAsync(directory, ["check-ignore", "-q", fullPath], ct);
         if (ignored != 0)
         {
             return false;
         }
 
-        var tracked = await RunGitAsync(directory, ["ls-files", "--error-unmatch", path], ct);
+        var tracked = await RunGitAsync(directory, ["ls-files", "--error-unmatch", fullPath], ct);
         return tracked != 0;
     }
 
