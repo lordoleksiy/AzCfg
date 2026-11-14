@@ -123,7 +123,7 @@
   - Тести: тег важливіший за суфікс, невідомий суфікс, кілька stores на одне середовище.
   - Залежить від: M1
 
-- [ ] **C2. `ProjectService`**
+- [x] **C2. `ProjectService`**
   - `ResolveAsync`: є збережений binding → `Existing`. Інакше: проєкти з `IProjectDetector`, префікси з dev store,
     зіставлення назви csproj/папки з префіксом (ordinal ignore case, `-`/`.` вважаються однаковими).
     Один точний збіг → `IsConfident = true`. `TargetOptions` — з `ILocalTarget.InspectAsync`.
