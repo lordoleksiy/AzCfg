@@ -44,7 +44,7 @@
   - Тести: `IsProtectedByName` (prod/Production/prd → true, dev/stage → false), resolver.
   - Залежить від: —
 
-- [ ] **M2. Доповнення моделі синхронізації**
+- [x] **M2. Доповнення моделі синхронізації**
   - `Conflict(Key, StateItem? Base, StateItem? Local, StateItem? Remote)` — як у `DiffItem` (без `ConfigEntry`).
   - `PullResult(string Environment, int ValuesWritten, int SecretsWritten, bool Blocked, IReadOnlyList<string> LocalChanges)`.
   - `ProjectBinding` + `string? ActiveEnvironment`.
