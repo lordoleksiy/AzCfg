@@ -164,7 +164,7 @@
   - Тести: кожен `DiffKind`, конфлікт (обидві сторони змінили по-різному), однакова зміна з обох боків = `Unchanged`.
   - Залежить від: M2
 
-- [ ] **D2. `ThreeWayDiff.Plan`**
+- [x] **D2. `ThreeWayDiff.Plan`**
   - `ConfigDiff` → `SyncPlan`: локальні зміни → `Change`; `Conflict` → `Conflicts`.
   - Правило global: зміна ключа з global → новий ключ у scope сервісу; видалення ключа з global → нічого.
     `TouchesGlobal = true` лише для змін із `@global`.
