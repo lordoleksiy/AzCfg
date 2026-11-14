@@ -10,6 +10,7 @@ app.Configure(config =>
 {
     config.SetApplicationName("azcfg");
     config.AddCommand<InitCommand>("init").WithDescription("Discover App Configuration stores and save your environments.");
+    config.AddCommand<PullCommand>("pull").WithDescription("Pull an environment into the local targets.");
     config.SetExceptionHandler((ex, _) =>
     {
         var json = args.Contains("--json");
