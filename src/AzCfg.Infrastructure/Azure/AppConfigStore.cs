@@ -1,0 +1,74 @@
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+using Azure.Core;
+using Azure.Data.AppConfiguration;
+using AzCfg.Core.Abstractions;
+using AzCfg.Core.Mapping;
+using AzCfg.Core.Model;
+using AzCfg.Core.Sync;
+
+namespace AzCfg.Infrastructure.Azure;
+
+/// <summary>
+/// Azure App Configuration store. Reads <c>global:*</c> and <c>&lt;service&gt;:*</c> keys as entries; keys of
+/// other services are skipped. Writing is not implemented yet.
+/// </summary>
+public sealed class AppConfigStore(TokenCredential credential) : IConfigStore
+{
+    private const string NoLabel = "\0";
+
+    private readonly ConcurrentDictionary<Uri, ConfigurationClient> _clients = new();
+
+    public async IAsyncEnumerable<ConfigEntry> ReadAsync(
+        ConfigEnvironment env, string service, [EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var keyFilter in (string[])["global:*", $"{service}:*"])
+        {
+            var selector = new SettingSelector { KeyFilter = keyFilter, LabelFilter = env.Label ?? NoLabel };
+            await foreach (var setting in Client(env).GetConfigurationSettingsAsync(selector, ct))
+            {
+                if (ToEntry(setting, service) is { } entry)
+                {
+                    yield return entry;
+                }
+            }
+        }
+    }
+
+    public async IAsyncEnumerable<string> ListServicePrefixesAsync(
+        ConfigEnvironment env, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var selector = new SettingSelector { LabelFilter = env.Label ?? NoLabel, Fields = SettingFields.Key };
+        List<string> keys = [];
+        await foreach (var setting in Client(env).GetConfigurationSettingsAsync(selector, ct))
+        {
+            keys.Add(setting.Key);
+        }
+
+        foreach (var prefix in ToServicePrefixes(keys))
+        {
+            yield return prefix;
+        }
+    }
+
+    public Task<ApplyResult> ApplyAsync(
+        ConfigEnvironment env, string service, IReadOnlyList<Change> changes, CancellationToken ct) =>
+        throw new NotImplementedException();
+
+    internal static IEnumerable<string> ToServicePrefixes(IEnumerable<string> keys) =>
+        keys.Select(k => k[..Math.Max(k.IndexOf(':'), 0)]).Where(p => p.Length > 0 && p != "global").Distinct();
+
+    internal static ConfigEntry? ToEntry(ConfigurationSetting setting, string service) =>
+        KeyMapper.TryParseStoreKey(setting.Key, service, out var scope, out var path)
+            ? new ConfigEntry(
+                path,
+                scope,
+                setting is SecretReferenceConfigurationSetting reference
+                    ? new ConfigValue.KeyVaultRef(reference.SecretId)
+                    : new ConfigValue.Plain(setting.Value ?? ""),
+                setting.ETag == default ? null : setting.ETag.ToString())
+            : null;
+
+    private ConfigurationClient Client(ConfigEnvironment env) =>
+        _clients.GetOrAdd(env.StoreEndpoint, endpoint => new ConfigurationClient(endpoint, credential));
+}
