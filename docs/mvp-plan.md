@@ -101,7 +101,7 @@
   - Тести: розбір URI секрету (vault, name, version).
   - Залежить від: —
 
-- [ ] **I7. `ResourceGraphDiscovery`**
+- [x] **I7. `ResourceGraphDiscovery`**
   - Один KQL-запит на тип: `microsoft.appconfiguration/configurationstores`, `microsoft.keyvault/vaults`
     → `AzureResource` (з тегами й resource group).
   - Тести: мапінг рядка відповіді → `AzureResource`.

@@ -5,6 +5,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="AzCfg.Infrastructure.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Azure.Data.AppConfiguration" />
     <PackageReference Include="Azure.Identity" />
     <PackageReference Include="Azure.ResourceManager.ResourceGraph" />
