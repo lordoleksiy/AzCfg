@@ -176,7 +176,7 @@
   - Тести: приклад з `docs/architecture.md` (розділ «JSON-формат редагування»).
   - Залежить від: —
 
-- [ ] **D4. Edit JSON: parse** (`JsonProjection.FromEditJson`)
+- [x] **D4. Edit JSON: parse** (`JsonProjection.FromEditJson`)
   - JSON → `ConfigState` + список нових секретів (`{"@kv","value"}` → `SecretString`).
     `"value": null` → помилка з назвою ключа («впиши значення або прибери ключ»). Не-рядкові скаляри → рядок.
   - Тести: round-trip з D3, `@global`, новий секрет, null-значення, невалідний JSON.
