@@ -1,6 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace AzCfg.Core.Sync;
 
 /// <summary>Normalized value of a <see cref="StateItem"/> (decision 4).</summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(Plain), "plain")]
+[JsonDerivedType(typeof(Secret), "secret")]
 public abstract record StateValue
 {
     public sealed record Plain(string Value) : StateValue;

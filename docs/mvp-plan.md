@@ -157,7 +157,7 @@
 
 ## Етап 4. Diff, push, edit
 
-- [ ] **D1. `ThreeWayDiff.Compute`** (Core/Sync, static)
+- [x] **D1. `ThreeWayDiff.Compute`** (Core/Sync, static)
   - Вхід: base, local, remote (`ConfigState`) → `ConfigDiff` з `DiffKind` для кожного ключа.
   - Тут же нормалізація (ADR 0007): local-ключ — секрет лише якщо base/remote знає його як KV-ref;
     scope local-ключа — з remote/base, інакше `Service`.
