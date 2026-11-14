@@ -92,18 +92,20 @@ public sealed class SyncService(
 
     /// <summary>
     /// Plans local changes against <paramref name="env"/>. <see cref="PushSource.Promote"/> plans only new service keys
-    /// (<c>Add</c>/<c>CreateSecret</c>, no snapshot, global ignored); a key already in <paramref name="env"/> is a conflict.
+    /// (<c>Add</c>/<c>CreateSecret</c>, no snapshot, global ignored); a key already in <paramref name="env"/> at service scope is a conflict (a global-only key gets a service override).
     /// Throws <see cref="ArgumentException"/> naming the key for a null secret value.
     /// </summary>
     public async Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct)
     {
-        var (snapshot, remote, raw) = await ReadRemoteAsync(binding, env, ct);
-        var @base = source is PushSource.Promote ? new ConfigState(new Dictionary<string, StateItem>()) : snapshot;
+        var (snapshot, merged, raw) = await ReadRemoteAsync(binding, env, ct);
+        var promote = source is PushSource.Promote;
+        var @base = promote ? new ConfigState(new Dictionary<string, StateItem>()) : snapshot;
+        var remote = promote ? Service(merged) : merged;
         var json = source switch { PushSource.EditedJson e => e.Json, PushSource.Promote p => p.Json, _ => null };
         var local = json is null ? new ParsedEditJson(await ReadLocalAsync(binding, ct), []) : JsonProjection.FromEditJson(json, fingerprinter, KnownSecrets(@base, remote));
-        if (source is PushSource.Promote)
+        if (promote)
         {
-            local = local with { State = new(local.State.Items.Where(i => i.Value.Scope == ConfigScope.Service).ToDictionary(i => i.Key, i => i.Value, StringComparer.Ordinal)) };
+            local = local with { State = Service(local.State) };
         }
 
         var diff = ThreeWayDiff.Compute(@base, local.State, remote, fingerprinter);
@@ -180,6 +182,8 @@ public sealed class SyncService(
     private static Dictionary<string, StateValue.Secret> KnownSecrets(ConfigState @base, ConfigState remote) => @base.Items.Values.Concat(remote.Items.Values)
         .Select(i => i.Value).OfType<StateValue.Secret>().Where(s => s.SecretUri is not null)
         .GroupBy(s => ThreeWayDiff.SecretName(s.SecretUri!)).ToDictionary(g => g.Key, g => g.Last());
+
+    private static ConfigState Service(ConfigState state) => new(state.Items.Where(i => i.Value.Scope == ConfigScope.Service).ToDictionary(i => i.Key, i => i.Value, StringComparer.Ordinal));
 
     private static Uri Vault(Uri uri) => new(uri.GetLeftPart(UriPartial.Authority));
 

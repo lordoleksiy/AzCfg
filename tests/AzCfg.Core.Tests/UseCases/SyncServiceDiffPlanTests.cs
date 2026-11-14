@@ -197,6 +197,23 @@ public sealed class SyncServiceDiffPlanTests
     }
 
     [Theory]
+    [InlineData("1")]
+    [InlineData("mine")]
+    public async Task PlanPushAsync_Promote_KeyOnlyGlobalInTarget_AddsServiceOverride(string value)
+    {
+        var s = Create([Plain("A", "1", ConfigScope.Global)]);
+
+        var plan = await s.Service.PlanPushAsync(Binding(), Env, Promote($$"""{"A":"{{value}}"}"""), Ct);
+
+        var change = Assert.Single(plan.Changes);
+        Assert.Equal(ChangeKind.Add, change.Kind);
+        Assert.Null(change.Before);
+        Assert.Equal(ConfigScope.Service, change.After!.Scope);
+        Assert.Empty(plan.Conflicts);
+        Assert.False(plan.TouchesGlobal);
+    }
+
+    [Theory]
     [InlineData("bound", "other", "bound")]
     [InlineData(null, "other", "other")]
     public async Task PlanPushAsync_Promote_NewSecret_IsCreatedInTargetVault(string? bound, string existing, string expected)
