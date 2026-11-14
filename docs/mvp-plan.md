@@ -95,7 +95,7 @@
   - Тести: plain, KV-ref, чужий ключ пропускається, ETag переноситься.
   - Залежить від: —
 
-- [ ] **I6. `KeyVaultSecretStore`**
+- [x] **I6. `KeyVaultSecretStore`**
   - `GetAsync(secretUri)` — vault і назва з URI; `SetAsync(vaultUri, name, value)` → URI нової версії.
   - Один `SecretClient` на vault (кеш у словнику). Auth — лише `DefaultAzureCredential`.
   - Тести: розбір URI секрету (vault, name, version).
