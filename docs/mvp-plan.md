@@ -146,7 +146,7 @@
   - `--json` пише result-record через `System.Text.Json`.
   - Залежить від: —
 
-- [ ] **L2. `azcfg init`** (через `/add-cli-command`)
+- [x] **L2. `azcfg init`** (через `/add-cli-command`)
   - Discovery → користувач обирає/підтверджує середовища та `IsProtected` → `SaveProfileAsync`.
   - Fallback: ручне введення endpoint. `--json`: виводить кандидатів, без інтерактиву.
   - Залежить від: C1, L1, I1, I7
