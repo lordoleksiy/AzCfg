@@ -54,7 +54,7 @@ public class SecretRedactionTests
             new LocalTargetBinding(LocalTargetKind.UserSecrets, "proj.csproj", LocalFileFormat.NestedJson),
             new Dictionary<string, Uri>());
 
-        var env = new ConfigEnvironment("dev", new Uri("https://cfg.azconfig.io"), null);
+        var env = new ConfigEnvironment("dev", new Uri("https://cfg.azconfig.io"), null, IsProtected: false);
 
         return new SyncPlan(binding, env, new[] { CreateChangeWithSecret() }, Array.Empty<Conflict>(), false, false);
     }
