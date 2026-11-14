@@ -1,6 +1,7 @@
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using AzCfg.Core.Abstractions;
+using AzCfg.Core.UseCases;
 using AzCfg.Infrastructure.Azure;
 using AzCfg.Infrastructure.Local;
 using AzCfg.Infrastructure.State;
@@ -25,6 +26,7 @@ public static class DependencyInjection
         services.AddSingleton(_ => new ArmClient(new DefaultAzureCredential()));
         services.AddSingleton<IResourceDiscovery, ResourceGraphDiscovery>();
         services.AddSingleton<IConfigStore>(_ => new AppConfigStore(new DefaultAzureCredential()));
+        services.AddSingleton<ISetupService, SetupService>();
         return services;
     }
 }
