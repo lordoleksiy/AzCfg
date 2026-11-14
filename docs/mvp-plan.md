@@ -87,7 +87,7 @@
   - Тести: temp-папка з кількома csproj.
   - Залежить від: —
 
-- [ ] **I5. `AppConfigStore` — читання**
+- [x] **I5. `AppConfigStore` — читання**
   - `ReadAsync`: ключі `global:*` і `<service>:*` → `ConfigEntry` через `KeyMapper.TryParseStoreKey`.
     Content type `application/vnd.microsoft.appconfig.keyvaultref+json` → `ConfigValue.KeyVaultRef(uri)`.
   - `ListServicePrefixesAsync`: унікальні частини ключів до першої `:` (без `global`).

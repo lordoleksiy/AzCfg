@@ -24,6 +24,7 @@ public static class DependencyInjection
         services.AddSingleton<ILocalTarget, UserSecretsTarget>();
         services.AddSingleton(_ => new ArmClient(new DefaultAzureCredential()));
         services.AddSingleton<IResourceDiscovery, ResourceGraphDiscovery>();
+        services.AddSingleton<IConfigStore>(_ => new AppConfigStore(new DefaultAzureCredential()));
         return services;
     }
 }
