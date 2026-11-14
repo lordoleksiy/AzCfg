@@ -1,0 +1,14 @@
+namespace AzCfg.Core.Sync;
+
+/// <summary>
+/// Where the local side of a push comes from. The library default is <see cref="LocalFiles"/> (push from
+/// the bound local targets); <c>edit</c> is a push with <see cref="EditedJson"/> as the source.
+/// </summary>
+public abstract record PushSource
+{
+    /// <summary>Push from the local files bound in <c>ProjectBinding</c> (the default).</summary>
+    public sealed record LocalFiles : PushSource;
+
+    /// <summary>Push from a developer-edited JSON projection (see <c>azcfg edit</c>).</summary>
+    public sealed record EditedJson(string Json) : PushSource;
+}

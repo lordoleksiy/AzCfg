@@ -1,11 +1,13 @@
 using AzCfg.Core.Model;
+using AzCfg.Core.UseCases;
 
 namespace AzCfg.Core.Abstractions;
 
 public interface ILocalTarget
 {
-    string Kind { get; }
+    LocalTargetKind Kind { get; }
     bool CanHandle(ProjectInfo project);
-    Task<IReadOnlyDictionary<string, string>> ReadAsync(ProjectInfo project, CancellationToken ct);
-    Task WriteAsync(ProjectInfo project, IReadOnlyList<ConfigEntry> entries, CancellationToken ct);
+    Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct);
+    Task<IReadOnlyList<LocalValue>> ReadAsync(LocalTargetBinding target, CancellationToken ct);
+    Task WriteAsync(LocalTargetBinding target, IReadOnlyList<LocalValue> values, CancellationToken ct);
 }
