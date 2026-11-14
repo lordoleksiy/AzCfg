@@ -138,7 +138,55 @@ public sealed class SyncService(
         return plan with { Changes = changes, RequiresVaultChoice = requiresVaultChoice };
     }
 
-    public Task<ApplyResult> ApplyAsync(SyncPlan plan, ApplyOptions options, CancellationToken ct) => throw new NotImplementedException();
+    /// <summary>
+    /// Creates Key Vault secrets first, then writes all changes to App Config in one call (references use the new secret URIs).
+    /// Throws <see cref="InvalidOperationException"/> before any write on conflicts, a missing vault choice, an unconfirmed
+    /// protected environment (name, ignoring case) or unconfirmed global changes. The snapshot is refreshed only when nothing failed.
+    /// </summary>
+    public async Task<ApplyResult> ApplyAsync(SyncPlan plan, ApplyOptions options, CancellationToken ct)
+    {
+        if (plan.Conflicts.Count > 0)
+        {
+            throw new InvalidOperationException("Plan has conflicts; resolve them before applying.");
+        }
+
+        if (plan.RequiresVaultChoice)
+        {
+            throw new InvalidOperationException("Choose a Key Vault first.");
+        }
+
+        if (plan.Environment.IsProtected && !string.Equals(options.ConfirmedEnvironment, plan.Environment.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Applying to protected environment '{plan.Environment.Name}' requires typing its name.");
+        }
+
+        if (plan.TouchesGlobal && !options.ConfirmGlobal)
+        {
+            throw new InvalidOperationException("Plan changes global keys; confirm global changes.");
+        }
+
+        var changes = new List<Change>();
+        foreach (var change in plan.Changes)
+        {
+            if (change.Kind != ChangeKind.CreateSecret)
+            {
+                changes.Add(change);
+                continue;
+            }
+
+            var uri = await secretStore.SetAsync(Vault(((ConfigValue.KeyVaultRef)change.After!.Value).SecretUri), change.SecretName!, change.SecretValue!.Reveal(), ct);
+            changes.Add(new(change.Before is null ? ChangeKind.Add : ChangeKind.Update, change.Before, change.After with { Value = new ConfigValue.KeyVaultRef(uri) }));
+        }
+
+        var result = await store.ApplyAsync(plan.Environment, plan.Binding.Service, changes, ct);
+        if (result.Failed.Count == 0)
+        {
+            var (_, remote, _) = await ReadRemoteAsync(plan.Binding, plan.Environment, ct);
+            await state.SaveSnapshotAsync(plan.Binding.RepoPath, plan.Environment.Name, remote, ct);
+        }
+
+        return result;
+    }
 
     private async Task<ConfigState> ReadLocalAsync(ProjectBinding binding, CancellationToken ct)
     {

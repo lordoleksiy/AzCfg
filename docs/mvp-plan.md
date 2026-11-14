@@ -189,7 +189,7 @@
   - Тести на fakes: обидва джерела, кожен крок вибору vault.
   - Залежить від: D2, D4, C3
 
-- [ ] **D6. `SyncService.ApplyAsync`**
+- [x] **D6. `SyncService.ApplyAsync`**
   - `IsProtected` середовище → `options.ConfirmedEnvironment` має дорівнювати назві, інакше виняток.
     `TouchesGlobal` → потрібне `ConfirmGlobal`.
   - Порядок: спершу `CreateSecret` у KV, потім App Config (референси з новими URI). Після успіху — оновити знімок.
