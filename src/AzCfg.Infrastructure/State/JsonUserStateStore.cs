@@ -88,7 +88,9 @@ public sealed class JsonUserStateStore(string root) : IUserStateStore
 
     private string SnapshotPath(string repoPath, string environment)
     {
-        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(repoPath).ToUpperInvariant())));
+        var fullPath = Path.GetFullPath(repoPath);
+        var key = OperatingSystem.IsWindows() ? fullPath.ToUpperInvariant() : fullPath;
+        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
         return Path.Combine(root, "snapshots", hash, environment + ".json");
     }
 
