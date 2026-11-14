@@ -73,7 +73,7 @@
   - Тести: round-trip вкладеного JSON, відсутній файл → порожній список, safety у temp git-репо.
   - Залежить від: —
 
-- [ ] **I3. `UserSecretsTarget`** (`Infrastructure/Local`, через `/add-local-target`)
+- [x] **I3. `UserSecretsTarget`** (`Infrastructure/Local`, через `/add-local-target`)
   - Шлях: `PathHelper.GetSecretsPathFromSecretsId(id)` з `Microsoft.Extensions.Configuration.UserSecrets`.
   - Немає `UserSecretsId` у `.csproj` → виконати `dotnet user-secrets init --project <csproj>`.
   - `IsSafeForSecrets = true` завжди.
