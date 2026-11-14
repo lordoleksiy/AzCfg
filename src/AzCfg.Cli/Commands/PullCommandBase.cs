@@ -17,19 +17,14 @@ public abstract class PullCommandBase<TSettings>(
     ISyncService sync,
     IUserStateStore state,
     IEnvironmentResolver resolver,
-    IAnsiConsole console) : AsyncCommand<TSettings> where TSettings : PullSettings
+    IAnsiConsole console) : EnvironmentCommandBase<TSettings>(projects, state, resolver) where TSettings : PullSettings
 {
-    protected virtual string? RequestedEnv(TSettings settings) => settings.Env;
+    protected override async Task<ProjectBinding> GetBindingAsync(string repo, ProjectResolution resolution, TSettings settings, CancellationToken ct) =>
+        resolution.Existing ?? await BindAsync(repo, resolution, !settings.Json && !settings.Yes, ct);
 
     public override async Task<int> ExecuteAsync(CommandContext context, TSettings settings, CancellationToken ct)
     {
-        var profile = await state.LoadProfileAsync(ct) ?? throw new InvalidOperationException("No profile found. Run 'azcfg init' first.");
-        var repo = Path.GetFullPath(settings.Project);
-        var resolution = await projects.ResolveAsync(repo, ct);
-        var binding = resolution.Existing ?? await BindAsync(repo, resolution, !settings.Json && !settings.Yes, ct);
-        var name = RequestedEnv(settings) ?? binding.ActiveEnvironment ?? "dev";
-        var env = resolver.Resolve(profile).FirstOrDefault(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException($"Environment '{name}' is not in the profile.");
+        var (binding, env) = await ResolveAsync(settings, ct);
 
         var result = settings.Json
             ? await sync.PullAsync(binding, env, null, settings.Force, ct)
@@ -71,7 +66,7 @@ public abstract class PullCommandBase<TSettings>(
         var (values, secrets) = interactive
             ? (Choose("Local target for values:", resolution.TargetOptions.Select(o => o.Target)), Choose("Local target for secrets:", safe))
             : (safe[0], safe[0]);
-        return await projects.BindAsync(repo, service, values, secrets, ct);
+        return await Projects.BindAsync(repo, service, values, secrets, ct);
     }
 
     private LocalTargetBinding Choose(string title, IEnumerable<LocalTargetBinding> options) =>

@@ -12,6 +12,8 @@ app.Configure(config =>
     config.AddCommand<InitCommand>("init").WithDescription("Discover App Configuration stores and save your environments.");
     config.AddCommand<PullCommand>("pull").WithDescription("Pull an environment into the local targets.");
     config.AddCommand<UseCommand>("use").WithDescription("Pull an environment and make it the active one.");
+    config.AddCommand<PlanCommand>("plan").WithDescription("Show what pushing the local files would change.");
+    config.AddCommand<PushCommand>("push").WithDescription("Apply the local files to an environment.");
     config.SetExceptionHandler((ex, _) =>
     {
         var json = args.Contains("--json");
