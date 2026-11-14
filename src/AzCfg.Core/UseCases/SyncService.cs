@@ -74,7 +74,7 @@ public sealed class SyncService(
     }
 
     public async Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) =>
-        JsonProjection.ToEditJson(await store.ReadAsync(env, binding.Service, ct).ToListAsync(ct)).ToJsonString(new() { WriteIndented = true });
+        JsonProjection.ToEditJson(ScopeMerger.Merge(await store.ReadAsync(env, binding.Service, ct).ToListAsync(ct))).ToJsonString(new() { WriteIndented = true });
 
     public async Task<string> ExportPromoteJsonAsync(ProjectBinding binding, ConfigEnvironment from, ConfigEnvironment to, CancellationToken ct)
     {
@@ -93,14 +93,14 @@ public sealed class SyncService(
 
     /// <summary>
     /// Plans local changes against <paramref name="env"/>. <see cref="PushSource.Promote"/> plans only new service keys
-    /// (<c>Add</c>/<c>CreateSecret</c>, no snapshot, global ignored); a key already in <paramref name="env"/> at service scope is a conflict (a global-only key gets a service override).
+    /// (<c>Add</c>/<c>CreateSecret</c>, empty base, global ignored); <see cref="PushSource.EditedJson"/> uses the current remote state as base (it was exported from it); a key already in <paramref name="env"/> at service scope is a conflict (a global-only key gets a service override).
     /// Throws <see cref="ArgumentException"/> naming the key for a null secret value.
     /// </summary>
     public async Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct)
     {
         var (snapshot, merged, raw) = await ReadRemoteAsync(binding, env, ct);
         var promote = source is PushSource.Promote;
-        var @base = promote ? new ConfigState(new Dictionary<string, StateItem>()) : snapshot;
+        var @base = source switch { PushSource.Promote => new ConfigState(new Dictionary<string, StateItem>()), PushSource.EditedJson => merged, _ => snapshot };
         var remote = promote ? Service(merged) : merged;
         var json = source switch { PushSource.EditedJson e => e.Json, PushSource.Promote p => p.Json, _ => null };
         var local = json is null ? new ParsedEditJson(await ReadLocalAsync(binding, ct), []) : JsonProjection.FromEditJson(json, fingerprinter, KnownSecrets(@base, remote));

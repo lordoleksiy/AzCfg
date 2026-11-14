@@ -1,6 +1,8 @@
 using System.Text.Json.Nodes;
+using AzCfg.Core.Mapping;
 using AzCfg.Core.Model;
 using AzCfg.Core.Security;
+using AzCfg.Core.Sync;
 using AzCfg.Core.Tests.Fakes;
 using AzCfg.Core.UseCases;
 
@@ -38,11 +40,12 @@ public sealed class SyncServiceExportJsonTests
     }
 
     [Fact]
-    public async Task ExportJsonAsync_SameKeyInBothScopes_AppearsInBoth()
+    public async Task ExportJsonAsync_ServiceOverridesGlobal_OnlyServiceValueAndRoundTrips()
     {
-        var json = await Export(Plain("Level", "s"), Plain("Level", "g", ConfigScope.Global));
+        var json = await Export(Plain("Level", "s"), Plain("Level", "g", ConfigScope.Global), Plain("Other", "o", ConfigScope.Global));
 
-        Assert.True(JsonEquals("""{"Level":"s","@global":{"Level":"g"}}""", json));
+        Assert.True(JsonEquals("""{"Level":"s","@global":{"Other":"o"}}""", json));
+        JsonProjection.FromEditJson(json, new HmacSecretFingerprinter(new byte[32]), new Dictionary<string, StateValue.Secret>());
     }
 
     [Fact]
