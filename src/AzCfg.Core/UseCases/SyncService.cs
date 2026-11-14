@@ -28,13 +28,7 @@ public sealed class SyncService(
 
         if (!force && binding.ActiveEnvironment is { } active && await state.LoadSnapshotAsync(binding.RepoPath, active, ct) is { } snapshot)
         {
-            var local = await targets.First(t => t.Kind == binding.ValuesTarget.Kind).ReadAsync(binding.ValuesTarget, ct);
-            if (binding.ValuesTarget != binding.SecretsTarget)
-            {
-                local = [.. local, .. await secretsTarget.ReadAsync(binding.SecretsTarget, ct)];
-            }
-
-            var localState = new ConfigState(local.ToDictionary(v => v.Key, v => new StateItem(v.Key, ConfigScope.Service, new StateValue.Plain(v.Value)), StringComparer.Ordinal));
+            var localState = await ReadLocalAsync(binding, ct);
             var changed = ThreeWayDiff.Compute(snapshot, localState, snapshot, fingerprinter).Items
                 .Where(i => i.Kind is DiffKind.LocalAdded or DiffKind.LocalModified or DiffKind.LocalDeleted)
                 .Select(i => i.Key).ToList();
@@ -90,9 +84,102 @@ public sealed class SyncService(
         return JsonProjection.ToEditJson(added, secretPlaceholders: true).ToJsonString(new() { WriteIndented = true });
     }
 
-    public Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct) => throw new NotImplementedException();
+    public async Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct)
+    {
+        var (@base, remote, _) = await ReadRemoteAsync(binding, env, ct);
+        return ThreeWayDiff.Compute(@base, await ReadLocalAsync(binding, ct), remote, fingerprinter);
+    }
 
-    public Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => throw new NotImplementedException();
+    public async Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct)
+    {
+        if (source is PushSource.Promote)
+        {
+            throw new NotSupportedException("Promote push is not supported yet.");
+        }
+
+        var (@base, remote, raw) = await ReadRemoteAsync(binding, env, ct);
+        var local = source is PushSource.EditedJson edited
+            ? JsonProjection.FromEditJson(edited.Json, fingerprinter, KnownSecrets(@base, remote))
+            : new ParsedEditJson(await ReadLocalAsync(binding, ct), []);
+        var diff = ThreeWayDiff.Compute(@base, local.State, remote, fingerprinter);
+        var plan = ThreeWayDiff.Plan(diff, raw, binding, env);
+
+        var fallback = binding.VaultByEnvironment.GetValueOrDefault(env.Name) is { } bound ? Vault(bound) : MostFrequentVault(raw, ConfigScope.Service) ?? MostFrequentVault(raw, ConfigScope.Global);
+        var changes = new List<Change>();
+        var requiresVaultChoice = false;
+        foreach (var change in plan.Changes)
+        {
+            if (change.Kind != ChangeKind.CreateSecret)
+            {
+                changes.Add(change);
+                continue;
+            }
+
+            var item = diff.Items.First(i => i.Local?.Value is StateValue.Secret && ThreeWayDiff.SecretName(i, binding.Service) == change.SecretName);
+            var scope = item.Local!.Scope;
+            var created = local.NewSecrets.FirstOrDefault(n => n.Key == item.Key && n.Scope == scope);
+            var value = created?.Value ?? (local.State.Items[item.Key].Value is StateValue.Plain plain ? new SecretString(plain.Value) : null);
+            if (value is null)
+            {
+                continue;
+            }
+
+            var name = created?.Name ?? change.SecretName;
+            var vault = (item.Local.Value as StateValue.Secret)?.SecretUri is { } known ? Vault(known) : fallback;
+            requiresVaultChoice |= vault is null;
+            changes.Add(change with
+            {
+                SecretName = name,
+                SecretValue = value,
+                After = vault is null ? null : new(item.Key, scope, new ConfigValue.KeyVaultRef(new($"{vault.AbsoluteUri.TrimEnd('/')}/secrets/{name}"))),
+            });
+        }
+
+        return plan with { Changes = changes, RequiresVaultChoice = requiresVaultChoice };
+    }
 
     public Task<ApplyResult> ApplyAsync(SyncPlan plan, ApplyOptions options, CancellationToken ct) => throw new NotImplementedException();
+
+    private async Task<ConfigState> ReadLocalAsync(ProjectBinding binding, CancellationToken ct)
+    {
+        var local = await targets.First(t => t.Kind == binding.ValuesTarget.Kind).ReadAsync(binding.ValuesTarget, ct);
+        if (binding.ValuesTarget != binding.SecretsTarget)
+        {
+            local = [.. local, .. await targets.First(t => t.Kind == binding.SecretsTarget.Kind).ReadAsync(binding.SecretsTarget, ct)];
+        }
+
+        return new(local.ToDictionary(v => v.Key, v => new StateItem(v.Key, ConfigScope.Service, new StateValue.Plain(v.Value)), StringComparer.Ordinal));
+    }
+
+    private async Task<(ConfigState Base, ConfigState Remote, List<ConfigEntry> Raw)> ReadRemoteAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct)
+    {
+        var raw = await store.ReadAsync(env, binding.Service, ct).ToListAsync(ct);
+        var items = new Dictionary<string, StateItem>(StringComparer.Ordinal);
+        foreach (var entry in ScopeMerger.Merge(raw))
+        {
+            StateValue? value = entry.Value switch
+            {
+                ConfigValue.Plain plain => new StateValue.Plain(plain.Value),
+                ConfigValue.KeyVaultRef reference => new StateValue.Secret(reference.SecretUri, fingerprinter.Fingerprint(new SecretString(await secretStore.GetAsync(reference.SecretUri, ct)))),
+                _ => null,
+            };
+            if (value is not null)
+            {
+                items[entry.Key] = new(entry.Key, entry.Scope, value);
+            }
+        }
+
+        return (await state.LoadSnapshotAsync(binding.RepoPath, env.Name, ct) ?? new(new Dictionary<string, StateItem>()), new(items), raw);
+    }
+
+    private static Dictionary<string, StateValue.Secret> KnownSecrets(ConfigState @base, ConfigState remote) => @base.Items.Values.Concat(remote.Items.Values)
+        .Select(i => i.Value).OfType<StateValue.Secret>().Where(s => s.SecretUri is not null)
+        .GroupBy(s => ThreeWayDiff.SecretName(s.SecretUri!)).ToDictionary(g => g.Key, g => g.Last());
+
+    private static Uri Vault(Uri uri) => new(uri.GetLeftPart(UriPartial.Authority));
+
+    private static Uri? MostFrequentVault(IEnumerable<ConfigEntry> raw, ConfigScope scope) => raw.Where(e => e.Scope == scope)
+        .Select(e => e.Value switch { ConfigValue.KeyVaultRef r => r.SecretUri, ConfigValue.ResolvedSecret r => r.SecretUri, _ => null })
+        .OfType<Uri>().Select(Vault).GroupBy(v => v).OrderByDescending(g => g.Count()).ThenBy(g => g.Key.AbsoluteUri, StringComparer.Ordinal)
+        .Select(g => g.Key).FirstOrDefault();
 }
