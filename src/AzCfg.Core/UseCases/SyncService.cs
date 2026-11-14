@@ -73,7 +73,8 @@ public sealed class SyncService(
         return new(env.Name, values.Count, secrets.Count, false, []);
     }
 
-    public Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => throw new NotImplementedException();
+    public async Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) =>
+        JsonProjection.ToEditJson(await store.ReadAsync(env, binding.Service, ct).ToListAsync(ct)).ToJsonString(new() { WriteIndented = true });
 
     public async Task<string> ExportPromoteJsonAsync(ProjectBinding binding, ConfigEnvironment from, ConfigEnvironment to, CancellationToken ct)
     {
