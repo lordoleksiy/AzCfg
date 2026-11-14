@@ -6,6 +6,10 @@ namespace AzCfg.Infrastructure;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddAzCfg(this IServiceCollection services) =>
+    public static IServiceCollection AddAzCfg(this IServiceCollection services)
+    {
         services.AddSingleton<IProjectDetector, CsprojDetector>();
+        services.AddSingleton<ILocalTarget, AppSettingsLocalTarget>();
+        return services;
+    }
 }
