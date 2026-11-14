@@ -4,6 +4,7 @@ using AzCfg.Core.Abstractions;
 using AzCfg.Infrastructure.Azure;
 using AzCfg.Infrastructure.Local;
 using AzCfg.Infrastructure.State;
+using Azure.ResourceManager;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AzCfg.Infrastructure;
@@ -21,6 +22,8 @@ public static class DependencyInjection
             return new KeyVaultSecretStore(vault => new SecretClient(vault, credential));
         });
         services.AddSingleton<ILocalTarget, UserSecretsTarget>();
+        services.AddSingleton(_ => new ArmClient(new DefaultAzureCredential()));
+        services.AddSingleton<IResourceDiscovery, ResourceGraphDiscovery>();
         return services;
     }
 }
