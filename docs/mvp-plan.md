@@ -131,7 +131,7 @@
   - Тести на fakes: existing, впевнений збіг, кілька кандидатів, відмова небезпечній цілі.
   - Залежить від: I4, M2
 
-- [ ] **C3. `SyncService.PullAsync`**
+- [x] **C3. `SyncService.PullAsync`**
   - Читає remote (`IConfigStore`) → `ScopeMerger.Merge` → KV-ref резолвляться через `ISecretStore`.
   - Повний перезапис: значення → `ValuesTarget`, секрети → `SecretsTarget` (одна ціль → один запис).
   - Перед записом повторно перевіряє `IsSafeForSecrets` для `SecretsTarget`; небезпечно → нічого не пише, виняток.

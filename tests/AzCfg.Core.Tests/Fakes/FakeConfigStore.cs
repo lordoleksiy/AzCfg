@@ -5,9 +5,12 @@ using AzCfg.Core.Sync;
 
 namespace AzCfg.Core.Tests.Fakes;
 
-internal sealed class FakeConfigStore(Dictionary<string, string[]> prefixesByEnvironment) : IConfigStore
+internal sealed class FakeConfigStore(
+    Dictionary<string, string[]> prefixesByEnvironment,
+    Dictionary<string, ConfigEntry[]>? entriesByEnvironment = null) : IConfigStore
 {
-    public IAsyncEnumerable<ConfigEntry> ReadAsync(ConfigEnvironment env, string service, CancellationToken ct) => throw new NotSupportedException();
+    public IAsyncEnumerable<ConfigEntry> ReadAsync(ConfigEnvironment env, string service, CancellationToken ct) =>
+        entriesByEnvironment![env.Name].ToAsyncEnumerable();
 
     public async IAsyncEnumerable<string> ListServicePrefixesAsync(ConfigEnvironment env, [EnumeratorCancellation] CancellationToken ct)
     {
