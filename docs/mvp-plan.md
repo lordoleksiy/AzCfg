@@ -139,7 +139,7 @@
   - Тести на fakes: розділення значень/секретів, service перекриває global, у знімку немає значень секретів.
   - Залежить від: C2, M2
 
-- [ ] **L1. Каркас CLI**
+- [x] **L1. Каркас CLI**
   - `Program.cs`: Spectre `CommandApp` + DI (`AddAzCfg`) через `ITypeRegistrar`.
   - Глобальні опції: `--env`, `--json`, `--yes`, `--project` (за замовчуванням — поточна папка).
   - Помилки auth/RBAC (`AuthenticationFailedException`, 401/403) → зрозуміле повідомлення з потрібною роллю.
