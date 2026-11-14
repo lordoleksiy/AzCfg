@@ -44,10 +44,11 @@ public static class JsonProjection
     /// <summary>
     /// Builds the edit JSON (architecture, "JSON-формат редагування") from merged entries: nesting by <c>:</c>,
     /// plain values as strings, Key Vault references as <c>{"@kv":"&lt;secret-name&gt;"}</c> (secret values are never
-    /// emitted), global entries under <c>@global</c> (omitted when empty). Properties are ordered ordinally.
+    /// emitted; <paramref name="secretPlaceholders"/> adds <c>"value":null</c>), global entries under <c>@global</c> (omitted when empty).
+    /// Properties are ordered ordinally.
     /// Throws <see cref="ArgumentException"/> for null elements, invalid keys, or a key that is both a value and a parent.
     /// </summary>
-    public static JsonObject ToEditJson(IEnumerable<ConfigEntry> entries)
+    public static JsonObject ToEditJson(IEnumerable<ConfigEntry> entries, bool secretPlaceholders = false)
     {
         ArgumentNullException.ThrowIfNull(entries);
 
@@ -57,8 +58,8 @@ public static class JsonProjection
             throw new ArgumentException("Entries must not contain null.", nameof(entries));
         }
 
-        var root = Build(list.Where(e => e.Scope == ConfigScope.Service).Select(ToNode), nameof(entries));
-        var global = Build(list.Where(e => e.Scope == ConfigScope.Global).Select(ToNode), nameof(entries));
+        var root = Build(list.Where(e => e.Scope == ConfigScope.Service).Select(e => ToNode(e, secretPlaceholders)), nameof(entries));
+        var global = Build(list.Where(e => e.Scope == ConfigScope.Global).Select(e => ToNode(e, secretPlaceholders)), nameof(entries));
         if (global.Count > 0)
         {
             root["@global"] = global;
@@ -127,13 +128,16 @@ public static class JsonProjection
         ? value.GetValueKind() == JsonValueKind.String ? value.GetValue<string>() : value.ToJsonString()
         : throw new ArgumentException($"Key '{key}' has a null or non-scalar value: set a value or remove the key.");
 
-    private static (string Key, JsonNode Node) ToNode(ConfigEntry entry) => (entry.Key, entry.Value switch
+    private static (string Key, JsonNode Node) ToNode(ConfigEntry entry, bool secretPlaceholders) => (entry.Key, entry.Value switch
     {
         ConfigValue.Plain p => JsonValue.Create(p.Value)!,
-        ConfigValue.KeyVaultRef r => new JsonObject { ["@kv"] = SecretName(r.SecretUri) },
-        ConfigValue.ResolvedSecret r => new JsonObject { ["@kv"] = SecretName(r.SecretUri) },
+        ConfigValue.KeyVaultRef r => Reference(r.SecretUri, secretPlaceholders),
+        ConfigValue.ResolvedSecret r => Reference(r.SecretUri, secretPlaceholders),
         _ => throw new ArgumentException($"Unsupported value of '{entry.Key}'.", "entries"),
     });
+
+    private static JsonObject Reference(Uri secretUri, bool placeholder) =>
+        placeholder ? new() { ["@kv"] = SecretName(secretUri), ["value"] = null } : new() { ["@kv"] = SecretName(secretUri) };
 
     private static string SecretName(Uri secretUri) => secretUri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries)[1];
 
