@@ -18,7 +18,7 @@
 - Pull: беремо `global:*` + `<service>:*`, зрізаємо префікс, сервісні перекривають global (з provenance).
 - Push: за замовчуванням scope = сервіс; зміна `global` — лише явно (секція `@global`) + окреме попередження.
 - Назви секретів KV: `:` → `--` (напр. `crm-api-service--ConnectionStrings--Crm`).
-- local.settings.json (Functions): `:` → `__`.
+- local.settings.json: вкладені JSON-об'єкти без scope-префікса (`Dataverse:ConnString` → `{"Dataverse":{"ConnString":"..."}}`); `__` не використовується за замовчуванням. Формат налаштовується per-ціль: вкладений JSON (типово; наші Functions читають `appSettings.local.json`/user-secrets) або плоскі ключі з `__` — друге ще не реалізовано (див. ADR 0004).
 
 ### Середовища
 - Зараз: **окремий App Configuration на кожне середовище** (dev / stage / prod).

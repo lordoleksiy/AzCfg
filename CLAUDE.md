@@ -33,7 +33,7 @@ tests/AzCfg.Infrastructure.Tests
 - Сервіс: `<service>:<Key:Path>`; глобальні: `global:<Key:Path>`.
 - Pull: `global:*` + `<service>:*`, префікс зрізається, сервісні перекривають global.
 - Push за замовчуванням лише scope сервісу; global — тільки явно через `@global`.
-- KV-секрети: `:` → `--`; local.settings.json: `:` → `__`.
+- KV-секрети: `:` → `--`; local.settings.json: вкладені JSON-об'єкти (сегменти шляху за `:`), без scope-префікса і без `__`.
 - `{ "@kv": "name" }` → KV reference; з `"value"` → створити/оновити секрет.
 
 ## Безпека
