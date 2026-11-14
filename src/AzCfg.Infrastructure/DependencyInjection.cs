@@ -20,6 +20,7 @@ public static class DependencyInjection
             var credential = new DefaultAzureCredential();
             return new KeyVaultSecretStore(vault => new SecretClient(vault, credential));
         });
+        services.AddSingleton<ILocalTarget, UserSecretsTarget>();
         return services;
     }
 }
