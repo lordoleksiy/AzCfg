@@ -89,6 +89,7 @@ public sealed class SyncServicePullTests
         Assert.Empty(s.ValuesTarget.Writes);
         Assert.Empty(s.SecretsTarget.Writes);
         Assert.Null(s.State.SavedSnapshot);
+        Assert.Null(s.State.Binding);
     }
 
     [Fact]

@@ -3,7 +3,7 @@ using Spectre.Console.Cli;
 
 namespace AzCfg.Cli.Commands;
 
-public sealed class PullSettings : GlobalSettings
+public class PullSettings : GlobalSettings
 {
     [CommandOption("--force")]
     [Description("Overwrite local changes that have not been pushed.")]
