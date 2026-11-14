@@ -1,6 +1,8 @@
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using AzCfg.Core.Abstractions;
+using AzCfg.Core.Environments;
+using AzCfg.Core.Security;
 using AzCfg.Core.UseCases;
 using AzCfg.Infrastructure.Azure;
 using AzCfg.Infrastructure.Local;
@@ -27,6 +29,11 @@ public static class DependencyInjection
         services.AddSingleton<IResourceDiscovery, ResourceGraphDiscovery>();
         services.AddSingleton<IConfigStore>(_ => new AppConfigStore(new DefaultAzureCredential()));
         services.AddSingleton<ISetupService, SetupService>();
+        services.AddSingleton<IEnvironmentResolver, SeparateStoresResolver>();
+        services.AddSingleton<ISecretFingerprinter>(sp =>
+            new HmacSecretFingerprinter(sp.GetRequiredService<IUserStateStore>().GetOrCreateFingerprintKeyAsync(CancellationToken.None).GetAwaiter().GetResult()));
+        services.AddSingleton<IProjectService, ProjectService>();
+        services.AddSingleton<ISyncService, SyncService>();
         return services;
     }
 }
