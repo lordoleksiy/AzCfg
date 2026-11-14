@@ -238,7 +238,7 @@
 
 ## Етап 6. Випуск
 
-- [ ] **R1. Пакування і README**
+- [x] **R1. Пакування і README**
   - `dotnet pack` як dotnet tool `azcfg`; README: встановлення, `az login`, ролі RBAC
     (App Configuration Data Owner, Key Vault Secrets User/Officer), приклади `init`/`pull`/`use`/`edit`/`promote`.
   - Залежить від: L6
