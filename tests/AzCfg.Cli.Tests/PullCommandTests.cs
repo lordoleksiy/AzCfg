@@ -67,7 +67,9 @@ public sealed class PullCommandTests
     private static Stubs Bound(PullResult? result = null) =>
         new() { Resolution = new([], true, [], Binding()), Result = result ?? new("dev", 3, 1, false, []) };
 
-    private static async Task<(int Exit, string Output)> Run(Stubs s, params string[] args)
+    private static async Task<(int Exit, string Output)> Run(Stubs s, params string[] args) => await Run("pull", s, args);
+
+    private static async Task<(int Exit, string Output)> Run(string command, Stubs s, params string[] args)
     {
         var writer = new StringWriter();
         var console = AnsiConsole.Create(new() { Out = new AnsiConsoleOutput(writer) });
@@ -82,8 +84,9 @@ public sealed class PullCommandTests
             c.PropagateExceptions();
             c.ConfigureConsole(console);
             c.AddCommand<PullCommand>("pull");
+            c.AddCommand<UseCommand>("use");
         });
-        var exit = await app.RunAsync(["pull", .. args]);
+        var exit = await app.RunAsync([command, .. args]);
         return (exit, writer.ToString());
     }
 
@@ -202,6 +205,58 @@ public sealed class PullCommandTests
         var (exit, output) = await Run(Bound(result), "--json");
 
         Assert.Equal(blocked ? 1 : 0, exit);
+        Assert.Equal(CliJson.Serialize(result), output.Trim());
+    }
+
+    public static TheoryData<string[], string?, string> UseSelection => new()
+    {
+        { ["stage"], "dev", "stage" },
+        { ["STAGE"], null, "stage" },
+        { ["stage", "--env", "dev"], null, "stage" },
+    };
+
+    [Theory]
+    [MemberData(nameof(UseSelection))]
+    public async Task Use_pulls_the_given_environment(string[] args, string? active, string expected)
+    {
+        var s = new Stubs { Resolution = new([], true, [], Binding(active)) };
+
+        await Run("use", s, args);
+
+        Assert.Equal(expected, s.Pulled!.Value.Env.Name);
+    }
+
+    [Fact]
+    public async Task Use_unknown_env_is_an_error_and_pulls_nothing()
+    {
+        var s = Bound();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Run("use", s, "nope"));
+
+        Assert.Null(s.Pulled);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Use_passes_force_and_fails_when_blocked(bool force)
+    {
+        var s = Bound(new("stage", 0, 0, !force, ["Db:Host"]));
+
+        var (exit, output) = await Run("use", s, force ? ["stage", "--force"] : ["stage"]);
+
+        Assert.Equal(force, s.Pulled!.Value.Force);
+        Assert.Equal(force ? 0 : 1, exit);
+        Assert.Equal(!force, output.Contains("Db:Host"));
+    }
+
+    [Fact]
+    public async Task Use_json_output_is_the_serialized_PullResult()
+    {
+        var result = new PullResult("stage", 2, 1, false, []);
+
+        var (_, output) = await Run("use", Bound(result), "stage", "--json");
+
         Assert.Equal(CliJson.Serialize(result), output.Trim());
     }
 }
