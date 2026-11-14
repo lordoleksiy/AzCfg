@@ -117,6 +117,27 @@ public sealed class SyncServiceApplyTests
     }
 
     [Fact]
+    public async Task ApplyAsync_Success_UpdatesSnapshotOnlyForTouchedKeys()
+    {
+        var state = new FakeUserStateStore();
+        state.Snapshots["dev"] = new(new Dictionary<string, StateItem>
+        {
+            ["X"] = new("X", ConfigScope.Service, new StateValue.Plain("old")),
+            ["Y"] = new("Y", ConfigScope.Service, new StateValue.Plain("1")),
+        });
+        var target = new FakeLocalTarget(LocalTargetKind.AppSettingsLocal) { Contents = [new("X", "old"), new("Y", "2")] };
+        var service = new SyncService(
+            new FakeConfigStore([], new() { ["dev"] = [Plain("X", "new"), Plain("Y", "2")] }),
+            new FakeSecretStore([]), state, new HmacSecretFingerprinter(new byte[32]), [target]);
+
+        await service.ApplyAsync(Plan([new(ChangeKind.Update, Plain("Y", "1"), Plain("Y", "2"))]), new(), Ct);
+        state.Snapshots["dev"] = state.SavedSnapshot!.Value.State;
+        var diff = await service.DiffAsync(Binding, Env(), Ct);
+
+        Assert.Equal([("X", DiffKind.RemoteModified), ("Y", DiffKind.Unchanged)], diff.Items.Select(i => (i.Key, i.Kind)));
+    }
+
+    [Fact]
     public async Task ApplyAsync_Success_SavesSnapshotWithoutSecretValues()
     {
         var s = Create();

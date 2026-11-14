@@ -141,7 +141,7 @@ public sealed class SyncService(
     /// <summary>
     /// Creates Key Vault secrets first, then writes all changes to App Config in one call (references use the new secret URIs).
     /// Throws <see cref="InvalidOperationException"/> before any write on conflicts, a missing vault choice, an unconfirmed
-    /// protected environment (name, ignoring case) or unconfirmed global changes. The snapshot is refreshed only when nothing failed.
+    /// protected environment (name, ignoring case) or unconfirmed global changes. When nothing failed, the snapshot is updated only for keys touched by the plan.
     /// </summary>
     public async Task<ApplyResult> ApplyAsync(SyncPlan plan, ApplyOptions options, CancellationToken ct)
     {
@@ -181,8 +181,21 @@ public sealed class SyncService(
         var result = await store.ApplyAsync(plan.Environment, plan.Binding.Service, changes, ct);
         if (result.Failed.Count == 0)
         {
-            var (_, remote, _) = await ReadRemoteAsync(plan.Binding, plan.Environment, ct);
-            await state.SaveSnapshotAsync(plan.Binding.RepoPath, plan.Environment.Name, remote, ct);
+            var (@base, remote, _) = await ReadRemoteAsync(plan.Binding, plan.Environment, ct);
+            var items = new Dictionary<string, StateItem>(@base.Items, StringComparer.Ordinal);
+            foreach (var key in plan.Changes.Select(c => (c.After ?? c.Before)!.Key))
+            {
+                if (remote.Items.TryGetValue(key, out var item))
+                {
+                    items[key] = item;
+                }
+                else
+                {
+                    items.Remove(key);
+                }
+            }
+
+            await state.SaveSnapshotAsync(plan.Binding.RepoPath, plan.Environment.Name, new(items), ct);
         }
 
         return result;
