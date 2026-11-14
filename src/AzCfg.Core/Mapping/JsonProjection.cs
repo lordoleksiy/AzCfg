@@ -1,5 +1,8 @@
 using System.Text.Json.Nodes;
+using System.Text.Json;
+using AzCfg.Core.Abstractions;
 using AzCfg.Core.Model;
+using AzCfg.Core.Sync;
 
 namespace AzCfg.Core.Mapping;
 
@@ -63,6 +66,66 @@ public static class JsonProjection
 
         return root;
     }
+
+    /// <summary>
+    /// Parses edit JSON into a local <see cref="ConfigState"/>: nesting → <c>:</c> keys, <c>@global</c> → <see cref="ConfigScope.Global"/>,
+    /// non-string scalars → their JSON text. <c>{"@kv":"n"}</c> becomes the <see cref="StateValue.Secret"/> found in
+    /// <paramref name="knownSecrets"/> by secret name (a vault URI cannot be derived from the name), else <c>Secret(null, "")</c>;
+    /// with <c>"value"</c> it is also added to <see cref="ParsedEditJson.NewSecrets"/> and fingerprinted.
+    /// Throws <see cref="JsonException"/> for invalid JSON and <see cref="ArgumentException"/> for a non-object root,
+    /// null/array values, or duplicate keys; messages name the key, never a value.
+    /// </summary>
+    public static ParsedEditJson FromEditJson(
+        string json, ISecretFingerprinter fingerprinter, IReadOnlyDictionary<string, StateValue.Secret> knownSecrets)
+    {
+        var root = JsonNode.Parse(json) as JsonObject ?? throw new ArgumentException("Edit JSON must be an object.", nameof(json));
+        var items = new Dictionary<string, StateItem>(StringComparer.Ordinal);
+        var secrets = new List<NewSecret>();
+
+        void Walk(JsonObject obj, IReadOnlyList<string> prefix, ConfigScope scope)
+        {
+            foreach (var (name, node) in obj)
+            {
+                if (scope == ConfigScope.Service && prefix.Count == 0 && name == "@global")
+                {
+                    Walk(node as JsonObject ?? throw new ArgumentException("'@global' must be an object.", nameof(json)), [], ConfigScope.Global);
+                    continue;
+                }
+
+                var key = KeyMapper.FromLocalJsonPath([.. prefix, name]);
+                switch (node)
+                {
+                    case JsonObject o when o.ContainsKey("@kv"):
+                        var secretName = o["@kv"] is JsonValue kv && kv.TryGetValue(out string? n)
+                            ? n
+                            : throw new ArgumentException($"'@kv' of '{key}' must be a string.", nameof(json));
+                        var known = knownSecrets.GetValueOrDefault(secretName);
+                        if (o.TryGetPropertyValue("value", out var raw))
+                        {
+                            var secret = new SecretString(Scalar(raw, key));
+                            secrets.Add(new(key, scope, secretName, secret));
+                            known = new(known?.SecretUri, fingerprinter.Fingerprint(secret));
+                        }
+
+                        items.Add(key, new(key, scope, known ?? new StateValue.Secret(null, "")));
+                        break;
+                    case JsonObject o:
+                        Walk(o, [.. prefix, name], scope);
+                        break;
+                    default:
+                        items.Add(key, new(key, scope, new StateValue.Plain(Scalar(node, key))));
+                        break;
+                }
+            }
+        }
+
+        Walk(root, [], ConfigScope.Service);
+        return new(new(items), secrets);
+    }
+
+    private static string Scalar(JsonNode? node, string key) => node is JsonValue value
+        ? value.GetValueKind() == JsonValueKind.String ? value.GetValue<string>() : value.ToJsonString()
+        : throw new ArgumentException($"Key '{key}' has a null or non-scalar value: set a value or remove the key.");
 
     private static (string Key, JsonNode Node) ToNode(ConfigEntry entry) => (entry.Key, entry.Value switch
     {

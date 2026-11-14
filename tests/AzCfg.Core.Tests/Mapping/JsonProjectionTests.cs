@@ -1,6 +1,8 @@
 using System.Text.Json.Nodes;
 using AzCfg.Core.Mapping;
 using AzCfg.Core.Model;
+using AzCfg.Core.Security;
+using AzCfg.Core.Sync;
 
 namespace AzCfg.Core.Tests.Mapping;
 
@@ -248,4 +250,96 @@ public class JsonProjectionTests
     {
         Assert.Throws<ArgumentException>(() => JsonProjection.ToEditJson([null!]));
     }
+
+    private static readonly HmacSecretFingerprinter Fingerprinter = new(Enumerable.Repeat((byte)1, 32).ToArray());
+    private static readonly Uri CrmUri = new("https://kv.vault.azure.net/secrets/crm-api--Crm");
+    private static readonly StateValue.Secret KnownCrm = new(CrmUri, "known-fp");
+
+    private static ParsedEditJson Parse(string json, params (string Name, StateValue.Secret Secret)[] known) =>
+        JsonProjection.FromEditJson(json, Fingerprinter, known.ToDictionary(k => k.Name, k => k.Secret));
+
+    [Fact]
+    public void FromEditJson_RoundTripsToEditJson()
+    {
+        var entries = new[]
+        {
+            Plain("Features:Flag", "true"),
+            Plain("Logging:Level", "Information", ConfigScope.Global),
+            Kv("ConnectionStrings:Crm", CrmUri.ToString()),
+        };
+
+        var parsed = Parse(JsonProjection.ToEditJson(entries).ToJsonString(), ("crm-api--Crm", KnownCrm));
+
+        Assert.Equal(
+            [
+                new StateItem("ConnectionStrings:Crm", ConfigScope.Service, KnownCrm),
+                new StateItem("Features:Flag", ConfigScope.Service, new StateValue.Plain("true")),
+                new StateItem("Logging:Level", ConfigScope.Global, new StateValue.Plain("Information")),
+            ],
+            parsed.State.Items.Values.OrderBy(i => i.Key, StringComparer.Ordinal));
+        Assert.Empty(parsed.NewSecrets);
+    }
+
+    [Fact]
+    public void FromEditJson_GlobalSection_GetsGlobalScope()
+    {
+        var parsed = Parse("""{"A":"1","@global":{"B":{"C":"2"}}}""");
+
+        Assert.Equal(ConfigScope.Service, parsed.State.Items["A"].Scope);
+        Assert.Equal(ConfigScope.Global, parsed.State.Items["B:C"].Scope);
+    }
+
+    [Theory]
+    [InlineData("""{"A":true}""", "true")]
+    [InlineData("""{"A":42}""", "42")]
+    [InlineData("""{"A":1.50}""", "1.50")]
+    [InlineData("""{"A":"x"}""", "x")]
+    public void FromEditJson_ScalarsBecomeStrings(string json, string expected) =>
+        Assert.Equal(new StateValue.Plain(expected), Parse(json).State.Items["A"].Value);
+
+    [Fact]
+    public void FromEditJson_KvWithValue_IsReturnedAsNewSecretAndFingerprinted()
+    {
+        var parsed = Parse("""{"@global":{"Db":{"@kv":"db--Pwd","value":"s3cret"}}}""");
+
+        var secret = Assert.Single(parsed.NewSecrets);
+        Assert.Equal(("Db", ConfigScope.Global, "db--Pwd", new SecretString("s3cret")), (secret.Key, secret.Scope, secret.Name, secret.Value));
+        Assert.Equal(
+            new StateValue.Secret(null, Fingerprinter.Fingerprint(new SecretString("s3cret"))),
+            parsed.State.Items["Db"].Value);
+    }
+
+    [Fact]
+    public void FromEditJson_KvWithoutValue_UsesKnownSecretOrNullUri()
+    {
+        var parsed = Parse("""{"A":{"@kv":"crm-api--Crm"},"B":{"@kv":"other"}}""", ("crm-api--Crm", KnownCrm));
+
+        Assert.Equal(KnownCrm, parsed.State.Items["A"].Value);
+        Assert.Equal(new StateValue.Secret(null, ""), parsed.State.Items["B"].Value);
+        Assert.Empty(parsed.NewSecrets);
+    }
+
+    [Theory]
+    [InlineData("""{"Db":{"Pwd":{"@kv":"n","value":null}}}""")]
+    [InlineData("""{"Db":{"Pwd":null}}""")]
+    [InlineData("""{"Db":{"Pwd":[1]}}""")]
+    public void FromEditJson_NullOrArray_ThrowsWithKeyName(string json)
+    {
+        var ex = Assert.Throws<ArgumentException>(() => Parse(json));
+
+        Assert.Contains("'Db:Pwd'", ex.Message);
+        Assert.Contains("remove the key", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("{ not json")]
+    [InlineData("")]
+    public void FromEditJson_InvalidJson_Throws(string json) =>
+        Assert.ThrowsAny<System.Text.Json.JsonException>(() => Parse(json));
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("\"x\"")]
+    public void FromEditJson_NonObjectRoot_Throws(string json) =>
+        Assert.Throws<ArgumentException>(() => Parse(json));
 }
