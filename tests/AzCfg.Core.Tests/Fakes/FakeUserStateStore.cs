@@ -8,6 +8,7 @@ internal sealed class FakeUserStateStore : IUserStateStore
 {
     public UserProfile? Profile { get; set; }
     public ProjectBinding? Binding { get; set; }
+    public (string Environment, ConfigState State)? SavedSnapshot { get; private set; }
 
     public Task<UserProfile?> LoadProfileAsync(CancellationToken ct) => Task.FromResult(Profile);
     public Task SaveProfileAsync(UserProfile profile, CancellationToken ct) => throw new NotSupportedException();
@@ -20,6 +21,10 @@ internal sealed class FakeUserStateStore : IUserStateStore
     }
 
     public Task<ConfigState?> LoadSnapshotAsync(string repoPath, string environment, CancellationToken ct) => throw new NotSupportedException();
-    public Task SaveSnapshotAsync(string repoPath, string environment, ConfigState state, CancellationToken ct) => throw new NotSupportedException();
+    public Task SaveSnapshotAsync(string repoPath, string environment, ConfigState state, CancellationToken ct)
+    {
+        SavedSnapshot = (environment, state);
+        return Task.CompletedTask;
+    }
     public Task<byte[]> GetOrCreateFingerprintKeyAsync(CancellationToken ct) => throw new NotSupportedException();
 }
