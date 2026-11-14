@@ -54,6 +54,7 @@ tests/AzCfg.Infrastructure.Tests
 
 ## Документація
 - Повна архітектура, моделі, порти, CLI, порядок MVP: `docs/architecture.md`
+- План MVP по задачах (брати одну через `/feature`): `docs/mvp-plan.md`
 - Рішення (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
   0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety)
 
