@@ -8,12 +8,18 @@ internal sealed class FakeLocalTarget(LocalTargetKind kind, bool canHandle = tru
 {
     public LocalTargetKind Kind => kind;
     public List<(LocalTargetBinding Target, IReadOnlyList<LocalValue> Values)> Writes { get; } = [];
+    public IReadOnlyList<LocalValue> Contents { get; set; } = [];
+    public int Reads { get; private set; }
     public bool CanHandle(ProjectInfo project) => canHandle;
 
     public Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct) =>
         Task.FromResult(new LocalTargetOption(target, true, isSafeForSecrets));
 
-    public Task<IReadOnlyList<LocalValue>> ReadAsync(LocalTargetBinding target, CancellationToken ct) => throw new NotSupportedException();
+    public Task<IReadOnlyList<LocalValue>> ReadAsync(LocalTargetBinding target, CancellationToken ct)
+    {
+        Reads++;
+        return Task.FromResult(Contents);
+    }
 
     public Task WriteAsync(LocalTargetBinding target, IReadOnlyList<LocalValue> values, CancellationToken ct)
     {
