@@ -22,6 +22,8 @@ public sealed class CsprojDetector : IProjectDetector
             projects.Add(ParseProject(repoPath, csprojPath));
         }
 
+        projects.Sort((a, b) => string.CompareOrdinal(a.CsprojPath, b.CsprojPath));
+
         return Task.FromResult<IReadOnlyList<ProjectInfo>>(projects);
     }
 
@@ -65,8 +67,11 @@ public sealed class CsprojDetector : IProjectDetector
     {
         var project = XDocument.Load(csprojPath).Root;
 
-        var userSecretsId = project?.Descendants("UserSecretsId").FirstOrDefault()?.Value.Trim();
-        var isAzureFunctions = project?.Descendants("AzureFunctionsVersion").Any() ?? false;
+        // Old-style (non-SDK) csproj files declare an MSBuild xmlns, so element names must be
+        // matched by LocalName rather than by an exact (namespace-qualified) XName.
+        var userSecretsId = project?.Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == "UserSecretsId")?.Value.Trim();
+        var isAzureFunctions = project?.Descendants().Any(e => e.Name.LocalName == "AzureFunctionsVersion") ?? false;
 
         return new ProjectInfo(
             RepoPath: repoPath,

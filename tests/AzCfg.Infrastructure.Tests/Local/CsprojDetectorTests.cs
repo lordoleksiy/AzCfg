@@ -107,6 +107,42 @@ public sealed class CsprojDetectorTests : IDisposable
     }
 
     [Fact]
+    public async Task DetectAsync_ReturnsProjects_OrderedByCsprojPathOrdinal()
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "C/C.csproj", MinimalCsproj);
+        WriteCsproj(repo, "A/A.csproj", MinimalCsproj);
+        WriteCsproj(repo, "B/B.csproj", MinimalCsproj);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        var expected = result.Select(p => p.CsprojPath)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(expected, result.Select(p => p.CsprojPath));
+    }
+
+    [Fact]
+    public async Task DetectAsync_NonSdkCsprojWithMsBuildNamespace_ParsesUserSecretsIdAndAzureFunctionsVersion()
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "Legacy/Legacy.csproj", """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <PropertyGroup>
+                <UserSecretsId>legacy-456</UserSecretsId>
+                <AzureFunctionsVersion>v4</AzureFunctionsVersion>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.Equal("legacy-456", result[0].UserSecretsId);
+        Assert.True(result[0].IsAzureFunctions);
+    }
+
+    [Fact]
     public async Task DetectAsync_NoCsprojFiles_ReturnsEmpty()
     {
         var repo = CreateRepo();
