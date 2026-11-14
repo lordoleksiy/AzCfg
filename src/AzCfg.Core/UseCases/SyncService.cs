@@ -90,17 +90,22 @@ public sealed class SyncService(
         return ThreeWayDiff.Compute(@base, await ReadLocalAsync(binding, ct), remote, fingerprinter);
     }
 
+    /// <summary>
+    /// Plans local changes against <paramref name="env"/>. <see cref="PushSource.Promote"/> plans only new service keys
+    /// (<c>Add</c>/<c>CreateSecret</c>, no snapshot, global ignored); a key already in <paramref name="env"/> is a conflict.
+    /// Throws <see cref="ArgumentException"/> naming the key for a null secret value.
+    /// </summary>
     public async Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct)
     {
+        var (snapshot, remote, raw) = await ReadRemoteAsync(binding, env, ct);
+        var @base = source is PushSource.Promote ? new ConfigState(new Dictionary<string, StateItem>()) : snapshot;
+        var json = source switch { PushSource.EditedJson e => e.Json, PushSource.Promote p => p.Json, _ => null };
+        var local = json is null ? new ParsedEditJson(await ReadLocalAsync(binding, ct), []) : JsonProjection.FromEditJson(json, fingerprinter, KnownSecrets(@base, remote));
         if (source is PushSource.Promote)
         {
-            throw new NotSupportedException("Promote push is not supported yet.");
+            local = local with { State = new(local.State.Items.Where(i => i.Value.Scope == ConfigScope.Service).ToDictionary(i => i.Key, i => i.Value, StringComparer.Ordinal)) };
         }
 
-        var (@base, remote, raw) = await ReadRemoteAsync(binding, env, ct);
-        var local = source is PushSource.EditedJson edited
-            ? JsonProjection.FromEditJson(edited.Json, fingerprinter, KnownSecrets(@base, remote))
-            : new ParsedEditJson(await ReadLocalAsync(binding, ct), []);
         var diff = ThreeWayDiff.Compute(@base, local.State, remote, fingerprinter);
         var plan = ThreeWayDiff.Plan(diff, raw, binding, env);
 
