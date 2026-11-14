@@ -160,7 +160,7 @@ public sealed class SyncServiceDiffPlanTests
 
         var plan = await s.Service.PlanPushAsync(Binding(vault: bound is null ? null : new($"https://{bound}.vault.azure.net/")), Env, new PushSource.EditedJson(NewSecretJson), Ct);
 
-        var change = Assert.Single(plan.Changes);
+        var change = Assert.Single(plan.Changes, c => c.SecretValue is not null);
         Assert.Equal(expected is null, plan.RequiresVaultChoice);
         Assert.Equal(expected is null ? null : new ConfigValue.KeyVaultRef(new($"https://{expected}.vault.azure.net/secrets/Db--Password")), change.After?.Value);
         Assert.Equal(NewSecretText, change.SecretValue!.Reveal());

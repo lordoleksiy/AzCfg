@@ -201,7 +201,7 @@
     середовища) → apply. Є конфлікти → push відмовляє.
   - Залежить від: D6, L3
 
-- [ ] **L5. `azcfg edit`**
+- [x] **L5. `azcfg edit`**
   - `ExportJsonAsync` → тимчасовий файл → `$EDITOR` (Windows fallback — `notepad`) → `PlanPushAsync(EditedJson)`
     → підтвердження → apply. Тимчасовий файл видаляється завжди (`finally`).
   - Залежить від: L4, D3

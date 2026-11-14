@@ -7,6 +7,7 @@ public interface ISyncService
 {
     /// <summary>Pulls <paramref name="env"/>; without <paramref name="force"/> it writes nothing and returns a blocked result when local files have unpushed changes.</summary>
     Task<PullResult> PullAsync(ProjectBinding binding, ConfigEnvironment env, IProgress<SyncProgress>? progress, bool force, CancellationToken ct);
+    /// <summary>Edit JSON of the remote service and global keys (global under <c>@global</c>); secrets only as <c>{"@kv": name}</c>, their values are never read.</summary>
     Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct);
     /// <summary>Edit JSON of service-scope keys in <paramref name="from"/> missing in <paramref name="to"/>; secrets are <c>{"@kv":"name","value":null}</c>. Global keys are excluded.</summary>
     Task<string> ExportPromoteJsonAsync(ProjectBinding binding, ConfigEnvironment from, ConfigEnvironment to, CancellationToken ct);
