@@ -30,6 +30,15 @@ public sealed class UserSecretsTargetTests : IDisposable
         Assert.Empty(await _target.ReadAsync(Binding(WithId()), CancellationToken.None));
 
     [Fact]
+    public async Task ReadAsync_NoSecretsId_ReturnsEmptyAndDoesNotModifyCsproj()
+    {
+        var values = await _target.ReadAsync(Binding(WithoutId()), CancellationToken.None);
+
+        Assert.Empty(values);
+        Assert.DoesNotContain("UserSecretsId", await File.ReadAllTextAsync(CsprojPath()));
+    }
+
+    [Fact]
     public async Task WriteAsync_ThenReadAsync_RoundTripsNestedKeys()
     {
         var binding = Binding(WithId());

@@ -27,8 +27,8 @@ public abstract class JsonFileTarget : ILocalTarget
         ArgumentNullException.ThrowIfNull(target);
         ct.ThrowIfCancellationRequested();
 
-        var path = GetFilePath(target);
-        if (!File.Exists(path))
+        var path = GetReadFilePath(target);
+        if (path is null || !File.Exists(path))
         {
             return Task.FromResult<IReadOnlyList<LocalValue>>([]);
         }
@@ -62,6 +62,9 @@ public abstract class JsonFileTarget : ILocalTarget
 
         await File.WriteAllTextAsync(path, json.ToJsonString(), ct);
     }
+
+    /// <summary>File to read, or <c>null</c> when there is none yet. Defaults to <see cref="GetFilePath"/>.</summary>
+    protected virtual string? GetReadFilePath(LocalTargetBinding target) => GetFilePath(target);
 
     /// <summary>Resolves the JSON file path for a binding. Derived classes know where their file lives.</summary>
     protected abstract string GetFilePath(LocalTargetBinding target);

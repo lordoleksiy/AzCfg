@@ -9,7 +9,7 @@ namespace AzCfg.Infrastructure.Local;
 /// <summary>
 /// <see cref="LocalTargetKind.UserSecrets"/>: the project's dotnet user-secrets file, nested JSON (ADR 0006).
 /// Always safe for secrets, since it lives outside the repo. A project without <c>UserSecretsId</c> reads as
-/// empty and is not modified by <see cref="InspectAsync"/>; <see cref="JsonFileTarget.WriteAsync"/> runs
+/// empty and is not modified by reading or <see cref="InspectAsync"/>; <see cref="JsonFileTarget.WriteAsync"/> runs
 /// <c>dotnet user-secrets init</c> first and throws <see cref="InvalidOperationException"/> if that fails.
 /// </summary>
 public sealed class UserSecretsTarget : JsonFileTarget
@@ -19,7 +19,10 @@ public sealed class UserSecretsTarget : JsonFileTarget
     public override bool CanHandle(ProjectInfo project) => true;
 
     public override Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct) =>
-        Task.FromResult(new LocalTargetOption(target, ReadSecretsId(target.ProjectPath) is { } id && File.Exists(SecretsPath(id)), true));
+        Task.FromResult(new LocalTargetOption(target, GetReadFilePath(target) is { } path && File.Exists(path), true));
+
+    protected override string? GetReadFilePath(LocalTargetBinding target) =>
+        ReadSecretsId(target.ProjectPath) is { } id ? SecretsPath(id) : null;
 
     protected override string GetFilePath(LocalTargetBinding target) =>
         SecretsPath(ReadSecretsId(target.ProjectPath) ?? InitSecretsId(target.ProjectPath));
@@ -34,7 +37,6 @@ public sealed class UserSecretsTarget : JsonFileTarget
         using var process = Process.Start(new ProcessStartInfo("dotnet")
         {
             ArgumentList = { "user-secrets", "init", "--project", csprojPath },
-            RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         })!;
