@@ -54,7 +54,7 @@
 
 ## Етап 2. Infrastructure
 
-- [ ] **I1. `JsonUserStateStore`** (`Infrastructure/State`)
+- [x] **I1. `JsonUserStateStore`** (`Infrastructure/State`)
   - Корінь: `%APPDATA%/azcfg` (Linux/macOS `~/.config/azcfg`); конструктор приймає корінь (для тестів — temp dir).
   - `profile.json`, `projects.json` (ключ — повний шлях репо), `snapshots/<repo-hash>/<env>.json`, `fingerprint.key`
     (32 випадкові байти, створюється один раз).
