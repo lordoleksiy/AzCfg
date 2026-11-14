@@ -11,4 +11,10 @@ public abstract record PushSource
 
     /// <summary>Push from a developer-edited JSON projection (see <c>azcfg edit</c>).</summary>
     public sealed record EditedJson(string Json) : PushSource;
+
+    /// <summary>
+    /// Push from a developer-edited promote projection (<c>azcfg promote</c>): keys copied from
+    /// <see cref="FromEnvironment"/> that are missing in the target environment, edited for it.
+    /// </summary>
+    public sealed record Promote(string Json, string FromEnvironment) : PushSource;
 }
