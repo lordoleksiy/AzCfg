@@ -40,4 +40,15 @@ public sealed class AppConfigStoreTests
 
         Assert.Equal("\"tag-1\"", AppConfigStore.ToEntry(setting, "crm")!.ETag);
     }
+
+    [Theory]
+    [InlineData("svc:A", "svc")]
+    [InlineData("global:A", "")]
+    [InlineData("noColon", "")]
+    [InlineData(":A", "")]
+    [InlineData("svc:A,svc:B,other:C,global:D,noColon", "svc,other")]
+    public void ToServicePrefixes_ReturnsUniqueServicePrefixes(string keys, string expected) =>
+        Assert.Equal(
+            expected.Split(',', StringSplitOptions.RemoveEmptyEntries),
+            AppConfigStore.ToServicePrefixes(keys.Split(',')));
 }
