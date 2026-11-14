@@ -171,7 +171,7 @@
   - Тести: override замість зміни global, видалення global ігнорується, remote-зміни не потрапляють у plan.
   - Залежить від: D1
 
-- [ ] **D3. Edit JSON: export** (`JsonProjection.ToEditJson`)
+- [x] **D3. Edit JSON: export** (`JsonProjection.ToEditJson`)
   - Merged entries → JSON: вкладеність за `:`, KV-ref → `{ "@kv": "<secret-name>" }`, global-ключі — у `@global`.
   - Тести: приклад з `docs/architecture.md` (розділ «JSON-формат редагування»).
   - Залежить від: —

@@ -19,7 +19,7 @@ public static class JsonProjection
     {
         ArgumentNullException.ThrowIfNull(values);
 
-        var paths = new List<(IReadOnlyList<string> Segments, LocalValue Value)>();
+        var nodes = new List<(string Key, JsonNode Node)>();
         foreach (var value in values)
         {
             if (value is null)
@@ -32,21 +32,63 @@ public static class JsonProjection
                 throw new ArgumentException($"Value of '{value.Key}' must not be null.", nameof(values));
             }
 
-            paths.Add((KeyMapper.ToLocalJsonPath(value.Key), value));
+            nodes.Add((value.Key, JsonValue.Create(value.Value)!));
         }
 
-        paths.Sort((x, y) => CompareSegments(x.Segments, y.Segments));
+        return Build(nodes, "values");
+    }
 
-        var root = new JsonObject();
-        foreach (var (segments, value) in paths)
+    /// <summary>
+    /// Builds the edit JSON (architecture, "JSON-формат редагування") from merged entries: nesting by <c>:</c>,
+    /// plain values as strings, Key Vault references as <c>{"@kv":"&lt;secret-name&gt;"}</c> (secret values are never
+    /// emitted), global entries under <c>@global</c> (omitted when empty). Properties are ordered ordinally.
+    /// Throws <see cref="ArgumentException"/> for null elements, invalid keys, or a key that is both a value and a parent.
+    /// </summary>
+    public static JsonObject ToEditJson(IEnumerable<ConfigEntry> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        var list = entries.ToList();
+        if (list.Contains(null!))
         {
-            Add(root, segments, value);
+            throw new ArgumentException("Entries must not contain null.", nameof(entries));
+        }
+
+        var root = Build(list.Where(e => e.Scope == ConfigScope.Service).Select(ToNode), nameof(entries));
+        var global = Build(list.Where(e => e.Scope == ConfigScope.Global).Select(ToNode), nameof(entries));
+        if (global.Count > 0)
+        {
+            root["@global"] = global;
         }
 
         return root;
     }
 
-    private static void Add(JsonObject root, IReadOnlyList<string> segments, LocalValue value)
+    private static (string Key, JsonNode Node) ToNode(ConfigEntry entry) => (entry.Key, entry.Value switch
+    {
+        ConfigValue.Plain p => JsonValue.Create(p.Value)!,
+        ConfigValue.KeyVaultRef r => new JsonObject { ["@kv"] = SecretName(r.SecretUri) },
+        ConfigValue.ResolvedSecret r => new JsonObject { ["@kv"] = SecretName(r.SecretUri) },
+        _ => throw new ArgumentException($"Unsupported value of '{entry.Key}'.", "entries"),
+    });
+
+    private static string SecretName(Uri secretUri) => secretUri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries)[1];
+
+    private static JsonObject Build(IEnumerable<(string Key, JsonNode Node)> nodes, string paramName)
+    {
+        var paths = nodes.Select(n => (Segments: KeyMapper.ToLocalJsonPath(n.Key), n.Key, n.Node)).ToList();
+        paths.Sort((x, y) => CompareSegments(x.Segments, y.Segments));
+
+        var root = new JsonObject();
+        foreach (var (segments, key, node) in paths)
+        {
+            Add(root, segments, key, node, paramName);
+        }
+
+        return root;
+    }
+
+    private static void Add(JsonObject root, IReadOnlyList<string> segments, string key, JsonNode leafNode, string paramName)
     {
         var current = root;
         for (var i = 0; i < segments.Count - 1; i++)
@@ -57,9 +99,9 @@ public static class JsonProjection
                 child = new JsonObject();
                 current[segment] = child;
             }
-            else if (child is not JsonObject)
+            else if (child is not JsonObject parent || parent.ContainsKey("@kv"))
             {
-                throw Conflict(value.Key, KeyMapper.FromLocalJsonPath(segments.Take(i + 1).ToList()));
+                throw Conflict(key, paramName, KeyMapper.FromLocalJsonPath(segments.Take(i + 1).ToList()));
             }
 
             current = (JsonObject)child;
@@ -69,16 +111,16 @@ public static class JsonProjection
         if (current.TryGetPropertyValue(leaf, out var existing))
         {
             throw existing is JsonObject
-                ? Conflict(value.Key, value.Key)
-                : new ArgumentException($"Duplicate key '{value.Key}'.", "values");
+                ? Conflict(key, paramName, key)
+                : new ArgumentException($"Duplicate key '{key}'.", paramName);
         }
 
-        current[leaf] = JsonValue.Create(value.Value);
+        current[leaf] = leafNode;
     }
 
-    private static ArgumentException Conflict(string key, string valueKey) =>
+    private static ArgumentException Conflict(string key, string paramName, string valueKey) =>
         new($"Key '{key}' conflicts with '{valueKey}': a key cannot be both a value and a parent of other keys.",
-            "values");
+            paramName);
 
     private static int CompareSegments(IReadOnlyList<string> x, IReadOnlyList<string> y)
     {
