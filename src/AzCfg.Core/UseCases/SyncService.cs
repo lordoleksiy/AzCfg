@@ -62,6 +62,15 @@ public sealed class SyncService(
 
     public Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => throw new NotImplementedException();
 
+    public async Task<string> ExportPromoteJsonAsync(ProjectBinding binding, ConfigEnvironment from, ConfigEnvironment to, CancellationToken ct)
+    {
+        var existing = (await store.ReadAsync(to, binding.Service, ct).ToListAsync(ct))
+            .Where(e => e.Scope == ConfigScope.Service).Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
+        var added = (await store.ReadAsync(from, binding.Service, ct).ToListAsync(ct))
+            .Where(e => e.Scope == ConfigScope.Service && !existing.Contains(e.Key));
+        return JsonProjection.ToEditJson(added, secretPlaceholders: true).ToJsonString(new() { WriteIndented = true });
+    }
+
     public Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct) => throw new NotImplementedException();
 
     public Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => throw new NotImplementedException();

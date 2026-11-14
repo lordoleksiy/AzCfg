@@ -219,7 +219,7 @@
   - Усі команди без `--env` беруть `ActiveEnvironment`; якщо його немає — `dev`.
   - Залежить від: E1, L3
 
-- [ ] **E3. Promote: export** (`SyncService.ExportPromoteJsonAsync(binding, from, to, ct)`)
+- [x] **E3. Promote: export** (`SyncService.ExportPromoteJsonAsync(binding, from, to, ct)`)
   - Ключі scope сервісу, що є в `from` і відсутні в `to` → edit JSON (формат D3). Plain — зі значенням з `from`;
     секрети → `{ "@kv": "<name>", "value": null }`. Global не включається.
   - Тести на fakes: лише нові ключі, наявні в `to` пропускаються, секрет без значення.
