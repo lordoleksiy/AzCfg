@@ -81,7 +81,7 @@
   - Тести: round-trip через тимчасовий `UserSecretsId`.
   - Залежить від: I2
 
-- [ ] **I4. `IProjectDetector` + `CsprojDetector`**
+- [x] **I4. `IProjectDetector` + `CsprojDetector`**
   - Порт у `Core/Abstractions`: `Task<IReadOnlyList<ProjectInfo>> DetectAsync(string repoPath, CancellationToken ct)`.
   - Реалізація: пошук `*.csproj` (без `bin/`, `obj/`), з XML — `UserSecretsId`, `AzureFunctionsVersion` → `IsAzureFunctions`.
   - Тести: temp-папка з кількома csproj.

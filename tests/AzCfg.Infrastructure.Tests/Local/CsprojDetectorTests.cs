@@ -1,0 +1,160 @@
+using AzCfg.Infrastructure.Local;
+
+namespace AzCfg.Infrastructure.Tests.Local;
+
+public sealed class CsprojDetectorTests : IDisposable
+{
+    private const string MinimalCsproj = "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>";
+
+    private readonly List<string> _tempDirs = [];
+    private readonly CsprojDetector _detector = new();
+
+    [Fact]
+    public async Task DetectAsync_FindsCsprojFiles_AcrossSubdirectories()
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "Service.Core/Service.Core.csproj", MinimalCsproj);
+        WriteCsproj(repo, "Service.Api/Service.Api.csproj", MinimalCsproj);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, p => p.Name == "Service.Core");
+        Assert.Contains(result, p => p.Name == "Service.Api");
+    }
+
+    [Fact]
+    public async Task DetectAsync_ExcludesBinAndObjDirectories()
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "Service/Service.csproj", MinimalCsproj);
+        WriteCsproj(repo, "Service/bin/Debug/Service.csproj", MinimalCsproj);
+        WriteCsproj(repo, "Service/obj/Service.csproj", MinimalCsproj);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.Equal([Path.Combine(repo, "Service", "Service.csproj")], result.Select(p => p.CsprojPath));
+    }
+
+    [Fact]
+    public async Task DetectAsync_UserSecretsIdPresent_ParsesIt()
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "Service/Service.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <UserSecretsId>abc-123</UserSecretsId>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.Equal("abc-123", result[0].UserSecretsId);
+    }
+
+    [Fact]
+    public async Task DetectAsync_UserSecretsIdAbsent_IsNull()
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "Service/Service.csproj", MinimalCsproj);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.Null(result[0].UserSecretsId);
+    }
+
+    [Fact]
+    public async Task DetectAsync_AzureFunctionsVersionPresent_SetsIsAzureFunctions()
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "Functions/Functions.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <AzureFunctionsVersion>v4</AzureFunctionsVersion>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.True(result[0].IsAzureFunctions);
+    }
+
+    [Fact]
+    public async Task DetectAsync_AzureFunctionsVersionAbsent_IsNotAzureFunctions()
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "Service/Service.csproj", MinimalCsproj);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.False(result[0].IsAzureFunctions);
+    }
+
+    [Fact]
+    public async Task DetectAsync_SetsRepoPathAndCsprojPath_OnEveryProject()
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "A/A.csproj", MinimalCsproj);
+        WriteCsproj(repo, "B/B.csproj", MinimalCsproj);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.All(result, p => Assert.Equal(repo, p.RepoPath));
+        Assert.Contains(result, p => p.CsprojPath == Path.Combine(repo, "A", "A.csproj"));
+        Assert.Contains(result, p => p.CsprojPath == Path.Combine(repo, "B", "B.csproj"));
+    }
+
+    [Fact]
+    public async Task DetectAsync_NoCsprojFiles_ReturnsEmpty()
+    {
+        var repo = CreateRepo();
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task DetectAsync_RepoPathDoesNotExist_ReturnsEmpty()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "azcfg-tests-missing-" + Guid.NewGuid().ToString("N"));
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.Empty(result);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task DetectAsync_BlankRepoPath_Throws(string? repoPath)
+    {
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => _detector.DetectAsync(repoPath!, CancellationToken.None));
+    }
+
+    private string CreateRepo()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "azcfg-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        _tempDirs.Add(path);
+        return path;
+    }
+
+    private static void WriteCsproj(string repo, string relativePath, string content)
+    {
+        var fullPath = Path.Combine(repo, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(fullPath, content);
+    }
+
+    public void Dispose()
+    {
+        foreach (var dir in _tempDirs.Where(Directory.Exists))
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+}
