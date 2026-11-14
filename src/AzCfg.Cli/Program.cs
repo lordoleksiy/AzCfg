@@ -15,6 +15,7 @@ app.Configure(config =>
     config.AddCommand<PlanCommand>("plan").WithDescription("Show what pushing the local files would change.");
     config.AddCommand<PushCommand>("push").WithDescription("Apply the local files to an environment.");
     config.AddCommand<EditCommand>("edit").WithDescription("Edit the remote config as JSON in your editor, then apply it.");
+    config.AddCommand<PromoteCommand>("promote").WithDescription("Copy new keys from one environment to another via your editor, then apply them.");
     config.SetExceptionHandler((ex, _) =>
     {
         var json = args.Contains("--json");
