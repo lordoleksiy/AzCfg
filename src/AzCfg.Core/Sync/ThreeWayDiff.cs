@@ -56,15 +56,20 @@ public static class ThreeWayDiff
         var before = Find(item.Key, scope);
         return item.Local.Value switch
         {
-            StateValue.Secret { SecretUri: { } uri } when (item.Remote ?? item.Base)?.Scope == scope =>
-                new(ChangeKind.CreateSecret, before, null, uri.Segments.SkipWhile(s => s != "secrets/").Skip(1).First().TrimEnd('/')),
-            StateValue.Secret => new(ChangeKind.CreateSecret, before, null, KeyMapper.ToKeyVaultSecretName(KeyMapper.ToStoreKey(scope, service, item.Key))),
+            StateValue.Secret => new(ChangeKind.CreateSecret, before, null, SecretName(item, service)),
             StateValue.Plain plain => new(before is null ? ChangeKind.Add : ChangeKind.Update, before, new ConfigEntry(item.Key, scope, new ConfigValue.Plain(plain.Value))),
             _ => null,
         };
 
         ConfigEntry? Find(string key, ConfigScope s) => remote.FirstOrDefault(e => e.Key == key && e.Scope == s);
     }
+
+    internal static string SecretName(Uri secretUri) => secretUri.Segments.SkipWhile(s => s != "secrets/").Skip(1).First().TrimEnd('/');
+
+    internal static string SecretName(DiffItem item, string service) =>
+        item.Local!.Value is StateValue.Secret { SecretUri: { } uri } && (item.Remote ?? item.Base)?.Scope == item.Local.Scope
+            ? SecretName(uri)
+            : KeyMapper.ToKeyVaultSecretName(KeyMapper.ToStoreKey(item.Local.Scope, service, item.Key));
 
     private static DiffKind Classify(StateItem? b, StateItem? l, StateItem? r) => (Same(b, l), Same(b, r), Same(l, r)) switch
     {

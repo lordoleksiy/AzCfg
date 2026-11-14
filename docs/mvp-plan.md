@@ -182,7 +182,7 @@
   - Тести: round-trip з D3, `@global`, новий секрет, null-значення, невалідний JSON.
   - Залежить від: D3
 
-- [ ] **D5. `SyncService.DiffAsync` + `PlanPushAsync`**
+- [x] **D5. `SyncService.DiffAsync` + `PlanPushAsync`**
   - Local з `PushSource.LocalFiles` (цілі) або `EditedJson` (D4); base — знімок; remote — стор → D1 → D2.
   - Vault для нових секретів (ADR 0005): збережений у binding → найчастіший серед референсів сервісу →
     серед global → інакше `RequiresVaultChoice = true`.
