@@ -166,9 +166,86 @@ public sealed class SyncServiceDiffPlanTests
         Assert.Equal(NewSecretText, change.SecretValue!.Reveal());
     }
 
+    private static PushSource.Promote Promote(string json) => new(json, "stage");
+
     [Fact]
-    public async Task PlanPushAsync_Promote_NotSupported() =>
-        await Assert.ThrowsAsync<NotSupportedException>(() => Create([]).Service.PlanPushAsync(Binding(), Env, new PushSource.Promote("{}", "stage"), Ct));
+    public async Task PlanPushAsync_Promote_OnlyAddsNewKeys_NeverUpdatesOrDeletes()
+    {
+        var s = Create([Plain("A", "1"), Plain("B", "2")], snapshot: State(
+            new StateItem("A", ConfigScope.Service, new StateValue.Plain("1")),
+            new StateItem("B", ConfigScope.Service, new StateValue.Plain("2")),
+            new StateItem("C", ConfigScope.Service, new StateValue.Plain("3"))));
+
+        var plan = await s.Service.PlanPushAsync(Binding(), Env, Promote("""{"N":"x","@global":{"G":"1"}}"""), Ct);
+
+        var change = Assert.Single(plan.Changes);
+        Assert.Equal(ChangeKind.Add, change.Kind);
+        Assert.Equal("N", change.After!.Key);
+        Assert.Empty(plan.Conflicts);
+        Assert.False(plan.RequiresVaultChoice);
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_Promote_KeyAlreadyInTarget_IsConflict()
+    {
+        var s = Create([Plain("A", "1")]);
+
+        var plan = await s.Service.PlanPushAsync(Binding(), Env, Promote("""{"A":"mine","N":"x"}"""), Ct);
+
+        Assert.Equal("A", Assert.Single(plan.Conflicts).Key);
+        Assert.Equal(["N"], plan.Changes.Select(c => c.After!.Key));
+    }
+
+    [Theory]
+    [InlineData("1")]
+    [InlineData("mine")]
+    public async Task PlanPushAsync_Promote_KeyOnlyGlobalInTarget_AddsServiceOverride(string value)
+    {
+        var s = Create([Plain("A", "1", ConfigScope.Global)]);
+
+        var plan = await s.Service.PlanPushAsync(Binding(), Env, Promote($$"""{"A":"{{value}}"}"""), Ct);
+
+        var change = Assert.Single(plan.Changes);
+        Assert.Equal(ChangeKind.Add, change.Kind);
+        Assert.Null(change.Before);
+        Assert.Equal(ConfigScope.Service, change.After!.Scope);
+        Assert.Empty(plan.Conflicts);
+        Assert.False(plan.TouchesGlobal);
+    }
+
+    [Theory]
+    [InlineData("bound", "other", "bound")]
+    [InlineData(null, "other", "other")]
+    public async Task PlanPushAsync_Promote_NewSecret_IsCreatedInTargetVault(string? bound, string existing, string expected)
+    {
+        var s = Create([Ref("S", new($"https://{existing}.vault.azure.net/secrets/s/v1"))]);
+
+        var plan = await s.Service.PlanPushAsync(Binding(vault: bound is null ? null : new($"https://{bound}.vault.azure.net/")), Env, Promote(NewSecretJson), Ct);
+
+        var change = Assert.Single(plan.Changes);
+        Assert.Equal(ChangeKind.CreateSecret, change.Kind);
+        Assert.Equal("Db--Password", change.SecretName);
+        Assert.Equal(NewSecretText, change.SecretValue!.Reveal());
+        Assert.Equal(new ConfigValue.KeyVaultRef(new($"https://{expected}.vault.azure.net/secrets/Db--Password")), change.After!.Value);
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_Promote_NewSecretWithoutVault_RequiresVaultChoice()
+    {
+        var plan = await Create([]).Service.PlanPushAsync(Binding(), Env, Promote(NewSecretJson), Ct);
+
+        Assert.True(plan.RequiresVaultChoice);
+        Assert.Null(Assert.Single(plan.Changes).After);
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_Promote_NullSecretValue_ThrowsNamingKeyWithoutValues()
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            Create([]).Service.PlanPushAsync(Binding(), Env, Promote("""{"Db":{"Password":{"@kv":"Db--Password","value":null}}}"""), Ct));
+
+        Assert.Contains("Db:Password", ex.Message);
+    }
 
     [Fact]
     public async Task PlanPushAsync_SerializedPlan_DoesNotContainSecretValues()
