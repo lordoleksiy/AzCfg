@@ -115,7 +115,7 @@
 
 ## Етап 3. Core use cases + перша версія CLI
 
-- [ ] **C1. `SetupService`**
+- [x] **C1. `SetupService`**
   - `DiscoverEnvironmentsAsync` повертає кандидатів: середовище за тегом `environment`, інакше за суфіксом
     назви (`-dev`, `-stg`/`-stage`, `-prod`). Невизначені — у кандидатах з `Name = null`, рішення приймає клієнт.
     `IsProtected` — за `IsProtectedByName`.
