@@ -44,29 +44,16 @@ public class ThreeWayDiffTests
         Assert.Equal(["B", "a", "b"], diff.Items.Select(i => i.Key));
     }
 
-    [Fact]
-    public void Compute_LocalScope_TakenFromRemoteThenBaseElseService()
+    [Theory]
+    [InlineData(ConfigScope.Service)]
+    [InlineData(ConfigScope.Global)]
+    public void Compute_KeepsLocalScope(ConfigScope scope)
     {
-        var @base = State(Plain("fromBase", "1", ConfigScope.Global));
-        var remote = State(Plain("fromRemote", "1", ConfigScope.Global));
-        var local = State(Plain("fromBase", "1"), Plain("fromRemote", "1"), Plain("brandNew", "1", ConfigScope.Global));
+        var remote = State(Plain("K", "1", ConfigScope.Global));
 
-        var items = Diff(@base, local, remote).Items.ToDictionary(i => i.Key);
+        var item = Assert.Single(Diff(remote, State(Plain("K", "1", scope)), remote).Items);
 
-        Assert.Equal(ConfigScope.Global, items["fromBase"].Local!.Scope);
-        Assert.Equal(ConfigScope.Global, items["fromRemote"].Local!.Scope);
-        Assert.Equal(ConfigScope.Service, items["brandNew"].Local!.Scope);
-    }
-
-    [Fact]
-    public void Compute_LocalScope_PrefersRemoteOverBase()
-    {
-        var @base = State(Plain("K", "1", ConfigScope.Global));
-        var remote = State(Plain("K", "1", ConfigScope.Service));
-
-        var item = Assert.Single(Diff(@base, State(Plain("K", "1")), remote).Items);
-
-        Assert.Equal(ConfigScope.Service, item.Local!.Scope);
+        Assert.Equal(scope, item.Local!.Scope);
     }
 
     [Fact]

@@ -1,12 +1,13 @@
 using AzCfg.Core.Abstractions;
+using AzCfg.Core.Mapping;
 using AzCfg.Core.Model;
 
 namespace AzCfg.Core.Sync;
 
 /// <summary>
-/// Computes a 3-way diff (ADR 0007), ordered by key (ordinal). Local items are normalized first: scope comes
-/// from remote, then base, else <see cref="ConfigScope.Service"/>; a plain local value becomes a secret only if
-/// remote or base knows the key as one (URI from remote, else base). Secrets compare by fingerprint.
+/// Computes a 3-way diff (ADR 0007), ordered by key (ordinal). Local items are normalized first: scope is kept as
+/// given; a plain local value becomes a secret only if remote or base knows the key as one (URI from remote,
+/// else base). Secrets compare by fingerprint.
 /// </summary>
 public static class ThreeWayDiff
 {
@@ -24,13 +25,45 @@ public static class ThreeWayDiff
         })]);
     }
 
-    private static StateItem Normalize(StateItem item, StateItem? @base, StateItem? remote, ISecretFingerprinter fingerprinter)
+    private static StateItem Normalize(StateItem item, StateItem? @base, StateItem? remote, ISecretFingerprinter fingerprinter) =>
+        item.Value is StateValue.Plain plain && (remote?.Value as StateValue.Secret ?? @base?.Value as StateValue.Secret) is { } known
+            ? item with { Value = new StateValue.Secret(known.SecretUri, fingerprinter.Fingerprint(new SecretString(plain.Value))) }
+            : item;
+
+    /// <summary>
+    /// Turns local changes into a <see cref="SyncPlan"/>; conflicts go to <see cref="SyncPlan.Conflicts"/>, remote
+    /// changes are ignored. A change targets <see cref="ConfigScope.Global"/> only for an explicit global local item;
+    /// otherwise a key that came from global becomes a service override, and deleting it does nothing. A changed
+    /// secret yields <see cref="ChangeKind.CreateSecret"/> without a value (named from its URI, unless it came from
+    /// another scope, else from the key). <see cref="Change.Before"/> is the matching raw remote entry.
+    /// </summary>
+    public static SyncPlan Plan(ConfigDiff diff, IReadOnlyList<ConfigEntry> remote, ProjectBinding binding, ConfigEnvironment env) => new(
+        binding,
+        env,
+        [.. diff.Items.Select(i => ToChange(i, remote, binding.Service)).OfType<Change>()],
+        [.. diff.Items.Where(i => i.Kind == DiffKind.Conflict).Select(i => new Conflict(i.Key, i.Base, i.Local, i.Remote))],
+        false,
+        diff.Items.Any(i => i.Kind is DiffKind.LocalAdded or DiffKind.LocalModified && i.Local!.Scope == ConfigScope.Global));
+
+    private static Change? ToChange(DiffItem item, IReadOnlyList<ConfigEntry> remote, string service)
     {
-        var scope = (remote ?? @base)?.Scope ?? ConfigScope.Service;
-        var known = remote?.Value as StateValue.Secret ?? @base?.Value as StateValue.Secret;
-        return item.Value is StateValue.Plain plain && known is not null
-            ? item with { Scope = scope, Value = new StateValue.Secret(known.SecretUri, fingerprinter.Fingerprint(new SecretString(plain.Value))) }
-            : item with { Scope = scope };
+        if (item.Kind == DiffKind.LocalDeleted)
+            return item.Base is { Scope: ConfigScope.Service } ? new(ChangeKind.Delete, Find(item.Key, ConfigScope.Service), null) : null;
+        if (item.Kind is not (DiffKind.LocalAdded or DiffKind.LocalModified))
+            return null;
+
+        var scope = item.Local!.Scope;
+        var before = Find(item.Key, scope);
+        return item.Local.Value switch
+        {
+            StateValue.Secret { SecretUri: { } uri } when (item.Remote ?? item.Base)?.Scope == scope =>
+                new(ChangeKind.CreateSecret, before, null, uri.Segments.SkipWhile(s => s != "secrets/").Skip(1).First().TrimEnd('/')),
+            StateValue.Secret => new(ChangeKind.CreateSecret, before, null, KeyMapper.ToKeyVaultSecretName(KeyMapper.ToStoreKey(scope, service, item.Key))),
+            StateValue.Plain plain => new(before is null ? ChangeKind.Add : ChangeKind.Update, before, new ConfigEntry(item.Key, scope, new ConfigValue.Plain(plain.Value))),
+            _ => null,
+        };
+
+        ConfigEntry? Find(string key, ConfigScope s) => remote.FirstOrDefault(e => e.Key == key && e.Scope == s);
     }
 
     private static DiffKind Classify(StateItem? b, StateItem? l, StateItem? r) => (Same(b, l), Same(b, r), Same(l, r)) switch
