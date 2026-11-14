@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
@@ -23,27 +22,6 @@ public sealed class JsonUserStateStore(string root) : IUserStateStore
     {
         WriteIndented = true,
         Converters = { new JsonStringEnumConverter() },
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver
-        {
-            Modifiers =
-            {
-                static info =>
-                {
-                    if (info.Type == typeof(StateValue))
-                    {
-                        info.PolymorphismOptions = new()
-                        {
-                            TypeDiscriminatorPropertyName = "type",
-                            DerivedTypes =
-                            {
-                                new(typeof(StateValue.Plain), "plain"),
-                                new(typeof(StateValue.Secret), "secret"),
-                            },
-                        };
-                    }
-                },
-            },
-        },
     };
 
     public static string DefaultRoot { get; } =
