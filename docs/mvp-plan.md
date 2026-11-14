@@ -62,7 +62,7 @@
   - Тести: round-trip кожного файлу, відсутній файл → `null`, ключ стабільний між викликами.
   - Залежить від: M1, M2
 
-- [ ] **I2. `AppSettingsLocalTarget`** (`Infrastructure/Local`)
+- [x] **I2. `AppSettingsLocalTarget`** (`Infrastructure/Local`)
   - Читання: `Microsoft.Extensions.Configuration.Json` (`ConfigurationBuilder().AddJsonFile(...)`) — сам дає
     плоскі ключі `A:B`. Запис: `JsonProjection.ToNestedJson`, повний перезапис файлу.
   - Файл: `appsettings.local.json` поруч із `.csproj` (`LocalTargetBinding.ProjectPath`).
