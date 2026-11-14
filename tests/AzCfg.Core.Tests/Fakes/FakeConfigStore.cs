@@ -7,8 +7,12 @@ namespace AzCfg.Core.Tests.Fakes;
 
 internal sealed class FakeConfigStore(
     Dictionary<string, string[]> prefixesByEnvironment,
-    Dictionary<string, ConfigEntry[]>? entriesByEnvironment = null) : IConfigStore
+    Dictionary<string, ConfigEntry[]>? entriesByEnvironment = null,
+    List<string>? calls = null) : IConfigStore
 {
+    public IReadOnlyList<Change>? Applied { get; private set; }
+    public string[] FailKeys { get; set; } = [];
+
     public IAsyncEnumerable<ConfigEntry> ReadAsync(ConfigEnvironment env, string service, CancellationToken ct) =>
         entriesByEnvironment![env.Name].ToAsyncEnumerable();
 
@@ -22,5 +26,11 @@ internal sealed class FakeConfigStore(
         await Task.CompletedTask;
     }
 
-    public Task<ApplyResult> ApplyAsync(ConfigEnvironment env, string service, IReadOnlyList<Change> changes, CancellationToken ct) => throw new NotSupportedException();
+    public Task<ApplyResult> ApplyAsync(ConfigEnvironment env, string service, IReadOnlyList<Change> changes, CancellationToken ct)
+    {
+        calls?.Add("apply");
+        Applied = changes;
+        var failed = changes.Select(c => (c.After ?? c.Before)!.Key).Where(FailKeys.Contains).ToList();
+        return Task.FromResult(new ApplyResult(changes.Count - failed.Count, failed));
+    }
 }
