@@ -37,7 +37,7 @@
 
 ## Етап 1. Модель
 
-- [ ] **M1. Захищені середовища і профіль**
+- [x] **M1. Захищені середовища і профіль**
   - `ConfigEnvironment` + `bool IsProtected`; статичний `ConfigEnvironment.IsProtectedByName(string name)`.
   - `UserProfile(IReadOnlyList<ConfigEnvironment> Environments)` замість словника `name → Uri`.
   - `SeparateStoresResolver : IEnvironmentResolver` (Core) — повертає середовища профілю, `Label = null`.
