@@ -23,29 +23,7 @@ public sealed class EditCommand(IProjectService projects, ISyncService sync, IUs
             return 0;
         }
 
-        var path = Path.Combine(Path.GetTempPath(), $"azcfg-{Guid.NewGuid():N}.json");
-        string edited;
-        try
-        {
-            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
-            if (!OperatingSystem.IsWindows())
-            {
-                options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-            }
-
-            await using (var stream = File.Open(path, options))
-            await using (var writer = new StreamWriter(stream))
-            {
-                await writer.WriteAsync(exported.AsMemory(), ct);
-            }
-
-            await editor.EditAsync(path, ct);
-            edited = await File.ReadAllTextAsync(path, ct);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
+        var edited = await editor.EditTextAsync(exported, ct);
 
         if (edited == exported)
         {

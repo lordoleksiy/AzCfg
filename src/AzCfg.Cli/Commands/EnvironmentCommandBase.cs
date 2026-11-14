@@ -27,8 +27,13 @@ public abstract class EnvironmentCommandBase<TSettings>(IProjectService projects
         var repo = Path.GetFullPath(settings.Project);
         var binding = await GetBindingAsync(repo, await Projects.ResolveAsync(repo, ct), settings, ct);
         var name = RequestedEnv(settings) ?? binding.ActiveEnvironment ?? "dev";
-        var env = resolver.Resolve(profile).FirstOrDefault(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException($"Environment '{name}' is not in the profile.");
-        return (binding, env);
+        return (binding, Find(profile, name));
     }
+
+    protected async Task<ConfigEnvironment> FindEnvironmentAsync(string name, CancellationToken ct) =>
+        Find(await State.LoadProfileAsync(ct) ?? throw new InvalidOperationException("No profile found. Run 'azcfg init' first."), name);
+
+    private ConfigEnvironment Find(UserProfile profile, string name) =>
+        resolver.Resolve(profile).FirstOrDefault(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException($"Environment '{name}' is not in the profile.");
 }
