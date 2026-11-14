@@ -107,7 +107,7 @@
   - Тести: мапінг рядка відповіді → `AzureResource`.
   - Залежить від: —
 
-- [ ] **I8. `AppConfigStore` — запис**
+- [x] **I8. `AppConfigStore` — запис**
   - `ApplyAsync`: `Add`/`Update` → `SetConfigurationSetting` з `If-Match: etag` (для `Add` — `If-None-Match: *`);
     `Delete` → видалення з etag; KV-ref пишеться з правильним content type. HTTP 412 → ключ у `ApplyResult.Failed`.
   - Тести: побудова `ConfigurationSetting` з `Change` (без мережі).
