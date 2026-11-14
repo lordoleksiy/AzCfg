@@ -155,4 +155,97 @@ public class JsonProjectionTests
 
         Assert.Equal("""{"A":{"B":"1"}}""", JsonProjection.ToNestedJson(values).ToJsonString());
     }
+
+    private static ConfigEntry Plain(string key, string value, ConfigScope scope = ConfigScope.Service) =>
+        new(key, scope, new ConfigValue.Plain(value));
+
+    private static ConfigEntry Kv(string key, string uri, ConfigScope scope = ConfigScope.Service) =>
+        new(key, scope, new ConfigValue.KeyVaultRef(new Uri(uri)));
+
+    [Fact]
+    public void ToEditJson_NullInput_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => JsonProjection.ToEditJson(null!));
+    }
+
+    [Fact]
+    public void ToEditJson_EmptyInput_ReturnsEmptyObject()
+    {
+        Assert.Equal("{}", JsonProjection.ToEditJson([]).ToJsonString());
+    }
+
+    [Fact]
+    public void ToEditJson_ArchitectureExample_ProducesExpectedJson()
+    {
+        var result = JsonProjection.ToEditJson(
+        [
+            Kv("ConnectionStrings:Crm", "https://kv.vault.azure.net/secrets/crm-api-service--ConnectionStrings--Crm/abc123"),
+            Plain("Features:UseNewPricing", "true"),
+            Plain("Logging:Level", "Information", ConfigScope.Global),
+        ]);
+
+        Assert.Equal(
+            """{"ConnectionStrings":{"Crm":{"@kv":"crm-api-service--ConnectionStrings--Crm"}},"Features":{"UseNewPricing":"true"},"@global":{"Logging":{"Level":"Information"}}}""",
+            result.ToJsonString());
+    }
+
+    [Theory]
+    [InlineData("https://kv.vault.azure.net/secrets/my-secret")]
+    [InlineData("https://kv.vault.azure.net/secrets/my-secret/0123abcd")]
+    public void ToEditJson_KeyVaultRef_UsesSecretNameWithoutVersion(string uri)
+    {
+        var result = JsonProjection.ToEditJson([Kv("A:B", uri)]);
+
+        Assert.Equal("""{"A":{"B":{"@kv":"my-secret"}}}""", result.ToJsonString());
+    }
+
+    [Fact]
+    public void ToEditJson_ResolvedSecret_NeverExposesValue()
+    {
+        var secret = new ConfigValue.ResolvedSecret(
+            new Uri("https://kv.vault.azure.net/secrets/my-secret/v1"), new SecretString("s3cr3t-value"));
+
+        var result = JsonProjection.ToEditJson([new ConfigEntry("A", ConfigScope.Service, secret)]);
+
+        Assert.Equal("""{"A":{"@kv":"my-secret"}}""", result.ToJsonString());
+    }
+
+    [Fact]
+    public void ToEditJson_OnlyServiceEntries_HasNoGlobalProperty()
+    {
+        var result = JsonProjection.ToEditJson([Plain("A", "1")]);
+
+        Assert.False(result.ContainsKey("@global"));
+    }
+
+    [Fact]
+    public void ToEditJson_OnlyGlobalEntries_HasOnlyGlobalProperty()
+    {
+        var result = JsonProjection.ToEditJson([Plain("A:B", "1", ConfigScope.Global)]);
+
+        Assert.Equal("""{"@global":{"A":{"B":"1"}}}""", result.ToJsonString());
+    }
+
+    [Fact]
+    public void ToEditJson_PropertiesAreOrderedOrdinal_RegardlessOfInputOrder()
+    {
+        var result = JsonProjection.ToEditJson([Plain("b", "1"), Plain("A:z", "2"), Plain("a", "3"), Plain("A:B", "4")]);
+
+        Assert.Equal("""{"A":{"B":"4","z":"2"},"a":"3","b":"1"}""", result.ToJsonString());
+    }
+
+    [Theory]
+    [InlineData("A", "A:B")]
+    [InlineData("A:B", "A")]
+    public void ToEditJson_KeyIsBothValueAndParent_Throws(string first, string second)
+    {
+        Assert.Throws<ArgumentException>(
+            () => JsonProjection.ToEditJson([Kv(first, "https://kv.vault.azure.net/secrets/s"), Plain(second, "2")]));
+    }
+
+    [Fact]
+    public void ToEditJson_NullElement_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => JsonProjection.ToEditJson([null!]));
+    }
 }
