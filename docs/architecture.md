@@ -18,7 +18,11 @@
 - Pull: беремо `global:*` + `<service>:*`, зрізаємо префікс, сервісні перекривають global (з provenance).
 - Push: за замовчуванням scope = сервіс; зміна `global` — лише явно (секція `@global`) + окреме попередження.
 - Назви секретів KV: `:` → `--` (напр. `crm-api-service--ConnectionStrings--Crm`).
-- local.settings.json (Functions): `:` → `__`.
+- Формат — властивість локальної цілі (`LocalTargetBinding.Format`, ADR 0006): `NestedJson` для user-secrets і
+  `appsettings.local.json` (`Dataverse:ConnString` → `{"Dataverse":{"ConnString":"..."}}`, без scope-префікса);
+  `FlatDictionary` — єдиний дозволений формат для `local.settings.json` (`Values` — плоский словник рядків,
+  ключі `A:B` як є, без вкладеності; вкладений JSON для цієї цілі заборонено). `local.settings.json` спроєктовано в
+  контрактах, реалізація Infrastructure — пізніше (див. ADR 0004, ADR 0006).
 
 ### Середовища
 - Зараз: **окремий App Configuration на кожне середовище** (dev / stage / prod).
@@ -32,8 +36,11 @@
   Fallback — ручне введення endpoint.
 - **Сервіс проєкту**: реальні префікси з dev store (частина до першої `:`), зіставлені з назвою .csproj,
   папки, git remote, наявними ключами local.settings.json. Впевнений збіг — автоматично, інакше вибір. Запамʼятовується.
-- **Цілі**: скан `*.csproj` — `AzureFunctionsVersion`/Functions SDK → `local.settings.json` (`Values`);
-  `UserSecretsId` → user-secrets (секрети) + appsettings.Development.json; немає — запропонувати `dotnet user-secrets init`.
+- **Цілі**: розробник сам вирішує, куди йдуть значення, а куди — секрети (ADR 0006); Core лише пропонує
+  варіанти (`LocalTargetOption`), рішення не приймає. Варіанти: user-secrets і `appsettings.local.json`
+  (MVP, вкладений JSON) та `local.settings.json` (Azure Functions; лише плоский `Values`, спроєктовано, не в
+  MVP). Вибір запам'ятовується в `projects.json` (`ProjectBinding.ValuesTarget`/`SecretsTarget`) — наступного
+  разу `ProjectResolution.Existing` повертає його без повторних запитань.
 - **Key Vault — без хардкоду**:
   - читання: vault береться з URI в самому KV reference (`{"uri":"https://xxx.vault.azure.net/secrets/name"}`);
   - новий секрет: (1) вибір, збережений для проєкту/середовища → (2) найчастіший vault серед референсів сервісу →
@@ -48,11 +55,24 @@
 - `cache/` — discovery, списки префіксів.
 
 ### Синхронізація
-- Модель як Terraform: **plan → apply**.
-- 3-way diff: snapshot (база з останнього pull) × локальний стан × поточний remote → зміни + конфлікти.
+- Двостороння: **pull** — remote → local; **push** — local файли → remote (бібліотечний дефолт,
+  `PushSource.LocalFiles`); **edit** — це push із джерелом `PushSource.EditedJson(json)`. Модель як
+  Terraform: **plan → apply**.
+- Один конвеєр для всіх напрямків: кожна сторона (remote, локальні файли, база з останнього pull)
+  нормалізується в `ConfigState`, далі — 3-way diff (`ConfigDiff`: snapshot × локальний стан × поточний
+  remote → `DiffItem` із `DiffKind`), далі — `SyncPlan` для застосування. `ISyncService.DiffAsync` віддає
+  `ConfigDiff` напряму — цим користується майбутній UI для порівняння local/remote/base без обов'язкового
+  plan/apply.
+- Нормалізація (деталі — ADR 0007): значення або `StateValue.Plain`, або `StateValue.Secret(SecretUri?, Fingerprint)`
+  — секрет ніколи не несе сам текст, лише fingerprint. Локальний ключ — секрет лише якщо база/remote вже
+  знають його як KV-референс; інакше `Plain` (нові секрети вводяться лише через `@kv` у edit JSON). Правило
+  scope для push: локальна зміна ключа, що прийшов з `global`, створює override у scope сервісу (global
+  ніколи не перезаписується мовчки); локальне видалення ключа з `global` нічого не видаляє remote; `global`
+  змінюється лише явно, через `@global`.
 - Запис в App Config з `If-Match: etag`.
 - prod: apply вимагає ввести назву середовища.
-- Секрети ніколи не пишуться у файли, що трекаються git (перевірка `.gitignore`).
+- Секрети ніколи не пишуться у файли, що трекаються git (перевірка `.gitignore`); знімки (`snapshots/`)
+  теж не містять значень секретів — лише fingerprint (`SecretString`, `ISecretFingerprinter`, ADR 0007).
 - Auth: тільки `DefaultAzureCredential`. RBAC: App Configuration Data Owner; Key Vault Secrets User / Officer.
 
 ### JSON-формат редагування
@@ -77,15 +97,18 @@
 ```
 src/
   AzCfg.Core/             чиста логіка, БЕЗ Azure SDK і файлової системи
-    Model/                ConfigEntry, ConfigValue, ConfigEnvironment, ConfigScope
+    Model/                ConfigEntry, ConfigValue, ConfigEnvironment, ConfigScope, LocalTargetKind,
+                          LocalFileFormat, LocalTargetBinding, LocalValue, ProjectBinding, SecretString
     Mapping/              KeyMapper, JsonProjection (@kv, @global), ScopeMerger
-    Sync/                 ThreeWayDiff, SyncPlan, Change, Conflict
+    Sync/                 PushSource, StateValue, StateItem, ConfigState, DiffKind, DiffItem, ConfigDiff,
+                          ThreeWayDiff, SyncPlan, Change, Conflict
+    Security/             HmacSecretFingerprinter
     Abstractions/         IConfigStore, ISecretStore, IResourceDiscovery, ILocalTarget,
-                          IEnvironmentResolver, IUserStateStore
-    UseCases/             SetupService, ProjectService, SyncService
+                          IEnvironmentResolver, IUserStateStore, ISecretFingerprinter
+    UseCases/             SetupService, ProjectService, SyncService, LocalTargetOption
   AzCfg.Infrastructure/
     Azure/                AppConfigStore, KeyVaultSecretStore, ResourceGraphDiscovery
-    Local/                LocalSettingsTarget, UserSecretsTarget, AppSettingsTarget, CsprojDetector
+    Local/                UserSecretsTarget, AppSettingsLocalTarget, LocalSettingsTarget (пізніше), CsprojDetector
     State/                JsonUserStateStore
     DependencyInjection.cs   services.AddAzCfg()
   AzCfg.Cli/              Spectre.Console.Cli — тільки взаємодія з користувачем
@@ -95,6 +118,9 @@ tests/
 ```
 
 ### Модель
+`ConfigEntry.Key`, `StateItem.Key`, `DiffItem.Key`, `LocalValue.Key` — конфігураційний шлях **без**
+scope-префікса (напр. `ConnectionStrings:Crm`); ключ стору будується через `KeyMapper.ToStoreKey(Scope, service, Key)`.
+
 ```csharp
 public enum ConfigScope { Global, Service }
 
@@ -102,11 +128,33 @@ public abstract record ConfigValue
 {
     public sealed record Plain(string Value) : ConfigValue;
     public sealed record KeyVaultRef(Uri SecretUri) : ConfigValue;
-    public sealed record ResolvedSecret(Uri SecretUri, string Value) : ConfigValue;
+    public sealed record ResolvedSecret(Uri SecretUri, SecretString Value) : ConfigValue;
 }
 
 public sealed record ConfigEntry(string Key, ConfigScope Scope, ConfigValue Value, string? ETag = null);
 public sealed record ConfigEnvironment(string Name, Uri StoreEndpoint, string? Label);
+
+// decision 1: локальні цілі — розробник обирає, Core лише пропонує варіанти
+public enum LocalTargetKind { UserSecrets, AppSettingsLocal, LocalSettings }
+public enum LocalFileFormat { NestedJson, FlatDictionary }
+public sealed record LocalTargetBinding(LocalTargetKind Kind, string ProjectPath, LocalFileFormat Format);
+// LocalSettings вимагає FlatDictionary — валідується в конструкторі.
+
+// decision 2: прив'язка памʼятає вибір значень/секретів окремо (можуть збігатися)
+public sealed record ProjectBinding(
+    string RepoPath, string Service,
+    LocalTargetBinding ValuesTarget, LocalTargetBinding SecretsTarget,
+    IReadOnlyDictionary<string, Uri> VaultByEnvironment);
+
+// decision 4: пара ключ/значення локального файлу; Value не потрапляє у ToString (може бути секрет)
+public sealed record LocalValue(string Key, string Value);
+
+// decision 5: секрет ніколи не друкується/серіалізується як є
+public sealed class SecretString
+{
+    public string Reveal();           // явний доступ до значення
+    public override string ToString(); // "***"
+}
 ```
 
 ### Порти
@@ -129,20 +177,40 @@ public interface IResourceDiscovery
 }
 public interface ILocalTarget
 {
-    string Kind { get; }
+    LocalTargetKind Kind { get; }
     bool CanHandle(ProjectInfo project);
-    Task<IReadOnlyDictionary<string, string>> ReadAsync(ProjectInfo project, CancellationToken ct);
-    Task WriteAsync(ProjectInfo project, IReadOnlyList<ConfigEntry> entries, CancellationToken ct);
+    Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct);
+    Task<IReadOnlyList<LocalValue>> ReadAsync(LocalTargetBinding target, CancellationToken ct);
+    Task WriteAsync(LocalTargetBinding target, IReadOnlyList<LocalValue> values, CancellationToken ct);
 }
 public interface IEnvironmentResolver { IReadOnlyList<ConfigEnvironment> Resolve(UserProfile profile); }
+
+// decision 5: знімки не містять значень секретів — лише fingerprint у ConfigState
+public interface IUserStateStore
+{
+    Task<ConfigState?> LoadSnapshotAsync(string repoPath, string environment, CancellationToken ct);
+    Task SaveSnapshotAsync(string repoPath, string environment, ConfigState state, CancellationToken ct);
+    Task<byte[]> GetOrCreateFingerprintKeyAsync(CancellationToken ct); // персональний ключ, не в репо
+    // + LoadProfileAsync/SaveProfileAsync, LoadBindingAsync/SaveBindingAsync
+}
+public interface ISecretFingerprinter { string Fingerprint(SecretString secret); } // HmacSecretFingerprinter
 ```
 
 ### Use cases: «пропозиція → рішення»
 ```csharp
-ProjectResolution r = await projects.ResolveAsync(repoPath, ct);      // Candidates, IsConfident, Targets
-ProjectBinding b    = await projects.BindAsync(repoPath, service, targets, ct);
-SyncPlan plan       = await sync.PlanPushAsync(b, env, editedJson, ct); // Changes, Conflicts, RequiresVaultChoice
-ApplyResult res     = await sync.ApplyAsync(plan, new ApplyOptions(ConfirmedEnvironment: "prod"), ct);
+ProjectResolution r = await projects.ResolveAsync(repoPath, ct);
+// r.Existing != null → клієнт використовує запамʼятований ProjectBinding без запитань;
+// інакше клієнт обирає з r.TargetOptions (LocalTargetOption: Target, Exists, IsSafeForSecrets).
+ProjectBinding b = await projects.BindAsync(repoPath, service, valuesTarget, secretsTarget, ct);
+
+// push: бібліотечний дефолт — з локальних файлів; edit — push відредагованого JSON.
+SyncPlan plan = await sync.PlanPushAsync(b, env, new PushSource.LocalFiles(), ct);
+SyncPlan editPlan = await sync.PlanPushAsync(b, env, new PushSource.EditedJson(json), ct);
+
+// дані для майбутнього UI (порівняння local/remote/base), окремо від plan/apply:
+ConfigDiff diff = await sync.DiffAsync(b, env, ct);
+
+ApplyResult res = await sync.ApplyAsync(plan, new ApplyOptions(ConfirmedEnvironment: "prod"), ct);
 ```
 - Прогрес: `IProgress<SyncProgress>`; логування: `ILogger<T>`.
 - `SyncPlan` — record: CLI малює таблицю, `--json` серіалізує як є, UI показує diff.
@@ -166,7 +234,7 @@ azcfg doctor                   доступи, .gitignore, мертві KV-ре�
 ## Порядок робіт (MVP)
 1. Core: модель, `KeyMapper`, `ScopeMerger`, `JsonProjection` + тести.
 2. Infrastructure: `AppConfigStore` (read), `KeyVaultSecretStore` (read), `ResourceGraphDiscovery`, `JsonUserStateStore`.
-3. `CsprojDetector` + `LocalSettingsTarget` + `UserSecretsTarget`.
+3. `CsprojDetector` + `UserSecretsTarget` + `AppSettingsLocalTarget`.
 4. CLI: `init` + `pull` — перша корисна версія.
 5. `ThreeWayDiff`, `plan`/`push`/`edit`, далі `CreateSecret` і вибір vault.
 

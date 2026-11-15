@@ -33,13 +33,17 @@ tests/AzCfg.Infrastructure.Tests
 - Сервіс: `<service>:<Key:Path>`; глобальні: `global:<Key:Path>`.
 - Pull: `global:*` + `<service>:*`, префікс зрізається, сервісні перекривають global.
 - Push за замовчуванням лише scope сервісу; global — тільки явно через `@global`.
-- KV-секрети: `:` → `--`; local.settings.json: `:` → `__`.
+- KV-секрети: `:` → `--`. Формат — властивість локальної цілі (`LocalTargetBinding.Format`): `NestedJson`
+  (сегменти шляху за `:`, без scope-префікса) для user-secrets/`appsettings.local.json`; `local.settings.json`
+  — лише `FlatDictionary` (плоский словник `Values`, ключі `A:B` як є, без вкладеності).
 - `{ "@kv": "name" }` → KV reference; з `"value"` → створити/оновити секрет.
 
 ## Безпека
 - Auth лише `DefaultAzureCredential`.
 - Секрети ніколи не пишуться у git-tracked файли.
 - Запис в App Config з `If-Match: etag`; prod apply вимагає ввести назву середовища.
+- Значення секретів ніколи не потрапляють у знімки (`snapshots`), плани, логи чи `--json` вивід —
+  лише через `SecretString` (редагується до `"***"`) і fingerprint (`ISecretFingerprinter`).
 
 ## Правила роботи
 - TDD для Core: спершу падаючий тест, потім код.
@@ -50,8 +54,9 @@ tests/AzCfg.Infrastructure.Tests
 
 ## Документація
 - Повна архітектура, моделі, порти, CLI, порядок MVP: `docs/architecture.md`
+- План MVP по задачах (брати одну через `/feature`): `docs/mvp-plan.md`
 - Рішення (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
-  0004 key naming, 0005 KV discovery)
+  0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety)
 
 ## Skills
 - `/add-local-target` — новий `ILocalTarget` + тест + DI
