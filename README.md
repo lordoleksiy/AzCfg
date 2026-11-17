@@ -91,4 +91,4 @@ git push origin cli-v0.2.0
 ```
 
 The workflow runs the tests, packs `AzCfg` with the version taken from the tag and pushes it to nuget.org.
-It requires the `NUGET_API_KEY` repository secret.
+It authenticates with nuget.org via Trusted Publishing (OIDC) and requires the `NUGET_USER` repository secret (nuget.org profile name).
