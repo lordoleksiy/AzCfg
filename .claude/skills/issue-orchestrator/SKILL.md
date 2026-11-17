@@ -31,6 +31,8 @@ argument-hint: <issue number> [extra acceptance criteria]
 - One agent per layer/feature with **disjoint files** (`Agent`, `isolation: "worktree"`, run in parallel):
   Infrastructure adapter, Core use-case behavior, CLI commands. Two writers never share a file except
   `CliApp.cs` registrations (trivial merge).
+- Worktree agents may start at the repo's default branch, not your HEAD: every brief starts with
+  `git switch -c <agent-branch> <hash>` (the commit you want them on), then merge `<agent-branch>`.
 - Each brief: ADR section to follow, exact signatures, files allowed/forbidden, tests expected, verify commands,
   commit message with the `Co-Authored-By` trailer, "do not push", short final report (branch, hash, API, counts).
 - Interface additions break test stubs in `tests/AzCfg.Cli.Tests` — tell the agent to add members throwing
