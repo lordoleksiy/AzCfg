@@ -11,7 +11,7 @@ public class SetupServiceTests
         envTag is null ? new Dictionary<string, string>() : new Dictionary<string, string> { ["environment"] = envTag });
 
     private static Task<IReadOnlyList<EnvironmentCandidate>> Discover(params AzureResource[] stores) =>
-        new SetupService(new StubResourceDiscovery(stores), new ProfileRecordingStateStore()).DiscoverEnvironmentsAsync(CancellationToken.None);
+        new SetupService(new StubResourceDiscovery(stores), new ProfileRecordingStateStore(), new FakeConfigStore([])).DiscoverEnvironmentsAsync(CancellationToken.None);
 
     [Theory]
     [InlineData("app-dev", "dev", false)]
@@ -79,8 +79,19 @@ public class SetupServiceTests
         var state = new ProfileRecordingStateStore();
         var profile = new UserProfile([new("dev", new Uri("https://dev.azconfig.io"), null, false)]);
 
-        await new SetupService(new StubResourceDiscovery(), state).SaveProfileAsync(profile, CancellationToken.None);
+        await new SetupService(new StubResourceDiscovery(), state, new FakeConfigStore([])).SaveProfileAsync(profile, CancellationToken.None);
 
         Assert.Same(profile, state.Saved);
+    }
+
+    [Fact]
+    public async Task ListLabels_DelegatesToConfigStore()
+    {
+        var store = new FakeConfigStore([]) { Labels = ["Development", "Production"] };
+
+        var labels = await new SetupService(new StubResourceDiscovery(), new ProfileRecordingStateStore(), store)
+            .ListLabelsAsync(new Uri("https://shared.azconfig.io"), CancellationToken.None);
+
+        Assert.Equal(["Development", "Production"], labels);
     }
 }

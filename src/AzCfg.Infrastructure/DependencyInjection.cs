@@ -29,6 +29,7 @@ public static class DependencyInjection
         services.AddSingleton<IResourceDiscovery, ResourceGraphDiscovery>();
         services.AddSingleton<IConfigStore>(_ => new AppConfigStore(new DefaultAzureCredential()));
         services.AddSingleton<ISetupService, SetupService>();
+        services.AddSingleton<IUserSettingsService, UserSettingsService>();
         services.AddSingleton<IEnvironmentResolver, ProfileEnvironmentResolver>();
         services.AddSingleton<ISecretFingerprinter>(sp =>
             new HmacSecretFingerprinter(sp.GetRequiredService<IUserStateStore>().GetOrCreateFingerprintKeyAsync(CancellationToken.None).GetAwaiter().GetResult()));
