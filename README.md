@@ -13,6 +13,12 @@ dotnet tool install --global AzCfg
 azcfg --help
 ```
 
+Update to the latest version:
+
+```
+dotnet tool update --global AzCfg
+```
+
 ## Authentication
 
 azcfg authenticates only through `DefaultAzureCredential`. The simplest way is the Azure CLI:
@@ -74,3 +80,12 @@ dotnet test AzCfg.slnx
 dotnet pack src/AzCfg.Cli -c Release -o artifacts
 dotnet tool install --global --add-source artifacts AzCfg
 ```
+
+## Release
+
+The CLI is published by `.github/workflows/publish-cli.yml` on every push to `master` that changes `src/**`
+or `Directory.*.props`. Bump `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj` before merging to `master`:
+nuget.org does not accept an already published version, so the run fails if it was not bumped.
+
+The workflow runs the tests, packs `AzCfg` and pushes it to nuget.org.
+It authenticates with nuget.org via Trusted Publishing (OIDC) and requires the `NUGET_USER` repository secret (nuget.org profile name).
