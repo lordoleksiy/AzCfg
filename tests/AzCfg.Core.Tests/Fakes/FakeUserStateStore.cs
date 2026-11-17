@@ -12,7 +12,12 @@ internal sealed class FakeUserStateStore : IUserStateStore
     public (string Environment, ConfigState State)? SavedSnapshot { get; private set; }
 
     public Task<UserProfile?> LoadProfileAsync(CancellationToken ct) => Task.FromResult(Profile);
-    public Task SaveProfileAsync(UserProfile profile, CancellationToken ct) => throw new NotSupportedException();
+    public Task SaveProfileAsync(UserProfile profile, CancellationToken ct)
+    {
+        Profile = profile;
+        return Task.CompletedTask;
+    }
+
     public Task<ProjectBinding?> LoadBindingAsync(string repoPath, CancellationToken ct) => Task.FromResult(Binding);
 
     public Task SaveBindingAsync(ProjectBinding binding, CancellationToken ct)

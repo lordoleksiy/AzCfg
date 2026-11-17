@@ -15,13 +15,20 @@ public static class CliApp
         app.Configure(config =>
         {
             config.SetApplicationName("azcfg");
-            config.AddCommand<InitCommand>("init").WithDescription("Discover App Configuration stores and save your environments.");
+            config.AddCommand<InitCommand>("init").WithDescription("Choose how environments are separated (stores or labels) and save your environments.");
             config.AddCommand<PullCommand>("pull").WithDescription("Pull an environment into the local targets.");
             config.AddCommand<UseCommand>("use").WithDescription("Pull an environment and make it the active one.");
             config.AddCommand<PlanCommand>("plan").WithDescription("Show what pushing the local files would change.");
             config.AddCommand<PushCommand>("push").WithDescription("Apply the local files to an environment.");
             config.AddCommand<EditCommand>("edit").WithDescription("Edit the remote config as JSON in your editor, then apply it.");
             config.AddCommand<PromoteCommand>("promote").WithDescription("Copy new keys from one environment to another via your editor, then apply them.");
+            config.AddBranch("config", settings =>
+            {
+                settings.SetDescription("Show or change your global settings: mode, defaultLabel, env.<name>.endpoint|label|protected.");
+                settings.AddCommand<ConfigListCommand>("list").WithDescription("List all settings.");
+                settings.AddCommand<ConfigGetCommand>("get").WithDescription("Show one setting.");
+                settings.AddCommand<ConfigSetCommand>("set").WithDescription("Change one setting.");
+            });
             config.SetExceptionHandler((ex, _) =>
             {
                 var json = args.Contains("--json");

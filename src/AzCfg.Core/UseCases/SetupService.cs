@@ -3,7 +3,7 @@ using AzCfg.Core.Model;
 
 namespace AzCfg.Core.UseCases;
 
-public sealed class SetupService(IResourceDiscovery discovery, IUserStateStore state) : ISetupService
+public sealed class SetupService(IResourceDiscovery discovery, IUserStateStore state, IConfigStore configStore) : ISetupService
 {
     private static readonly (string Suffix, string Name)[] Suffixes =
         [("-dev", "dev"), ("-stg", "stage"), ("-stage", "stage"), ("-prod", "prod")];
@@ -12,6 +12,8 @@ public sealed class SetupService(IResourceDiscovery discovery, IUserStateStore s
         [.. (await discovery.FindAppConfigStoresAsync(ct)).Select(ToCandidate)];
 
     public Task SaveProfileAsync(UserProfile profile, CancellationToken ct) => state.SaveProfileAsync(profile, ct);
+
+    public Task<IReadOnlyList<string>> ListLabelsAsync(Uri store, CancellationToken ct) => configStore.ListLabelsAsync(store, ct);
 
     private static EnvironmentCandidate ToCandidate(AzureResource store)
     {
