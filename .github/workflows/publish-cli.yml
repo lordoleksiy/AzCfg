@@ -2,7 +2,11 @@ name: Publish CLI
 
 on:
   push:
-    tags: ['cli-v*']
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
 
 permissions:
   contents: read
@@ -22,7 +26,7 @@ jobs:
         run: dotnet test AzCfg.slnx -c Release
 
       - name: Pack
-        run: dotnet pack src/AzCfg.Cli -c Release -o artifacts -p:Version=${GITHUB_REF_NAME#cli-v}
+        run: dotnet pack src/AzCfg.Cli -c Release -o artifacts
 
       - name: NuGet login (trusted publishing)
         id: login
@@ -31,4 +35,4 @@ jobs:
           user: ${{ secrets.NUGET_USER }}
 
       - name: Push to nuget.org
-        run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json

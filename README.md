@@ -83,12 +83,9 @@ dotnet tool install --global --add-source artifacts AzCfg
 
 ## Release
 
-The CLI is published by `.github/workflows/publish-cli.yml`. Merge to `master`, then push a `cli-v*` tag:
+The CLI is published by `.github/workflows/publish-cli.yml` on every push to `master` that changes `src/**`
+or `Directory.*.props`. Bump `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj` before merging to `master`:
+nuget.org does not accept an already published version, so the run fails if it was not bumped.
 
-```
-git tag cli-v0.2.0
-git push origin cli-v0.2.0
-```
-
-The workflow runs the tests, packs `AzCfg` with the version taken from the tag and pushes it to nuget.org.
+The workflow runs the tests, packs `AzCfg` and pushes it to nuget.org.
 It authenticates with nuget.org via Trusted Publishing (OIDC) and requires the `NUGET_USER` repository secret (nuget.org profile name).
