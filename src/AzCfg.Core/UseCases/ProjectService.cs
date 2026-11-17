@@ -1,5 +1,6 @@
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Model;
+using AzCfg.Core.Sync;
 
 namespace AzCfg.Core.UseCases;
 
@@ -7,7 +8,9 @@ namespace AzCfg.Core.UseCases;
 /// Resolves and binds projects. Service candidates are the prefixes of the <c>dev</c> environment store (the first
 /// environment when none is named <c>dev</c>), matched to csproj/folder names ignoring case and treating <c>-</c> and
 /// <c>.</c> as equal; exactly one match is confident. <see cref="BindAsync"/> throws
-/// <see cref="InvalidOperationException"/> when the secrets target is not safe for secrets.
+/// <see cref="InvalidOperationException"/> when the secrets target is not safe for secrets. <see cref="AddIgnoreAsync"/> and
+/// <see cref="RemoveIgnoreAsync"/> only edit the saved binding's ignore patterns: they throw <see cref="ArgumentException"/>
+/// for a blank pattern and <see cref="InvalidOperationException"/> when the project is not bound yet.
 /// </summary>
 public sealed class ProjectService(
     IUserStateStore state,
@@ -65,6 +68,23 @@ public sealed class ProjectService(
         var binding = new ProjectBinding(repoPath, service, valuesTarget, secretsTarget, new Dictionary<string, Uri>());
         await state.SaveBindingAsync(binding, ct);
         return binding;
+    }
+
+    public Task<ProjectBinding> AddIgnoreAsync(string repoPath, string pattern, CancellationToken ct) =>
+        UpdateIgnoreAsync(repoPath, pattern, (ignore, p) => ignore.Contains(p, StringComparer.OrdinalIgnoreCase) ? ignore : [.. ignore, p], ct);
+
+    public Task<ProjectBinding> RemoveIgnoreAsync(string repoPath, string pattern, CancellationToken ct) =>
+        UpdateIgnoreAsync(repoPath, pattern, (ignore, p) => [.. ignore.Where(i => !string.Equals(i, p, StringComparison.OrdinalIgnoreCase))], ct);
+
+    private async Task<ProjectBinding> UpdateIgnoreAsync(
+        string repoPath, string pattern, Func<IReadOnlyList<string>, string, IReadOnlyList<string>> update, CancellationToken ct)
+    {
+        var normalized = IgnoreRules.Normalize(pattern);
+        var binding = await state.LoadBindingAsync(repoPath, ct)
+            ?? throw new InvalidOperationException("This project is not bound yet. Run 'azcfg pull' first.");
+        var updated = binding with { Ignore = update(binding.Ignore ?? [], normalized) };
+        await state.SaveBindingAsync(updated, ct);
+        return updated;
     }
 
     private static string Normalize(string name) => name.Replace('-', '.');

@@ -10,6 +10,9 @@ namespace AzCfg.Core.UseCases;
 /// secrets to <c>SecretsTarget</c>; one write when they are the same target). Unless forced, returns a blocked result
 /// (keys only, nothing written) when local targets differ from the active environment's snapshot. Throws <see cref="InvalidOperationException"/>
 /// before writing anything when the secrets target is not safe for secrets. The snapshot keeps only secret fingerprints.
+/// Keys matched by <see cref="ProjectBinding.Ignore"/> (scope = provenance: remote, else snapshot, else local service; ADR 0008)
+/// belong to the local files: pull keeps their local values in the target they were read from, never writes their remote
+/// values, leaves them out of the snapshot and never blocks on them; <see cref="PushSource.LocalFiles"/> plans and diffs skip them.
 /// </summary>
 public sealed class SyncService(
     IConfigStore store,
@@ -26,11 +29,17 @@ public sealed class SyncService(
             throw new InvalidOperationException($"{binding.SecretsTarget.Kind} target is not safe for secrets.");
         }
 
-        if (!force && binding.ActiveEnvironment is { } active && await state.LoadSnapshotAsync(binding.RepoPath, active, ct) is { } snapshot)
+        var (raw, warnings) = await ReadEntriesAsync(env, binding.Service, ct);
+        var entries = ScopeMerger.Merge(raw);
+        var remoteScopes = entries.ToDictionary(e => e.Key, e => e.Scope, StringComparer.Ordinal);
+        var snapshot = binding.ActiveEnvironment is { } active ? await state.LoadSnapshotAsync(binding.RepoPath, active, ct) : null;
+        var ignore = binding.Ignore is { Count: > 0 };
+        var local = (!force && snapshot is not null) || ignore ? await ReadTargetsAsync(binding, ct) : ([], []);
+
+        if (!force && snapshot is not null)
         {
-            var localState = await ReadLocalAsync(binding, ct);
-            var changed = ThreeWayDiff.Compute(snapshot, localState, snapshot, fingerprinter).Items
-                .Where(i => i.Kind is DiffKind.LocalAdded or DiffKind.LocalModified or DiffKind.LocalDeleted)
+            var changed = ThreeWayDiff.Compute(snapshot, ToState([.. local.Values, .. local.Secrets]), snapshot, fingerprinter).Items
+                .Where(i => i.Kind is DiffKind.LocalAdded or DiffKind.LocalModified or DiffKind.LocalDeleted && !Ignored(i.Key))
                 .Select(i => i.Key).ToList();
             if (changed.Count > 0)
             {
@@ -38,13 +47,18 @@ public sealed class SyncService(
             }
         }
 
-        var (raw, warnings) = await ReadEntriesAsync(env, binding.Service, ct);
-        var entries = ScopeMerger.Merge(raw);
         List<LocalValue> values = [], secrets = [];
+        List<string> ignored = [];
         var items = new Dictionary<string, StateItem>(StringComparer.Ordinal);
 
         foreach (var entry in entries)
         {
+            if (ignore && Ignored(entry.Key))
+            {
+                ignored.Add(entry.Key);
+                continue;
+            }
+
             switch (entry.Value)
             {
                 case ConfigValue.Plain plain:
@@ -59,6 +73,13 @@ public sealed class SyncService(
             }
         }
 
+        var (valuesWritten, secretsWritten) = (values.Count, secrets.Count);
+        if (ignore)
+        {
+            values.AddRange(local.Values.Where(v => Ignored(v.Key)));
+            secrets.AddRange(local.Secrets.Where(v => Ignored(v.Key)));
+        }
+
         if (binding.ValuesTarget == binding.SecretsTarget)
         {
             await secretsTarget.WriteAsync(binding.SecretsTarget, [.. values, .. secrets], ct);
@@ -71,7 +92,10 @@ public sealed class SyncService(
 
         await state.SaveSnapshotAsync(binding.RepoPath, env.Name, new ConfigState(items), ct);
         await state.SaveBindingAsync(binding with { ActiveEnvironment = env.Name }, ct);
-        return new(env.Name, values.Count, secrets.Count, false, []) { Warnings = warnings };
+        return new(env.Name, valuesWritten, secretsWritten, false, []) { Warnings = warnings, Ignored = ignored.Count == 0 ? Array.Empty<string>() : ignored };
+
+        bool Ignored(string key) => IgnoreRules.IsIgnored(
+            binding.Ignore, key, remoteScopes.TryGetValue(key, out var scope) ? scope : snapshot?.Items.GetValueOrDefault(key)?.Scope ?? ConfigScope.Service);
     }
 
     public async Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) =>
@@ -89,12 +113,14 @@ public sealed class SyncService(
     public async Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct)
     {
         var (@base, remote, _, _) = await ReadRemoteAsync(binding, env, ct);
-        return ThreeWayDiff.Compute(@base, await ReadLocalAsync(binding, ct), remote, fingerprinter);
+        return WithoutIgnored(ThreeWayDiff.Compute(@base, await ReadLocalAsync(binding, ct), remote, fingerprinter), binding);
     }
 
     /// <summary>
     /// Plans local changes against <paramref name="env"/>. <see cref="PushSource.Promote"/> plans only new service keys
     /// (<c>Add</c>/<c>CreateSecret</c>, empty base, global ignored); <see cref="PushSource.EditedJson"/> uses the current remote state as base (it was exported from it); a key already in <paramref name="env"/> at service scope is a conflict (a global-only key gets a service override).
+    /// <see cref="PushSource.LocalFiles"/> skips ignored keys; without <see cref="PushSource.LocalFiles.Delete"/> (upsert) a local
+    /// deletion is not planned but returned as <see cref="SyncWarningKind.DeleteSkipped"/>. Edited and promoted JSON ignore neither.
     /// Throws <see cref="ArgumentException"/> naming the key for a null secret value.
     /// </summary>
     public async Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct)
@@ -111,13 +137,25 @@ public sealed class SyncService(
         }
 
         var diff = ThreeWayDiff.Compute(@base, local.State, remote, fingerprinter);
+        if (source is PushSource.LocalFiles)
+        {
+            diff = WithoutIgnored(diff, binding);
+        }
+
         var plan = ThreeWayDiff.Plan(diff, raw, binding, env);
 
         var fallback = binding.VaultByEnvironment.GetValueOrDefault(env.Name) is { } bound ? Vault(bound) : MostFrequentVault(raw, ConfigScope.Service) ?? MostFrequentVault(raw, ConfigScope.Global);
         var changes = new List<Change>();
+        List<SyncWarning> skipped = [];
         var requiresVaultChoice = false;
         foreach (var change in plan.Changes)
         {
+            if (change.Kind == ChangeKind.Delete && source is PushSource.LocalFiles { Delete: false })
+            {
+                skipped.Add(new(SyncWarningKind.DeleteSkipped, change.Before!.Key, $"'{change.Before.Key}' was deleted locally; it is not deleted remotely (use --delete)."));
+                continue;
+            }
+
             if (change.Kind != ChangeKind.CreateSecret)
             {
                 changes.Add(change);
@@ -144,7 +182,7 @@ public sealed class SyncService(
             });
         }
 
-        List<SyncWarning> warnings = [.. readWarnings, .. plan.Warnings];
+        List<SyncWarning> warnings = [.. readWarnings, .. plan.Warnings, .. skipped];
         return plan with { Changes = changes, RequiresVaultChoice = requiresVaultChoice, Warnings = warnings.Count == 0 ? Array.Empty<SyncWarning>() : warnings };
     }
 
@@ -213,14 +251,21 @@ public sealed class SyncService(
 
     private async Task<ConfigState> ReadLocalAsync(ProjectBinding binding, CancellationToken ct)
     {
-        var local = await targets.First(t => t.Kind == binding.ValuesTarget.Kind).ReadAsync(binding.ValuesTarget, ct);
-        if (binding.ValuesTarget != binding.SecretsTarget)
-        {
-            local = [.. local, .. await targets.First(t => t.Kind == binding.SecretsTarget.Kind).ReadAsync(binding.SecretsTarget, ct)];
-        }
-
-        return new(local.ToDictionary(v => v.Key, v => new StateItem(v.Key, ConfigScope.Service, new StateValue.Plain(v.Value)), StringComparer.Ordinal));
+        var (values, secrets) = await ReadTargetsAsync(binding, ct);
+        return ToState([.. values, .. secrets]);
     }
+
+    /// <summary>Reads the values target and the secrets target separately; a shared target is read once (as values).</summary>
+    private async Task<(IReadOnlyList<LocalValue> Values, IReadOnlyList<LocalValue> Secrets)> ReadTargetsAsync(ProjectBinding binding, CancellationToken ct) => (
+        await targets.First(t => t.Kind == binding.ValuesTarget.Kind).ReadAsync(binding.ValuesTarget, ct),
+        binding.ValuesTarget == binding.SecretsTarget ? [] : await targets.First(t => t.Kind == binding.SecretsTarget.Kind).ReadAsync(binding.SecretsTarget, ct));
+
+    private static ConfigState ToState(IEnumerable<LocalValue> local) =>
+        new(local.ToDictionary(v => v.Key, v => new StateItem(v.Key, ConfigScope.Service, new StateValue.Plain(v.Value)), StringComparer.Ordinal));
+
+    /// <summary>Drops items matched by <see cref="ProjectBinding.Ignore"/>; the scope matched is the provenance (remote, else base, else local).</summary>
+    private static ConfigDiff WithoutIgnored(ConfigDiff diff, ProjectBinding binding) =>
+        new([.. diff.Items.Where(i => !IgnoreRules.IsIgnored(binding.Ignore, i.Key, (i.Remote ?? i.Base ?? i.Local)!.Scope))]);
 
     /// <summary>Reads the environment's entries with one copy per <c>(Scope, Key)</c> across labels (ADR 0008).</summary>
     private async Task<(IReadOnlyList<ConfigEntry> Entries, IReadOnlyList<SyncWarning> Warnings)> ReadEntriesAsync(ConfigEnvironment env, string service, CancellationToken ct) =>

@@ -42,6 +42,10 @@ public sealed class PullCommandTests
 
         public Task<ProjectBinding> BindAsync(string repoPath, string service, LocalTargetBinding valuesTarget, LocalTargetBinding secretsTarget, CancellationToken ct) =>
             Task.FromResult(s.Bound = new(repoPath, service, valuesTarget, secretsTarget, new Dictionary<string, Uri>()));
+
+        public Task<ProjectBinding> AddIgnoreAsync(string repoPath, string pattern, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<ProjectBinding> RemoveIgnoreAsync(string repoPath, string pattern, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private sealed class StubSync(Stubs s) : ISyncService
