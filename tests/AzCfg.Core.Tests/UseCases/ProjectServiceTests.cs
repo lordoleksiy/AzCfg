@@ -116,4 +116,87 @@ public sealed class ProjectServiceTests
 
         Assert.Null(state.Binding);
     }
+
+    private static ProjectBinding Bound(params string[]? ignore) => new(Repo, "orders", Values, Secrets, new Dictionary<string, Uri>(), "dev", ignore);
+
+    [Fact]
+    public async Task AddIgnoreAsync_AddsNormalizedPatternAndSavesWithoutTouchingFiles()
+    {
+        var binding = Bound(null);
+        var state = new FakeUserStateStore { Binding = binding };
+        var target = new FakeLocalTarget(LocalTargetKind.UserSecrets);
+        var service = Create(state, [], [], target);
+
+        var result = await service.AddIgnoreAsync(Repo, "  Logging:*  ", Ct);
+
+        Assert.Equal(["Logging:*"], result.Ignore!);
+        Assert.Equal(binding with { Ignore = result.Ignore }, result);
+        Assert.Same(result, state.Binding);
+        Assert.Equal(0, target.Reads);
+        Assert.Empty(target.Writes);
+    }
+
+    [Fact]
+    public async Task AddIgnoreAsync_AppendsAndSkipsDuplicatesIgnoringCase()
+    {
+        var state = new FakeUserStateStore { Binding = Bound("Logging:*") };
+        var service = Create(state, [], []);
+
+        await service.AddIgnoreAsync(Repo, "global:*", Ct);
+        var result = await service.AddIgnoreAsync(Repo, "LOGGING:*", Ct);
+
+        Assert.Equal(["Logging:*", "global:*"], result.Ignore!);
+        Assert.Same(result, state.Binding);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    public async Task AddIgnoreAsync_BlankPattern_ThrowsAndSavesNothing(string pattern)
+    {
+        var binding = Bound(null);
+        var state = new FakeUserStateStore { Binding = binding };
+
+        await Assert.ThrowsAsync<ArgumentException>(() => Create(state, [], []).AddIgnoreAsync(Repo, pattern, Ct));
+
+        Assert.Same(binding, state.Binding);
+    }
+
+    [Fact]
+    public async Task RemoveIgnoreAsync_RemovesIgnoringCase()
+    {
+        var binding = Bound("Logging:*", "global:*");
+        var state = new FakeUserStateStore { Binding = binding };
+
+        var result = await Create(state, [], []).RemoveIgnoreAsync(Repo, " LOGGING:* ", Ct);
+
+        Assert.Equal(["global:*"], result.Ignore!);
+        Assert.Equal(binding with { Ignore = result.Ignore }, result);
+        Assert.Same(result, state.Binding);
+    }
+
+    [Theory]
+    [InlineData("B")]
+    [InlineData(null)]
+    public async Task RemoveIgnoreAsync_MissingPattern_IsNoOp(string? existing)
+    {
+        var state = new FakeUserStateStore { Binding = existing is null ? Bound(null) : Bound(existing) };
+
+        var result = await Create(state, [], []).RemoveIgnoreAsync(Repo, "A", Ct);
+
+        string[] expected = existing is null ? [] : [existing];
+        Assert.Equal(expected, result.Ignore ?? []);
+    }
+
+    [Fact]
+    public async Task IgnoreAsync_NotBound_Throws()
+    {
+        var service = Create(new FakeUserStateStore(), [], []);
+
+        var add = await Assert.ThrowsAsync<InvalidOperationException>(() => service.AddIgnoreAsync(Repo, "A", Ct));
+        var remove = await Assert.ThrowsAsync<InvalidOperationException>(() => service.RemoveIgnoreAsync(Repo, "A", Ct));
+
+        Assert.Equal("This project is not bound yet. Run 'azcfg pull' first.", add.Message);
+        Assert.Equal(add.Message, remove.Message);
+    }
 }

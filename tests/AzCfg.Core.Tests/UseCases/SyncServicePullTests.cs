@@ -20,8 +20,8 @@ public sealed class SyncServicePullTests
     private static ConfigEntry Plain(string key, string value, ConfigScope scope = ConfigScope.Service) => new(key, scope, new ConfigValue.Plain(value));
     private static ConfigEntry Secret(string key) => new(key, ConfigScope.Service, new ConfigValue.KeyVaultRef(SecretUri));
 
-    private static ProjectBinding Binding(LocalTargetBinding values, LocalTargetBinding secrets, string? active = null) =>
-        new("/repo", "orders", values, secrets, new Dictionary<string, Uri>(), active);
+    private static ProjectBinding Binding(LocalTargetBinding values, LocalTargetBinding secrets, string? active = null, string[]? ignore = null) =>
+        new("/repo", "orders", values, secrets, new Dictionary<string, Uri>(), active, ignore);
 
     private sealed record Setup(
         SyncService Service, FakeUserStateStore State, FakeLocalTarget ValuesTarget, FakeLocalTarget SecretsTarget);
@@ -214,5 +214,96 @@ public sealed class SyncServicePullTests
         await s.Service.PullAsync(Binding(Secrets, Secrets, "dev"), Env, null, false, Ct);
 
         Assert.Equal(1, s.SecretsTarget.Reads);
+    }
+
+    [Fact]
+    public async Task PullAsync_IgnoredKeys_KeepLocalValuesInTheirTargetsAndSkipRemote()
+    {
+        var s = Create([Plain("A", "1"), Plain("Logging:Level", "Info"), Secret("Db:Password")]);
+        s.ValuesTarget.Contents = [new("Logging:Level", "Debug"), new("Local:Only", "x")];
+        s.SecretsTarget.Contents = [new("Db:Password", "mine")];
+
+        var result = await s.Service.PullAsync(Binding(Values, Secrets, ignore: ["logging:*", "Db:*"]), Env, null, false, Ct);
+
+        Assert.Equal([new LocalValue("A", "1"), new LocalValue("Logging:Level", "Debug")], s.ValuesTarget.Writes.Single().Values);
+        Assert.Equal([new LocalValue("Db:Password", "mine")], s.SecretsTarget.Writes.Single().Values);
+        Assert.Equal(["Db:Password", "Logging:Level"], result.Ignored);
+        Assert.Equal((1, 0), (result.ValuesWritten, result.SecretsWritten));
+        Assert.Equal(["A"], s.State.SavedSnapshot!.Value.State.Items.Keys);
+    }
+
+    [Fact]
+    public async Task PullAsync_IgnoredRemoteKeyMissingLocally_IsNotWritten()
+    {
+        var s = Create([Plain("A", "1"), Secret("Db:Password")]);
+
+        var result = await s.Service.PullAsync(Binding(Values, Secrets, ignore: ["Db:Password"]), Env, null, false, Ct);
+
+        Assert.Empty(s.SecretsTarget.Writes.Single().Values);
+        Assert.Equal(["Db:Password"], result.Ignored);
+        Assert.DoesNotContain("Db:Password", s.State.SavedSnapshot!.Value.State.Items.Keys);
+    }
+
+    [Fact]
+    public async Task PullAsync_GlobalPattern_IgnoresOnlyKeysFromGlobal()
+    {
+        var s = Create([Plain("G", "1", ConfigScope.Global), Plain("S", "2"), Plain("O", "g", ConfigScope.Global), Plain("O", "s")]);
+        s.ValuesTarget.Contents = [new("G", "mine"), new("S", "old"), new("O", "old")];
+
+        var result = await s.Service.PullAsync(Binding(Values, Secrets, ignore: ["global:*"]), Env, null, false, Ct);
+
+        Assert.Equal([new LocalValue("O", "s"), new LocalValue("S", "2"), new LocalValue("G", "mine")], s.ValuesTarget.Writes.Single().Values);
+        Assert.Equal(["G"], result.Ignored);
+    }
+
+    [Fact]
+    public async Task PullAsync_SameTarget_KeepsIgnoredLocalValue()
+    {
+        var s = Create([Plain("A", "r"), Plain("C", "c")]);
+        s.SecretsTarget.Contents = [new("A", "mine"), new("B", "x")];
+
+        await s.Service.PullAsync(Binding(Secrets, Secrets, ignore: ["A"]), Env, null, false, Ct);
+
+        Assert.Equal([new LocalValue("C", "c"), new LocalValue("A", "mine")], Assert.Single(s.SecretsTarget.Writes).Values);
+        Assert.Equal(1, s.SecretsTarget.Reads);
+    }
+
+    [Fact]
+    public async Task PullAsync_IgnoredLocalChange_DoesNotBlock()
+    {
+        var s = Create([Plain("A", "remote"), Plain("L", "r")]);
+        s.State.Snapshots["dev"] = Snapshot(PlainItem("A", "1"), PlainItem("L", "1"));
+        s.ValuesTarget.Contents = [new("A", "1"), new("L", "changed"), new("N", "new")];
+
+        var result = await s.Service.PullAsync(Binding(Values, Secrets, "dev", ["L", "N"]), Env, null, false, Ct);
+
+        Assert.False(result.Blocked);
+        Assert.Equal([new LocalValue("A", "remote"), new LocalValue("L", "changed"), new LocalValue("N", "new")], s.ValuesTarget.Writes.Single().Values);
+    }
+
+    [Fact]
+    public async Task PullAsync_IgnoredGlobalKeyMissingFromSnapshot_DoesNotBlock()
+    {
+        var s = Create([Plain("G", "1", ConfigScope.Global)]);
+        s.State.Snapshots["dev"] = Snapshot();
+        s.ValuesTarget.Contents = [new("G", "mine")];
+
+        var result = await s.Service.PullAsync(Binding(Values, Secrets, "dev", ["global:G"]), Env, null, false, Ct);
+
+        Assert.False(result.Blocked);
+        Assert.Equal([new LocalValue("G", "mine")], s.ValuesTarget.Writes.Single().Values);
+    }
+
+    [Fact]
+    public async Task PullAsync_NotIgnoredLocalChange_StillBlocks()
+    {
+        var s = Create([Plain("A", "remote")]);
+        s.State.Snapshots["dev"] = Snapshot(PlainItem("A", "1"));
+        s.ValuesTarget.Contents = [new("A", "changed"), new("L", "x")];
+
+        var result = await s.Service.PullAsync(Binding(Values, Secrets, "dev", ["L"]), Env, null, false, Ct);
+
+        Assert.True(result.Blocked);
+        Assert.Equal(["A"], result.LocalChanges);
     }
 }

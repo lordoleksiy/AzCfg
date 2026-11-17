@@ -5,6 +5,8 @@ namespace AzCfg.Core.Model;
 /// plain values and which receives secrets (may be the same target), and which vault to use per
 /// environment when a new secret is created. <see cref="ActiveEnvironment"/> is the environment
 /// currently reflected in the local targets; commands without an explicit environment use it.
+/// <see cref="Ignore"/> holds the developer's local ignore patterns (per user, never in the repo; see
+/// <c>Sync.IgnoreRules</c>, ADR 0008); <c>null</c> means none.
 /// </summary>
 public sealed record ProjectBinding(
     string RepoPath,
@@ -12,4 +14,5 @@ public sealed record ProjectBinding(
     LocalTargetBinding ValuesTarget,
     LocalTargetBinding SecretsTarget,
     IReadOnlyDictionary<string, Uri> VaultByEnvironment,
-    string? ActiveEnvironment = null);
+    string? ActiveEnvironment = null,
+    IReadOnlyList<string>? Ignore = null);
