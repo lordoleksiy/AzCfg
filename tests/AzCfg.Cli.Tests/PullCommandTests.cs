@@ -166,6 +166,67 @@ public sealed class PullCommandTests
         Assert.Null(s.Pulled);
     }
 
+    public static TheoryData<ProjectResolution, string> ServiceOption => new()
+    {
+        { new([], false, [new(Unsafe, true, false), new(Secrets, true, true)], null), "billing" },
+        { new(["orders", "payments"], false, [new(Secrets, true, true)], null), "payments" },
+        { new(["orders"], true, [new(Secrets, true, true)], null), "billing" },
+    };
+
+    [Theory]
+    [MemberData(nameof(ServiceOption))]
+    public async Task Service_option_binds_an_unbound_project_without_detection(ProjectResolution resolution, string service)
+    {
+        var s = new Stubs { Resolution = resolution };
+
+        await Run(s, "--service", service, "--json");
+
+        Assert.Equal((service, Secrets, Secrets), (s.Bound!.Service, s.Bound.ValuesTarget, s.Bound.SecretsTarget));
+        Assert.Same(s.Bound, s.Pulled!.Value.Binding);
+    }
+
+    [Fact]
+    public async Task Service_option_does_not_rebind_a_bound_project()
+    {
+        var s = Bound();
+
+        await Run(s, "--service", "billing");
+
+        Assert.Null(s.Bound);
+        Assert.Equal("orders", s.Pulled!.Value.Binding.Service);
+    }
+
+    [Fact]
+    public async Task Use_accepts_the_service_option()
+    {
+        var s = new Stubs { Resolution = new([], false, [new(Secrets, true, true)], null) };
+
+        await Run("use", s, "stage", "--service", "billing", "--yes");
+
+        Assert.Equal("billing", s.Bound!.Service);
+        Assert.Equal("stage", s.Pulled!.Value.Env.Name);
+    }
+
+    public static TheoryData<ProjectResolution, string[], string> UnresolvableService => new()
+    {
+        { new([], false, [new(Secrets, true, true)], null), ["--json"], "No service keys were found in the App Configuration store for this project; pass --service <name>." },
+        { new([], false, [new(Secrets, true, true)], null), [], "No service keys were found in the App Configuration store for this project; pass --service <name>." },
+        { new(["orders", "payments"], false, [new(Secrets, true, true)], null), ["--yes"], "Several services match this project (orders, payments); pass --service <name> or run interactively." },
+        { new(["billing"], false, [new(Secrets, true, true)], null), ["--json"], "The only service in the App Configuration store (billing) does not match this project; pass --service <name> or run interactively." },
+    };
+
+    [Theory]
+    [MemberData(nameof(UnresolvableService))]
+    public async Task Unresolvable_service_names_the_service_option(ProjectResolution resolution, string[] args, string expected)
+    {
+        var s = new Stubs { Resolution = resolution };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(s, args));
+
+        Assert.Equal(expected, ex.Message);
+        Assert.Null(s.Pulled);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -197,6 +258,50 @@ public sealed class PullCommandTests
         Assert.Contains("Db:Host", output);
         Assert.Contains("Api:Key", output);
         Assert.Contains("--force", output);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Human_output_shows_warnings_and_ignored_keys(bool blocked)
+    {
+        var result = new PullResult("dev", 3, 1, blocked, blocked ? ["Db:Host"] : [])
+        {
+            Warnings = [new(SyncWarningKind.DuplicateLabels, "Api:Url", "'Api:Url' has [a] and [b]")],
+            Ignored = ["Logging:Level", "Serilog:Url"],
+        };
+
+        var (exit, output) = await Run(Bound(result));
+
+        Assert.Equal(blocked ? 1 : 0, exit);
+        Assert.Contains("Warning: 'Api:Url' has [a] and [b]", output);
+        Assert.Contains("2 ignored key(s) kept local: Logging:Level, Serilog:Url", output);
+        Assert.Equal(blocked, output.Contains("--force"));
+    }
+
+    [Fact]
+    public async Task Human_output_without_warnings_or_ignored_keys_shows_neither()
+    {
+        var (_, output) = await Run(Bound());
+
+        Assert.DoesNotContain("Warning:", output);
+        Assert.DoesNotContain("ignored", output);
+    }
+
+    [Fact]
+    public async Task Json_output_carries_warnings_and_ignored_keys()
+    {
+        var result = new PullResult("dev", 3, 1, false, [])
+        {
+            Warnings = [new(SyncWarningKind.DuplicateLabels, "Api:Url", "dup")],
+            Ignored = ["Logging:Level"],
+        };
+
+        var (_, output) = await Run(Bound(result), "--json");
+
+        Assert.Equal(CliJson.Serialize(result), output.Trim());
+        Assert.Contains("\"warnings\"", output);
+        Assert.Contains("\"ignored\":[\"Logging:Level\"]", output);
     }
 
     [Theory]

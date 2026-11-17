@@ -22,6 +22,13 @@ public static class CliApp
             config.AddCommand<PushCommand>("push").WithDescription("Apply the local files to an environment.");
             config.AddCommand<EditCommand>("edit").WithDescription("Edit the remote config as JSON in your editor, then apply it.");
             config.AddCommand<PromoteCommand>("promote").WithDescription("Copy new keys from one environment to another via your editor, then apply them.");
+            config.AddBranch("ignore", ignore =>
+            {
+                ignore.SetDescription("Keep keys local only: pull and push skip them (per user, never in the repo).");
+                ignore.AddCommand<IgnoreAddCommand>("add").WithDescription("Ignore keys matching a pattern; nothing is deleted.");
+                ignore.AddCommand<IgnoreRemoveCommand>("remove").WithDescription("Stop ignoring a pattern.");
+                ignore.AddCommand<IgnoreListCommand>("list").WithDescription("List the project's ignore patterns.");
+            });
             config.SetExceptionHandler((ex, _) =>
             {
                 var json = args.Contains("--json");

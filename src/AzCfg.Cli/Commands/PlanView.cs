@@ -3,18 +3,26 @@ using Spectre.Console;
 
 namespace AzCfg.Cli.Commands;
 
-/// <summary>Renders a plan as tables of changes and conflicts; secrets appear by key and secret name only.</summary>
+/// <summary>
+/// Renders a plan as tables of changes (with each key's label, <c>(none)</c> when unlabeled) and conflicts, followed by its
+/// warnings; empty tables are omitted. Secrets appear by key and secret name only.
+/// </summary>
 public static class PlanView
 {
     public static void Render(IAnsiConsole console, SyncPlan plan)
     {
         if (plan.Changes.Count > 0)
         {
-            var changes = new Table().AddColumns("Change", "Scope", "Key", "Secret");
+            var changes = new Table().AddColumns("Change", "Scope", "Key", "Label", "Secret");
             foreach (var c in plan.Changes)
             {
                 var entry = (c.After ?? c.Before)!;
-                changes.AddRow(c.Kind.ToString(), entry.Scope.ToString(), Markup.Escape(entry.Key), Markup.Escape(c.SecretName ?? string.Empty));
+                changes.AddRow(
+                    c.Kind.ToString(),
+                    entry.Scope.ToString(),
+                    Markup.Escape(entry.Key),
+                    Markup.Escape(entry.Label ?? "(none)"),
+                    Markup.Escape(c.SecretName ?? string.Empty));
             }
 
             console.Write(changes);
@@ -26,5 +34,7 @@ public static class PlanView
             plan.Conflicts.ToList().ForEach(c => conflicts.AddRow((c.Local ?? c.Remote ?? c.Base)!.Scope.ToString(), Markup.Escape(c.Key)));
             console.Write(conflicts);
         }
+
+        WarningsView.Render(console, plan.Warnings);
     }
 }
