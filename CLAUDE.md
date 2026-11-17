@@ -40,6 +40,7 @@ tests/AzCfg.Infrastructure.Tests
 - Labels (ADR 0008): store-режим читає всі labels (дублікати → одна копія + `SyncWarning`); label-режим —
   label середовища поверх ключів без label; Core ставить label кожного запису, Infrastructure пише `entry.Label`.
 - Push за замовчуванням — upsert (без видалень); `--delete` додає видалення. Ігнор — `ProjectBinding.Ignore`.
+- Global-ключі в локальних JSON-файлах позначаються `//@global` у кінці рядка (ADR 0009); push відносить їх до `global`.
 
 ## Безпека
 - Auth лише `DefaultAzureCredential`.
@@ -60,7 +61,7 @@ tests/AzCfg.Infrastructure.Tests
 - План MVP по задачах (брати одну через `/feature`): `docs/mvp-plan.md`
 - Рішення (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
   0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety,
-  0008 environment modes / labels, local ignore, push modes)
+  0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore)
 
 ## Skills
 - `/add-local-target` — новий `ILocalTarget` + тест + DI
