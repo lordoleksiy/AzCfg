@@ -24,8 +24,8 @@ public sealed class SyncServiceDiffPlanTests
     private static ConfigEntry Ref(string key, Uri uri, ConfigScope scope = ConfigScope.Service) => new(key, scope, new ConfigValue.KeyVaultRef(uri), "etag");
     private static StateItem SecretItem(string key) => new(key, ConfigScope.Service, new StateValue.Secret(SecretUri, Fingerprinter.Fingerprint(new SecretString(SecretText))));
 
-    private static ProjectBinding Binding(LocalTargetBinding? secrets = null, Uri? vault = null) =>
-        new("/repo", "orders", Values, secrets ?? Secrets, vault is null ? new Dictionary<string, Uri>() : new Dictionary<string, Uri> { ["dev"] = vault });
+    private static ProjectBinding Binding(LocalTargetBinding? secrets = null, Uri? vault = null, string[]? ignore = null) =>
+        new("/repo", "orders", Values, secrets ?? Secrets, vault is null ? new Dictionary<string, Uri>() : new Dictionary<string, Uri> { ["dev"] = vault }, Ignore: ignore);
 
     private sealed record Setup(SyncService Service, FakeUserStateStore State, FakeLocalTarget ValuesTarget, FakeLocalTarget SecretsTarget);
 
@@ -80,6 +80,113 @@ public sealed class SyncServiceDiffPlanTests
         Assert.Equal("etag", plan.Changes[0].Before!.ETag);
         Assert.Equal(1, s.ValuesTarget.Reads);
         Assert.Equal(0, s.SecretsTarget.Reads);
+    }
+
+    private static StateItem PlainItem(string key, string value, ConfigScope scope = ConfigScope.Service) => new(key, scope, new StateValue.Plain(value));
+
+    [Fact]
+    public async Task PlanPushAsync_LocalFiles_Upsert_SkipsLocalDeletesWithWarning()
+    {
+        var s = Create([Plain("A", "1"), Plain("B", "2")], values: [new("A", "3"), new("N", "x")], snapshot: State(PlainItem("A", "1"), PlainItem("B", "2")));
+
+        var plan = await s.Service.PlanPushAsync(Binding(Values), Env, new PushSource.LocalFiles(), Ct);
+
+        Assert.Equal([(ChangeKind.Update, "A"), (ChangeKind.Add, "N")], plan.Changes.Select(c => (c.Kind, c.After!.Key)));
+        Assert.Equal([new SyncWarning(SyncWarningKind.DeleteSkipped, "B", "'B' was deleted locally; it is not deleted remotely (use --delete).")], plan.Warnings);
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_LocalFiles_Delete_PlansLocalDeletes()
+    {
+        var s = Create([Plain("A", "1"), Plain("B", "2")], values: [new("A", "3")], snapshot: State(PlainItem("A", "1"), PlainItem("B", "2")));
+
+        var plan = await s.Service.PlanPushAsync(Binding(Values), Env, new PushSource.LocalFiles(Delete: true), Ct);
+
+        Assert.Equal([(ChangeKind.Update, "A"), (ChangeKind.Delete, "B")], plan.Changes.Select(c => (c.Kind, (c.After ?? c.Before)!.Key)));
+        Assert.Same(Array.Empty<SyncWarning>(), plan.Warnings);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PlanPushAsync_LocalFiles_UnchangedKey_YieldsNoChange(bool delete)
+    {
+        var s = Create([Plain("A", "1"), Ref("Db:Password", SecretUri)], values: [new("A", "1")], secrets: [new("Db:Password", SecretText)], snapshot: State(PlainItem("A", "1"), SecretItem("Db:Password")));
+
+        var plan = await s.Service.PlanPushAsync(Binding(), Env, new PushSource.LocalFiles(delete), Ct);
+
+        Assert.Empty(plan.Changes);
+        Assert.Same(Array.Empty<SyncWarning>(), plan.Warnings);
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_LocalFiles_IgnoredKeys_AreNeitherAddedUpdatedNorDeleted()
+    {
+        var s = Create(
+            [Plain("A", "1"), Plain("B", "2"), Plain("C", "3"), Plain("G", "g", ConfigScope.Global)],
+            values: [new("A", "x"), new("B", "y"), new("N", "n"), new("G", "mine")],
+            snapshot: State(PlainItem("A", "1"), PlainItem("B", "2"), PlainItem("C", "3"), PlainItem("G", "g", ConfigScope.Global)));
+
+        var plan = await s.Service.PlanPushAsync(Binding(Values, ignore: ["a", "C", "n*", "global:*"]), Env, new PushSource.LocalFiles(Delete: true), Ct);
+
+        Assert.Equal([(ChangeKind.Update, "B")], plan.Changes.Select(c => (c.Kind, c.After!.Key)));
+        Assert.Empty(plan.Conflicts);
+        Assert.False(plan.TouchesGlobal);
+        Assert.Same(Array.Empty<SyncWarning>(), plan.Warnings);
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_LocalFiles_IgnoredDelete_IsNotWarned()
+    {
+        var s = Create([Plain("A", "1")], snapshot: State(PlainItem("A", "1")));
+
+        var plan = await s.Service.PlanPushAsync(Binding(Values, ignore: ["A"]), Env, new PushSource.LocalFiles(), Ct);
+
+        Assert.Empty(plan.Changes);
+        Assert.Empty(plan.Warnings);
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_LocalFiles_GlobalPattern_DoesNotHideLocalOnlyKey()
+    {
+        var s = Create([], values: [new("N", "n")]);
+
+        var plan = await s.Service.PlanPushAsync(Binding(Values, ignore: ["global:*"]), Env, new PushSource.LocalFiles(), Ct);
+
+        Assert.Equal([ChangeKind.Add], plan.Changes.Select(c => c.Kind));
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_EditedJson_DoesNotApplyIgnore()
+    {
+        var s = Create([Plain("A", "1"), Plain("B", "2")], snapshot: State(PlainItem("A", "1"), PlainItem("B", "2")));
+
+        var plan = await s.Service.PlanPushAsync(Binding(ignore: ["*"]), Env, new PushSource.EditedJson("""{"A":"2"}"""), Ct);
+
+        Assert.Equal([ChangeKind.Update, ChangeKind.Delete], plan.Changes.Select(c => c.Kind));
+    }
+
+    [Fact]
+    public async Task DiffAsync_DropsIgnoredKeys()
+    {
+        var s = Create(
+            [Plain("A", "1"), Plain("G", "g", ConfigScope.Global), Plain("S", "s")],
+            values: [new("A", "2"), new("G", "x"), new("N", "new"), new("S", "changed")],
+            snapshot: State(PlainItem("A", "1"), PlainItem("S", "s")));
+
+        var diff = await s.Service.DiffAsync(Binding(Values, ignore: ["global:*", "N", "s"]), Env, Ct);
+
+        Assert.Equal([("A", DiffKind.LocalModified)], diff.Items.Select(i => (i.Key, i.Kind)));
+    }
+
+    [Fact]
+    public async Task DiffAsync_UsesBaseScopeWhenRemoteIsGone()
+    {
+        var s = Create([], values: [new("G", "x")], snapshot: State(PlainItem("G", "g", ConfigScope.Global)));
+
+        var diff = await s.Service.DiffAsync(Binding(Values, ignore: ["global:G"]), Env, Ct);
+
+        Assert.Empty(diff.Items);
     }
 
     [Fact]

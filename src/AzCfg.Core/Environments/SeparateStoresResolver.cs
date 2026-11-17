@@ -4,10 +4,10 @@ using AzCfg.Core.Model;
 namespace AzCfg.Core.Environments;
 
 /// <summary>
-/// Default <see cref="IEnvironmentResolver"/> strategy (ADR 0002): one App Configuration store per
-/// environment. Returns the profile's environments as-is, except <see cref="ConfigEnvironment.Label"/> is
-/// always cleared — this strategy never uses labels. A future <c>LabelResolver</c> will resolve one shared
-/// store into per-environment labels instead.
+/// <see cref="EnvironmentMode.StorePerEnvironment"/> strategy (ADR 0002, ADR 0008): one App Configuration store per
+/// environment. <see cref="ConfigEnvironment.Label"/> is cleared, so every label is read (labels never select the
+/// environment); the configured label (else <see cref="UserProfile.DefaultLabel"/>) becomes
+/// <see cref="ConfigEnvironment.WriteLabel"/> for new keys.
 /// </summary>
 public sealed class SeparateStoresResolver : IEnvironmentResolver
 {
@@ -15,6 +15,10 @@ public sealed class SeparateStoresResolver : IEnvironmentResolver
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        return profile.Environments.Select(env => env with { Label = null }).ToList();
+        return profile.Environments
+            .Select(env => env with { Label = null, WriteLabel = Blank(env.Label) ?? Blank(profile.DefaultLabel) })
+            .ToList();
     }
+
+    private static string? Blank(string? label) => string.IsNullOrWhiteSpace(label) ? null : label;
 }

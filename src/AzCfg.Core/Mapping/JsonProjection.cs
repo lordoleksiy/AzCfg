@@ -1,5 +1,5 @@
-using System.Text.Json.Nodes;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;

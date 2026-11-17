@@ -43,6 +43,8 @@ public sealed class PlanPushCommandTests
     {
         public Task<ProjectResolution> ResolveAsync(string repoPath, CancellationToken ct) => Task.FromResult(new ProjectResolution([], true, [], s.Existing));
         public Task<ProjectBinding> BindAsync(string repoPath, string service, LocalTargetBinding valuesTarget, LocalTargetBinding secretsTarget, CancellationToken ct) => throw new NotSupportedException();
+        public Task<ProjectBinding> AddIgnoreAsync(string repoPath, string pattern, CancellationToken ct) => throw new NotSupportedException();
+        public Task<ProjectBinding> RemoveIgnoreAsync(string repoPath, string pattern, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private sealed class StubSync(Stubs s) : ISyncService
@@ -182,9 +184,102 @@ public sealed class PlanPushCommandTests
         Assert.Equal(0, exit);
         Assert.Matches(@"Add[\s│]+Service[\s│]+Db:Host", output);
         Assert.Matches(@"Delete[\s│]+Global[\s│]+Old:Key", output);
-        Assert.Matches(@"CreateSecret[\s│]+Service[\s│]+Api:Key[\s│]+orders--Api--Key", output);
+        Assert.Matches(@"CreateSecret[\s│]+Service[\s│]+Api:Key[\s│]+\(none\)[\s│]+orders--Api--Key", output);
         Assert.Contains("Conflict:Key", output);
         Assert.DoesNotContain("s3cret", output);
+    }
+
+    public static TheoryData<string, string[], bool> DeleteOption => new()
+    {
+        { "plan", [], false },
+        { "plan", ["--delete"], true },
+        { "push", ["--yes"], false },
+        { "push", ["--yes", "--delete"], true },
+    };
+
+    [Theory]
+    [MemberData(nameof(DeleteOption))]
+    public async Task Delete_option_is_passed_to_the_local_files_source(string command, string[] args, bool delete)
+    {
+        var s = new Stubs();
+
+        await Run(command, s, "", args);
+
+        Assert.Equal(new PushSource.LocalFiles(delete), Assert.Single(s.Planned).Source);
+    }
+
+    [Fact]
+    public async Task Plan_shows_the_label_of_each_change()
+    {
+        var labeled = Entry("Api:Url") with { Label = "Development" };
+        var s = new Stubs
+        {
+            PlanFor = b => Plan(b, [new(ChangeKind.Add, null, Entry("Db:Host")), new(ChangeKind.Update, labeled, labeled), new(ChangeKind.Delete, Entry("Old:Key") with { Label = "[x]" }, null)]),
+        };
+
+        var (_, output) = await Run("plan", s, "");
+
+        Assert.Matches(@"Label", output);
+        Assert.Matches(@"Add[\s│]+Service[\s│]+Db:Host[\s│]+\(none\)", output);
+        Assert.Matches(@"Update[\s│]+Service[\s│]+Api:Url[\s│]+Development", output);
+        Assert.Matches(@"Delete[\s│]+Service[\s│]+Old:Key[\s│]+\[x\]", output);
+    }
+
+    private static readonly SyncWarning Skipped = new(SyncWarningKind.DeleteSkipped, "Old:Key", "'Old:Key' [kept] (use --delete).");
+
+    [Theory]
+    [InlineData("plan")]
+    [InlineData("push")]
+    public async Task Warnings_follow_the_tables(string command)
+    {
+        var s = new Stubs { PlanFor = b => Plan(b) with { Warnings = [Skipped] } };
+
+        var (_, output) = await Run(command, s, "", "--yes");
+
+        Assert.Contains("Warning: 'Old:Key' [kept] (use --delete).", output);
+        Assert.True(output.IndexOf("Db:Host", StringComparison.Ordinal) < output.IndexOf("Warning:", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("plan")]
+    [InlineData("push")]
+    public async Task Warnings_are_shown_when_there_are_no_changes(string command)
+    {
+        var s = new Stubs { PlanFor = b => Plan(b, []) with { Warnings = [Skipped] } };
+
+        var (exit, output) = await Run(command, s, "", "--yes");
+
+        Assert.Equal(0, exit);
+        var none = output.IndexOf("No changes.", StringComparison.Ordinal);
+        Assert.True(none >= 0 && none < output.IndexOf("Warning: 'Old:Key' [kept] (use --delete).", StringComparison.Ordinal), output);
+        Assert.Empty(s.Applied);
+    }
+
+    [Fact]
+    public async Task Refused_push_shows_warnings()
+    {
+        var s = new Stubs
+        {
+            PlanFor = b => Plan(b, conflicts: [new("Db:Host", null, null, new("Db:Host", ConfigScope.Service, new StateValue.Plain("r")))]) with { Warnings = [Skipped] },
+        };
+
+        var (exit, output) = await Run("push", s, "", "--yes");
+
+        Assert.Equal(1, exit);
+        Assert.Contains("Warning: 'Old:Key' [kept] (use --delete).", output);
+    }
+
+    [Fact]
+    public async Task Plan_json_carries_the_warnings_as_is()
+    {
+        var plan = Plan(Binding(), []) with { Warnings = [Skipped] };
+        var s = new Stubs { PlanFor = _ => plan };
+
+        var (_, output) = await Run("plan", s, "", "--json");
+
+        Assert.Equal(CliJson.Serialize(plan), output.Trim());
+        Assert.Contains("deleteSkipped", output);
+        Assert.DoesNotContain("No changes", output);
     }
 
     [Fact]

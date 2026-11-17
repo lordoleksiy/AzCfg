@@ -9,8 +9,9 @@ namespace AzCfg.Cli.Commands;
 
 /// <summary>
 /// Pulls the requested environment (else the binding's active one, else <c>dev</c>) into the local targets.
-/// Prompts for service and targets only when the project is not bound yet and neither <c>--json</c> nor <c>--yes</c> is set;
-/// otherwise an ambiguous project is an error. A blocked pull exits with 1.
+/// An unbound project is bound to <c>--service</c> when given (no detection), else to the detected service. Prompts for service and
+/// targets only when the project is not bound yet and neither <c>--json</c> nor <c>--yes</c> is set; otherwise an ambiguous project
+/// is an error naming <c>--service</c>. Human output lists warnings and ignored keys. A blocked pull exits with 1.
 /// </summary>
 public abstract class PullCommandBase<TSettings>(
     IProjectService projects,
@@ -20,7 +21,7 @@ public abstract class PullCommandBase<TSettings>(
     IAnsiConsole console) : EnvironmentCommandBase<TSettings>(projects, state, resolver) where TSettings : PullSettings
 {
     protected override async Task<ProjectBinding> GetBindingAsync(string repo, ProjectResolution resolution, TSettings settings, CancellationToken ct) =>
-        resolution.Existing ?? await BindAsync(repo, resolution, !settings.Json && !settings.Yes, ct);
+        resolution.Existing ?? await BindAsync(repo, resolution, settings.Service, !settings.Json && !settings.Yes, ct);
 
     public override async Task<int> ExecuteAsync(CommandContext context, TSettings settings, CancellationToken ct)
     {
@@ -48,14 +49,29 @@ public abstract class PullCommandBase<TSettings>(
             console.Write(table);
         }
 
+        if (!settings.Json)
+        {
+            WarningsView.Render(console, result.Warnings);
+            if (result.Ignored.Count > 0)
+            {
+                console.MarkupLineInterpolated($"{result.Ignored.Count} ignored key(s) kept local: {string.Join(", ", result.Ignored)}");
+            }
+        }
+
         return result.Blocked ? 1 : 0;
     }
 
-    private async Task<ProjectBinding> BindAsync(string repo, ProjectResolution resolution, bool interactive, CancellationToken ct)
+    private async Task<ProjectBinding> BindAsync(string repo, ProjectResolution resolution, string? requested, bool interactive, CancellationToken ct)
     {
-        var service = resolution.IsConfident ? resolution.Candidates[0]
-            : interactive && resolution.Candidates.Count > 0 ? console.Prompt(new SelectionPrompt<string>().Title("Service:").AddChoices(resolution.Candidates))
-            : throw new InvalidOperationException("Cannot determine the service for this project; run 'azcfg pull' interactively once.");
+        var candidates = resolution.Candidates;
+        var service = requested ?? (candidates.Count, resolution.IsConfident, interactive) switch
+        {
+            (0, _, _) => throw new InvalidOperationException("No service keys were found in the App Configuration store for this project; pass --service <name>."),
+            (_, true, _) => candidates[0],
+            (_, _, true) => console.Prompt(new SelectionPrompt<string>().Title("Service:").AddChoices(candidates)),
+            (1, _, _) => throw new InvalidOperationException($"The only service in the App Configuration store ({candidates[0]}) does not match this project; pass --service <name> or run interactively."),
+            _ => throw new InvalidOperationException($"Several services match this project ({string.Join(", ", candidates)}); pass --service <name> or run interactively."),
+        };
 
         var safe = resolution.TargetOptions.Where(o => o.IsSafeForSecrets).Select(o => o.Target).ToList();
         if (safe.Count == 0)

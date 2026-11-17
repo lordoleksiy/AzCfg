@@ -12,6 +12,9 @@ internal sealed class FakeConfigStore(
 {
     public IReadOnlyList<Change>? Applied { get; private set; }
     public string[] FailKeys { get; set; } = [];
+    public string[] Labels { get; set; } = [];
+
+    public Task<IReadOnlyList<string>> ListLabelsAsync(Uri storeEndpoint, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>(Labels);
 
     public IAsyncEnumerable<ConfigEntry> ReadAsync(ConfigEnvironment env, string service, CancellationToken ct) =>
         entriesByEnvironment![env.Name].ToAsyncEnumerable();

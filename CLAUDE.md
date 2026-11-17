@@ -37,6 +37,9 @@ tests/AzCfg.Infrastructure.Tests
   (сегменти шляху за `:`, без scope-префікса) для user-secrets/`appsettings.local.json`; `local.settings.json`
   — лише `FlatDictionary` (плоский словник `Values`, ключі `A:B` як є, без вкладеності).
 - `{ "@kv": "name" }` → KV reference; з `"value"` → створити/оновити секрет.
+- Labels (ADR 0008): store-режим читає всі labels (дублікати → одна копія + `SyncWarning`); label-режим —
+  label середовища поверх ключів без label; Core ставить label кожного запису, Infrastructure пише `entry.Label`.
+- Push за замовчуванням — upsert (без видалень); `--delete` додає видалення. Ігнор — `ProjectBinding.Ignore`.
 
 ## Безпека
 - Auth лише `DefaultAzureCredential`.
@@ -56,8 +59,12 @@ tests/AzCfg.Infrastructure.Tests
 - Повна архітектура, моделі, порти, CLI, порядок MVP: `docs/architecture.md`
 - План MVP по задачах (брати одну через `/feature`): `docs/mvp-plan.md`
 - Рішення (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
-  0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety)
+  0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety,
+  0008 environment modes / labels, local ignore, push modes)
 
 ## Skills
 - `/add-local-target` — новий `ILocalTarget` + тест + DI
 - `/add-cli-command` — нова команда + `--json`
+- `/adr` — новий ADR як контракт перед кодом
+- `/issue-orchestrator` — issue → ADR → агенти у worktree → merge → e2e перевірка
+- `/cli-scenario-test` — end-to-end сценарій CLI на in-memory фейках (init → pull → ignore → push)

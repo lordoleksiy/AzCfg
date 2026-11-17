@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "DevConsole": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "AZCFG_DEV_CWD": "C:\\Programming\\UA_DEVOPS\\CrmApiService"
+      }
+    }
+  }
+}

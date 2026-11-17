@@ -1,6 +1,6 @@
+using AzCfg.Infrastructure.Azure;
 using Azure;
 using Azure.Security.KeyVault.Secrets;
-using AzCfg.Infrastructure.Azure;
 
 namespace AzCfg.Infrastructure.Tests.Azure;
 

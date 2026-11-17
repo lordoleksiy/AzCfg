@@ -26,7 +26,13 @@ public abstract class PushCommandBase<TSettings>(IProjectService projects, ISync
 
         if (plan.Changes.Count == 0)
         {
-            return Report(settings, new ApplyResult(0, []), "No changes.");
+            var exit = Report(settings, new ApplyResult(0, []), "No changes.");
+            if (!settings.Json)
+            {
+                WarningsView.Render(Console, plan.Warnings);
+            }
+
+            return exit;
         }
 
         if (plan.RequiresVaultChoice)

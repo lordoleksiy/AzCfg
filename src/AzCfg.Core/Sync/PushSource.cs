@@ -6,8 +6,12 @@ namespace AzCfg.Core.Sync;
 /// </summary>
 public abstract record PushSource
 {
-    /// <summary>Push from the local files bound in <c>ProjectBinding</c> (the default).</summary>
-    public sealed record LocalFiles : PushSource;
+    /// <summary>
+    /// Push from the local files bound in <c>ProjectBinding</c> (the default), skipping ignored keys (ADR 0008). By default
+    /// an upsert: local deletions are not deleted remotely but reported as <see cref="SyncWarningKind.DeleteSkipped"/>;
+    /// <paramref name="Delete"/> also plans them as deletes.
+    /// </summary>
+    public sealed record LocalFiles(bool Delete = false) : PushSource;
 
     /// <summary>Push from a developer-edited JSON projection (see <c>azcfg edit</c>).</summary>
     public sealed record EditedJson(string Json) : PushSource;
