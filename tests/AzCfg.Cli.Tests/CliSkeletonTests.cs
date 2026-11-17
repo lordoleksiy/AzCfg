@@ -1,9 +1,9 @@
 using System.Net;
-using Azure;
-using Azure.Identity;
 using AzCfg.Cli;
 using AzCfg.Cli.Commands;
 using AzCfg.Core.Model;
+using Azure;
+using Azure.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Cli;
 

@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
-using Azure.Security.KeyVault.Secrets;
 using AzCfg.Core.Abstractions;
+using Azure.Security.KeyVault.Secrets;
 
 namespace AzCfg.Infrastructure.Azure;
 

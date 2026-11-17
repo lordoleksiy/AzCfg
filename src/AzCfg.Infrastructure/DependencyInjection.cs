@@ -1,5 +1,3 @@
-using Azure.Identity;
-using Azure.Security.KeyVault.Secrets;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Environments;
 using AzCfg.Core.Security;
@@ -7,7 +5,9 @@ using AzCfg.Core.UseCases;
 using AzCfg.Infrastructure.Azure;
 using AzCfg.Infrastructure.Local;
 using AzCfg.Infrastructure.State;
+using Azure.Identity;
 using Azure.ResourceManager;
+using Azure.Security.KeyVault.Secrets;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AzCfg.Infrastructure;

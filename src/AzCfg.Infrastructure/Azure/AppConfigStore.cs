@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using Azure;
-using Azure.Core;
-using Azure.Data.AppConfiguration;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Mapping;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
+using Azure;
+using Azure.Core;
+using Azure.Data.AppConfiguration;
 
 namespace AzCfg.Infrastructure.Azure;
 

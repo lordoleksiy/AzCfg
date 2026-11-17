@@ -1,7 +1,7 @@
-using Azure.Data.AppConfiguration;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
 using AzCfg.Infrastructure.Azure;
+using Azure.Data.AppConfiguration;
 
 namespace AzCfg.Infrastructure.Tests.Azure;
 
