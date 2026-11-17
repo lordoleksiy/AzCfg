@@ -6,28 +6,30 @@ using Spectre.Console.Cli;
 
 namespace AzCfg.Cli.Commands;
 
-/// <summary>Shows the changes and conflicts of pushing the local files to <c>--env</c> (else the active environment, else <c>dev</c>). Needs a bound project; always exits 0.</summary>
+/// <summary>
+/// Shows the changes, conflicts and warnings of pushing the local files to <c>--env</c> (else the active environment, else <c>dev</c>);
+/// upsert by default, <c>--delete</c> also plans remote deletes. Warnings are shown even without changes. Needs a bound project; always exits 0.
+/// </summary>
 public sealed class PlanCommand(IProjectService projects, ISyncService sync, IUserStateStore state, IEnvironmentResolver resolver, IAnsiConsole console)
-    : EnvironmentCommandBase<GlobalSettings>(projects, state, resolver)
+    : EnvironmentCommandBase<PlanSettings>(projects, state, resolver)
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, GlobalSettings settings, CancellationToken ct)
+    public override async Task<int> ExecuteAsync(CommandContext context, PlanSettings settings, CancellationToken ct)
     {
         var (binding, env) = await ResolveAsync(settings, ct);
-        var plan = await sync.PlanPushAsync(binding, env, new PushSource.LocalFiles(), ct);
+        var plan = await sync.PlanPushAsync(binding, env, new PushSource.LocalFiles(settings.Delete), ct);
 
         if (settings.Json)
         {
             console.Profile.Out.Writer.WriteLine(CliJson.Serialize(plan));
+            return 0;
         }
-        else if (plan.Changes.Count == 0 && plan.Conflicts.Count == 0)
+
+        if (plan.Changes.Count == 0 && plan.Conflicts.Count == 0)
         {
             console.MarkupLine("No changes.");
         }
-        else
-        {
-            PlanView.Render(console, plan);
-        }
 
+        PlanView.Render(console, plan);
         return 0;
     }
 }
