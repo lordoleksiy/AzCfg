@@ -29,6 +29,25 @@ public class SeparateStoresResolverTests
     }
 
     [Fact]
+    public void Resolve_EnvironmentLabel_BecomesWriteLabel()
+    {
+        var profile = new UserProfile([new ConfigEnvironment("dev", new Uri("https://dev.azconfig.io"), "Development", false)], DefaultLabel: "Default");
+
+        var env = Assert.Single(new SeparateStoresResolver().Resolve(profile));
+
+        Assert.Null(env.Label);
+        Assert.Equal("Development", env.WriteLabel);
+    }
+
+    [Fact]
+    public void Resolve_NoEnvironmentLabel_UsesProfileDefaultLabel()
+    {
+        var profile = new UserProfile([new ConfigEnvironment("dev", new Uri("https://dev.azconfig.io"), null, false)], DefaultLabel: "Default");
+
+        Assert.Equal("Default", Assert.Single(new SeparateStoresResolver().Resolve(profile)).WriteLabel);
+    }
+
+    [Fact]
     public void Resolve_NullProfile_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new SeparateStoresResolver().Resolve(null!));

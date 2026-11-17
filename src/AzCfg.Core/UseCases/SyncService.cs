@@ -38,7 +38,8 @@ public sealed class SyncService(
             }
         }
 
-        var entries = ScopeMerger.Merge(await store.ReadAsync(env, binding.Service, ct).ToListAsync(ct));
+        var (raw, warnings) = await ReadEntriesAsync(env, binding.Service, ct);
+        var entries = ScopeMerger.Merge(raw);
         List<LocalValue> values = [], secrets = [];
         var items = new Dictionary<string, StateItem>(StringComparer.Ordinal);
 
@@ -70,24 +71,24 @@ public sealed class SyncService(
 
         await state.SaveSnapshotAsync(binding.RepoPath, env.Name, new ConfigState(items), ct);
         await state.SaveBindingAsync(binding with { ActiveEnvironment = env.Name }, ct);
-        return new(env.Name, values.Count, secrets.Count, false, []);
+        return new(env.Name, values.Count, secrets.Count, false, []) { Warnings = warnings };
     }
 
     public async Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) =>
-        JsonProjection.ToEditJson(ScopeMerger.Merge(await store.ReadAsync(env, binding.Service, ct).ToListAsync(ct))).ToJsonString(new() { WriteIndented = true });
+        JsonProjection.ToEditJson(ScopeMerger.Merge((await ReadEntriesAsync(env, binding.Service, ct)).Entries)).ToJsonString(new() { WriteIndented = true });
 
     public async Task<string> ExportPromoteJsonAsync(ProjectBinding binding, ConfigEnvironment from, ConfigEnvironment to, CancellationToken ct)
     {
-        var existing = (await store.ReadAsync(to, binding.Service, ct).ToListAsync(ct))
+        var existing = (await ReadEntriesAsync(to, binding.Service, ct)).Entries
             .Where(e => e.Scope == ConfigScope.Service).Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
-        var added = (await store.ReadAsync(from, binding.Service, ct).ToListAsync(ct))
+        var added = (await ReadEntriesAsync(from, binding.Service, ct)).Entries
             .Where(e => e.Scope == ConfigScope.Service && !existing.Contains(e.Key));
         return JsonProjection.ToEditJson(added, secretPlaceholders: true).ToJsonString(new() { WriteIndented = true });
     }
 
     public async Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct)
     {
-        var (@base, remote, _) = await ReadRemoteAsync(binding, env, ct);
+        var (@base, remote, _, _) = await ReadRemoteAsync(binding, env, ct);
         return ThreeWayDiff.Compute(@base, await ReadLocalAsync(binding, ct), remote, fingerprinter);
     }
 
@@ -98,7 +99,7 @@ public sealed class SyncService(
     /// </summary>
     public async Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct)
     {
-        var (snapshot, merged, raw) = await ReadRemoteAsync(binding, env, ct);
+        var (snapshot, merged, raw, readWarnings) = await ReadRemoteAsync(binding, env, ct);
         var promote = source is PushSource.Promote;
         var @base = source switch { PushSource.Promote => new ConfigState(new Dictionary<string, StateItem>()), PushSource.EditedJson => merged, _ => snapshot };
         var remote = promote ? Service(merged) : merged;
@@ -139,11 +140,12 @@ public sealed class SyncService(
             {
                 SecretName = name,
                 SecretValue = value,
-                After = vault is null ? null : new(item.Key, scope, new ConfigValue.KeyVaultRef(new($"{vault.AbsoluteUri.TrimEnd('/')}/secrets/{name}"))),
+                After = vault is null ? null : new(item.Key, scope, new ConfigValue.KeyVaultRef(new($"{vault.AbsoluteUri.TrimEnd('/')}/secrets/{name}")), Label: change.Before?.Label ?? env.WriteLabel),
             });
         }
 
-        return plan with { Changes = changes, RequiresVaultChoice = requiresVaultChoice };
+        List<SyncWarning> warnings = [.. readWarnings, .. plan.Warnings];
+        return plan with { Changes = changes, RequiresVaultChoice = requiresVaultChoice, Warnings = warnings.Count == 0 ? Array.Empty<SyncWarning>() : warnings };
     }
 
     /// <summary>
@@ -189,7 +191,7 @@ public sealed class SyncService(
         var result = await store.ApplyAsync(plan.Environment, plan.Binding.Service, changes, ct);
         if (result.Failed.Count == 0)
         {
-            var (@base, remote, _) = await ReadRemoteAsync(plan.Binding, plan.Environment, ct);
+            var (@base, remote, _, _) = await ReadRemoteAsync(plan.Binding, plan.Environment, ct);
             var items = new Dictionary<string, StateItem>(@base.Items, StringComparer.Ordinal);
             foreach (var key in plan.Changes.Select(c => (c.After ?? c.Before)!.Key))
             {
@@ -220,9 +222,13 @@ public sealed class SyncService(
         return new(local.ToDictionary(v => v.Key, v => new StateItem(v.Key, ConfigScope.Service, new StateValue.Plain(v.Value)), StringComparer.Ordinal));
     }
 
-    private async Task<(ConfigState Base, ConfigState Remote, List<ConfigEntry> Raw)> ReadRemoteAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct)
+    /// <summary>Reads the environment's entries with one copy per <c>(Scope, Key)</c> across labels (ADR 0008).</summary>
+    private async Task<(IReadOnlyList<ConfigEntry> Entries, IReadOnlyList<SyncWarning> Warnings)> ReadEntriesAsync(ConfigEnvironment env, string service, CancellationToken ct) =>
+        LabelSelector.Select(await store.ReadAsync(env, service, ct).ToListAsync(ct), env);
+
+    private async Task<(ConfigState Base, ConfigState Remote, IReadOnlyList<ConfigEntry> Raw, IReadOnlyList<SyncWarning> Warnings)> ReadRemoteAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct)
     {
-        var raw = await store.ReadAsync(env, binding.Service, ct).ToListAsync(ct);
+        var (raw, warnings) = await ReadEntriesAsync(env, binding.Service, ct);
         var items = new Dictionary<string, StateItem>(StringComparer.Ordinal);
         foreach (var entry in ScopeMerger.Merge(raw))
         {
@@ -238,7 +244,7 @@ public sealed class SyncService(
             }
         }
 
-        return (await state.LoadSnapshotAsync(binding.RepoPath, env.Name, ct) ?? new(new Dictionary<string, StateItem>()), new(items), raw);
+        return (await state.LoadSnapshotAsync(binding.RepoPath, env.Name, ct) ?? new(new Dictionary<string, StateItem>()), new(items), raw, warnings);
     }
 
     private static Dictionary<string, StateValue.Secret> KnownSecrets(ConfigState @base, ConfigState remote) => @base.Items.Values.Concat(remote.Items.Values)

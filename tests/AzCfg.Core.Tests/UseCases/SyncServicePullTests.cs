@@ -57,6 +57,22 @@ public sealed class SyncServicePullTests
     }
 
     [Fact]
+    public async Task PullAsync_DuplicateLabels_WritesPreferredCopyAndWarns()
+    {
+        var s = Create([
+            new("Logging:Level", ConfigScope.Service, new ConfigValue.Plain("Info"), Label: "Development"),
+            new("Logging:Level", ConfigScope.Service, new ConfigValue.Plain("Debug")),
+        ]);
+
+        var result = await s.Service.PullAsync(Binding(Values, Secrets), Env, null, false, Ct);
+
+        Assert.Equal([new LocalValue("Logging:Level", "Debug")], Assert.Single(s.ValuesTarget.Writes).Values);
+        var warning = Assert.Single(result.Warnings);
+        Assert.Equal(SyncWarningKind.DuplicateLabels, warning.Kind);
+        Assert.Equal("Logging:Level", warning.Key);
+    }
+
+    [Fact]
     public async Task PullAsync_SameTarget_WritesOnce()
     {
         var s = Create([Plain("Logging:Level", "Info"), Secret("Db:Password")]);

@@ -53,6 +53,21 @@ public sealed class AppConfigStore(TokenCredential credential) : IConfigStore
         }
     }
 
+    public async Task<IReadOnlyList<string>> ListLabelsAsync(Uri storeEndpoint, CancellationToken ct)
+    {
+        var client = _clients.GetOrAdd(storeEndpoint, endpoint => new ConfigurationClient(endpoint, credential));
+        var labels = new SortedSet<string>(StringComparer.Ordinal);
+        await foreach (var setting in client.GetConfigurationSettingsAsync(new SettingSelector { Fields = SettingFields.Label }, ct))
+        {
+            if (!string.IsNullOrEmpty(setting.Label))
+            {
+                labels.Add(setting.Label);
+            }
+        }
+
+        return [.. labels];
+    }
+
     public async Task<ApplyResult> ApplyAsync(
         ConfigEnvironment env, string service, IReadOnlyList<Change> changes, CancellationToken ct)
     {

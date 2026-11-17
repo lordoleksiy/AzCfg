@@ -36,33 +36,61 @@ public static class ThreeWayDiff
     /// otherwise a key that came from global becomes a service override, and deleting it does nothing. A changed
     /// secret yields <see cref="ChangeKind.CreateSecret"/> without a value (named from its URI, unless it came from
     /// another scope, else from the key). <see cref="Change.Before"/> is the matching raw remote entry.
+    /// Labels (ADR 0008): Update/Delete keep the label of <see cref="Change.Before"/>, Add uses
+    /// <see cref="ConfigEnvironment.WriteLabel"/>. With a read label (label mode) an entry under another label is never
+    /// changed: a change becomes an Add override (<see cref="SyncWarningKind.LabelOverride"/>), a delete is skipped
+    /// (<see cref="SyncWarningKind.DeleteSkipped"/>).
     /// </summary>
-    public static SyncPlan Plan(ConfigDiff diff, IReadOnlyList<ConfigEntry> remote, ProjectBinding binding, ConfigEnvironment env) => new(
-        binding,
-        env,
-        [.. diff.Items.Select(i => ToChange(i, remote, binding.Service)).OfType<Change>()],
-        [.. diff.Items.Where(i => i.Kind == DiffKind.Conflict).Select(i => new Conflict(i.Key, i.Base, i.Local, i.Remote))],
-        false,
-        diff.Items.Any(i => i.Kind is DiffKind.LocalAdded or DiffKind.LocalModified && i.Local!.Scope == ConfigScope.Global));
+    public static SyncPlan Plan(ConfigDiff diff, IReadOnlyList<ConfigEntry> remote, ProjectBinding binding, ConfigEnvironment env)
+    {
+        List<SyncWarning> warnings = [];
+        return new(
+            binding,
+            env,
+            [.. diff.Items.Select(i => ToChange(i, remote, binding.Service, env, warnings)).OfType<Change>()],
+            [.. diff.Items.Where(i => i.Kind == DiffKind.Conflict).Select(i => new Conflict(i.Key, i.Base, i.Local, i.Remote))],
+            false,
+            diff.Items.Any(i => i.Kind is DiffKind.LocalAdded or DiffKind.LocalModified && i.Local!.Scope == ConfigScope.Global))
+        {
+            Warnings = warnings.Count == 0 ? Array.Empty<SyncWarning>() : warnings,
+        };
+    }
 
-    private static Change? ToChange(DiffItem item, IReadOnlyList<ConfigEntry> remote, string service)
+    private static Change? ToChange(DiffItem item, IReadOnlyList<ConfigEntry> remote, string service, ConfigEnvironment env, List<SyncWarning> warnings)
     {
         if (item.Kind == DiffKind.LocalDeleted)
-            return item.Base is { Scope: ConfigScope.Service } ? new(ChangeKind.Delete, Find(item.Key, ConfigScope.Service), null) : null;
+        {
+            if (item.Base is not { Scope: ConfigScope.Service } || Find(item.Key, ConfigScope.Service) is not { } existing)
+                return null;
+            if (Writable(existing))
+                return new(ChangeKind.Delete, existing, null);
+
+            warnings.Add(new(SyncWarningKind.DeleteSkipped, item.Key, $"'{item.Key}' exists only under {Display(existing.Label)}; it is not deleted from label '{env.Label}'."));
+            return null;
+        }
+
         if (item.Kind is not (DiffKind.LocalAdded or DiffKind.LocalModified))
             return null;
 
         var scope = item.Local!.Scope;
-        var before = Find(item.Key, scope);
+        var found = Find(item.Key, scope);
+        var before = found is not null && Writable(found) ? found : null;
+        if (found is not null && before is null)
+            warnings.Add(new(SyncWarningKind.LabelOverride, item.Key, $"'{item.Key}' exists only under {Display(found.Label)}; adding it with label '{env.WriteLabel}' instead of changing it."));
+
         return item.Local.Value switch
         {
             StateValue.Secret => new(ChangeKind.CreateSecret, before, null, SecretName(item, service)),
-            StateValue.Plain plain => new(before is null ? ChangeKind.Add : ChangeKind.Update, before, new ConfigEntry(item.Key, scope, new ConfigValue.Plain(plain.Value))),
+            StateValue.Plain plain => new(before is null ? ChangeKind.Add : ChangeKind.Update, before, new ConfigEntry(item.Key, scope, new ConfigValue.Plain(plain.Value), Label: before?.Label ?? env.WriteLabel)),
             _ => null,
         };
 
         ConfigEntry? Find(string key, ConfigScope s) => remote.FirstOrDefault(e => e.Key == key && e.Scope == s);
+
+        bool Writable(ConfigEntry e) => env.Label is null || e.Label == env.Label;
     }
+
+    private static string Display(string? label) => label is null ? "no label" : $"label '{label}'";
 
     internal static string SecretName(Uri secretUri) => secretUri.Segments.SkipWhile(s => s != "secrets/").Skip(1).First().TrimEnd('/');
 
