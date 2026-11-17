@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/AzCfg.Cli/AzCfg.Cli.csproj" />
     <Project Path="src/AzCfg.Core/AzCfg.Core.csproj" />
+    <Project Path="src/AzCfg.DevConsole/AzCfg.DevConsole.csproj" />
     <Project Path="src/AzCfg.Infrastructure/AzCfg.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/">
