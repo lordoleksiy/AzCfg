@@ -110,7 +110,7 @@ public sealed class PlanPushCommandTests
     private static async Task<(int Exit, string Output)> Run(string command, Stubs s, string input, params string[] args)
     {
         var writer = new StringWriter();
-        var console = AnsiConsole.Create(new() { Out = new AnsiConsoleOutput(writer), Interactive = InteractionSupport.Yes, Ansi = AnsiSupport.Yes, ColorSystem = ColorSystemSupport.NoColors });
+        var console = AnsiConsole.Create(new() { Out = new AnsiConsoleOutput(writer), Interactive = InteractionSupport.Yes, Ansi = AnsiSupport.Yes, ColorSystem = ColorSystemSupport.NoColors, Enrichment = new() { UseDefaultEnrichers = false } });
         console.Profile.Width = 200;
         var services = new ServiceCollection()
             .AddSingleton<IUserStateStore>(new StubState(s))
