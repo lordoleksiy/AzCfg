@@ -1,7 +1,7 @@
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Model;
 
-namespace AzCfg.Cli.Tests.Scenario;
+namespace AzCfg.Infrastructure.InMemory;
 
 /// <summary>Detects a fixed list of projects regardless of the path (no file system access).</summary>
 public sealed class FixedProjectDetector(params ProjectInfo[] projects) : IProjectDetector

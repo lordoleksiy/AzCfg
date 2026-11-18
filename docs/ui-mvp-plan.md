@@ -1323,7 +1323,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     `ApplyAsync` messages unchanged. (7) All CLI tests green.
   - **Tests:** files above; Core fakes.
 
-- [ ] **T1 — In-memory adapters → Infrastructure**
+- [x] **T1 — In-memory adapters → Infrastructure**
   - **Goal:** G36 seam — one set of realistic fakes for CLI scenarios, UI tests and `--demo`.
   - **Read:** §3.3, §5.3 (AD-12), §7.2 (T1 block), `tests/AzCfg.Cli.Tests/Scenario/*.cs`.
   - **Scope:** `git mv` the 7 types of §7.2 to `src/AzCfg.Infrastructure/InMemory/`, namespace

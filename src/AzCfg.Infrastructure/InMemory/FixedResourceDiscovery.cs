@@ -1,7 +1,7 @@
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Model;
 
-namespace AzCfg.Cli.Tests.Scenario;
+namespace AzCfg.Infrastructure.InMemory;
 
 /// <summary>Returns the App Configuration stores and Key Vaults added by the scenario (no Azure Resource Graph).</summary>
 public sealed class FixedResourceDiscovery : IResourceDiscovery

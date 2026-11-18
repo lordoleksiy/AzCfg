@@ -1,6 +1,6 @@
 using AzCfg.Core.Model;
 
-namespace AzCfg.Cli.Tests.Scenario;
+namespace AzCfg.Infrastructure.InMemory;
 
 /// <summary>One App Configuration setting held by <see cref="InMemoryAppConfig"/>: full store key, label (<c>null</c> = no label), value and ETag.</summary>
 public sealed record RemoteSetting(string Key, string? Label, ConfigValue Value, string ETag)

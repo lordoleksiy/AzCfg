@@ -3,7 +3,7 @@ using AzCfg.Core.Mapping;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
 
-namespace AzCfg.Cli.Tests.Scenario;
+namespace AzCfg.Infrastructure.InMemory;
 
 /// <summary>
 /// In-memory Azure App Configuration with the REST semantics <c>AppConfigStore</c> relies on (ADR 0008): settings keyed by

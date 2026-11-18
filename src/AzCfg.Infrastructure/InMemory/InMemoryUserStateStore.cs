@@ -4,7 +4,7 @@ using AzCfg.Core.Abstractions;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
 
-namespace AzCfg.Cli.Tests.Scenario;
+namespace AzCfg.Infrastructure.InMemory;
 
 /// <summary>
 /// In-memory per-user state: profile, bindings by full repo path, snapshots by <c>(repo, environment)</c> and a fixed fingerprint key.
