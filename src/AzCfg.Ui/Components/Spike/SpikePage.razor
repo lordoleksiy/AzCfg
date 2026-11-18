@@ -1,0 +1,57 @@
+@inject IThemeService ThemeService
+@inject IDialogService DialogService
+@inject INotificationService NotificationService
+
+<div class="spike">
+    <h1>AzCfg UI spike</h1>
+    <div class="spike-actions">
+        <FluentButton Appearance="ButtonAppearance.Primary" OnClick="ConfirmAsync">Open confirmation</FluentButton>
+        <FluentButton OnClick="ToastAsync">Show toast</FluentButton>
+        <span>@_status</span>
+    </div>
+    <div class="spike-grid">
+        <FluentDataGrid TGridItem="SpikeRow" Items="_rows" Virtualize="true" ItemSize="32" ItemKey="@(r => r.Index)">
+            <PropertyColumn Property="@(r => r.Key)" Title="Key" />
+            <PropertyColumn Property="@(r => r.Value)" Title="Value" />
+        </FluentDataGrid>
+    </div>
+    <div class="spike-editor">
+        <StandaloneCodeEditor Id="spike-editor" ConstructionOptions="EditorOptions" />
+    </div>
+</div>
+
+@code {
+    private readonly IQueryable<SpikeRow> _rows =
+        Enumerable.Range(0, 2000).Select(i => new SpikeRow(i, $"Section{i / 50}:Key{i}", $"value {i}")).AsQueryable();
+
+    private string _status = "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await ThemeService.SetThemeAsync(ThemeMode.Dark);
+        }
+    }
+
+    private async Task ConfirmAsync()
+    {
+        var result = await DialogService.ShowConfirmationAsync("Apply 3 changes to dev?", "Confirm apply");
+        _status = result.Cancelled ? "Cancelled" : "Confirmed";
+    }
+
+    private async Task ToastAsync() =>
+        await NotificationService.ShowToastAsync(o =>
+        {
+            o.Title = "Pulled 12 keys from dev";
+            o.Intent = ToastIntent.Success;
+        });
+
+    private static StandaloneEditorConstructionOptions EditorOptions(StandaloneCodeEditor editor) => new()
+    {
+        AutomaticLayout = true,
+        Language = "json",
+        Theme = "vs-dark",
+        Value = "{\n  \"Db\": {\n    \"Host\": \"localhost\"\n  },\n  \"Api\": { \"@kv\": \"crm--Api--Key\" }\n}\n",
+    };
+}

@@ -1339,7 +1339,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     (4) Infrastructure does not reference xunit.
   - **Tests:** `InMemoryCompositionTests`.
 
-- [ ] **F1 — UI scaffold, contracts, state, `AzureErrors`, spike**
+- [x] **F1 — UI scaffold, contracts, state, `AzureErrors`, spike**
   - **Goal:** compiling UI projects with every contract of §7.1 (F1 block), §7.2 (F1 block), §7.3–§7.5, working state,
     empty feature/area modules and a spike proving Fluent UI v5 + BlazorMonaco on net10 — so W2 runs in parallel
     without shared files.
