@@ -66,7 +66,8 @@ tests/AzCfg.Cli.Tests     command tests + Scenario/ (end-to-end on in-memory fak
 - User-facing CLI reference, RBAC roles, release: `README.md`
 - Decisions (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
   0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety,
-  0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore)
+  0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore,
+  0010 UI architecture and hosting, 0011 UI editing, sync and secret safety)
 
 ## Skills
 - `/feature` — one task → branch from `dev` → tests → code → PR into `dev`

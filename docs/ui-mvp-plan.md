@@ -1257,7 +1257,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
 
 - [ ] **F0 — Sync `dev` with `master`, package versions** — orchestrator, see 0.1.
 
-- [ ] **D1 — ADR 0010 and 0011**
+- [x] **D1 — ADR 0010 and 0011**
   - **Goal:** decisions recorded as contracts before code (G34).
   - **Read:** §2.1, §4, §5, §7.1, `docs/adr/0008-environment-modes-labels-ignore.md` (format).
   - **Scope:** `docs/adr/0010-ui-architecture-and-hosting.md` — AD-1…AD-4, AD-9…AD-13 and §5.4 (context, decision,
