@@ -1293,7 +1293,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     `ArgumentException`.
   - **Tests:** one or more per item, Core fakes from `tests/AzCfg.Core.Tests/Fakes`.
 
-- [ ] **C2 — Core: sync use cases**
+- [x] **C2 — Core: sync use cases**
   - **Goal:** G6, G8, G14, G25, G27 (`ReadRemoteConfigAsync`), G28.
   - **Read:** §3.2, §4 (G6, G8, G14, G25, G27, G28), §7.1 (C2 blocks), §9.
   - **Scope:** `PushSource.EditedJson(Json, BaseJson)` + `PrintMembers` for `EditedJson` and `Promote`;

@@ -24,21 +24,7 @@ public sealed class SyncService(
 {
     public async Task<PullResult> PullAsync(ProjectBinding binding, ConfigEnvironment env, IProgress<SyncProgress>? progress, bool force, CancellationToken ct)
     {
-        if ((await state.LoadProfileAsync(ct))?.GitIgnoreLocalFiles == true)
-        {
-            await targets.First(t => t.Kind == binding.ValuesTarget.Kind).EnsureGitIgnoredAsync(binding.ValuesTarget, ct);
-            if (binding.SecretsTarget != binding.ValuesTarget)
-            {
-                await targets.First(t => t.Kind == binding.SecretsTarget.Kind).EnsureGitIgnoredAsync(binding.SecretsTarget, ct);
-            }
-        }
-
-        var secretsTarget = targets.First(t => t.Kind == binding.SecretsTarget.Kind);
-        if (!(await secretsTarget.InspectAsync(binding.SecretsTarget, ct)).IsSafeForSecrets)
-        {
-            throw new InvalidOperationException($"{binding.SecretsTarget.Kind} target is not safe for secrets.");
-        }
-
+        var secretsTarget = await PrepareTargetsAsync(binding, ct);
         var (raw, warnings) = await ReadEntriesAsync(env, binding.Service, ct);
         var entries = ScopeMerger.Merge(raw);
         var remoteScopes = entries.ToDictionary(e => e.Key, e => e.Scope, StringComparer.Ordinal);
@@ -109,7 +95,118 @@ public sealed class SyncService(
     }
 
     public async Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) =>
-        JsonProjection.ToEditJson(ScopeMerger.Merge((await ReadEntriesAsync(env, binding.Service, ct)).Entries)).ToJsonString(new() { WriteIndented = true });
+        JsonProjection.ToEditJson((await ReadRemoteConfigAsync(binding, env, ct)).Entries).ToJsonString(new() { WriteIndented = true });
+
+    /// <summary>
+    /// Label selection (ADR 0008) and scope merge of the remote entries, as <see cref="ExportJsonAsync"/> sees them; secret
+    /// values are never read. <see cref="RemoteConfig.Shadowed"/> is ordered by key (ordinal).
+    /// </summary>
+    public async Task<RemoteConfig> ReadRemoteConfigAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct)
+    {
+        var (raw, warnings) = await ReadEntriesAsync(env, binding.Service, ct);
+        var entries = ScopeMerger.Merge(raw);
+        var overridden = entries.Where(e => e.Scope == ConfigScope.Service).Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
+        return new(env, entries, [.. raw.Where(e => e.Scope == ConfigScope.Global && overridden.Contains(e.Key)).OrderBy(e => e.Key, StringComparer.Ordinal)]) { Warnings = warnings };
+    }
+
+    /// <summary>
+    /// Pulls only <paramref name="keys"/> (see <see cref="ISyncService.PullSelectedAsync"/>). A key already in a local target
+    /// keeps its position there; a new one is appended. A target whose content does not change is not rewritten.
+    /// <see cref="PullResult.Warnings"/> are limited to the selected keys.
+    /// </summary>
+    public async Task<PullResult> PullSelectedAsync(ProjectBinding binding, ConfigEnvironment env, IReadOnlyCollection<string> keys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        EnsureActive(binding, env);
+        var secretsTarget = await PrepareTargetsAsync(binding, ct);
+
+        var (raw, warnings) = await ReadEntriesAsync(env, binding.Service, ct);
+        var remote = ScopeMerger.Merge(raw).ToDictionary(e => e.Key, StringComparer.Ordinal);
+        var snapshot = await state.LoadSnapshotAsync(binding.RepoPath, env.Name, ct);
+        var items = new Dictionary<string, StateItem>(snapshot?.Items ?? new Dictionary<string, StateItem>(), StringComparer.Ordinal);
+        var local = await ReadTargetsAsync(binding, ct);
+        var shared = binding.ValuesTarget == binding.SecretsTarget;
+        List<LocalValue> values = [.. local.Values], secrets = [.. local.Secrets];
+        List<string> ignored = [];
+        var (valuesWritten, secretsWritten) = (0, 0);
+        var selected = keys.ToHashSet(StringComparer.Ordinal);
+
+        foreach (var key in selected.Order(StringComparer.Ordinal))
+        {
+            var entry = remote.GetValueOrDefault(key);
+            if (IgnoreRules.IsIgnored(binding.Ignore, key, entry?.Scope ?? snapshot?.Items.GetValueOrDefault(key)?.Scope ?? ConfigScope.Service))
+            {
+                ignored.Add(key);
+                continue;
+            }
+
+            switch (entry?.Value)
+            {
+                case ConfigValue.Plain plain:
+                    Put(secrets, key, null);
+                    Put(values, key, new(key, plain.Value, entry.Scope));
+                    items[key] = new(key, entry.Scope, new StateValue.Plain(plain.Value));
+                    valuesWritten++;
+                    break;
+                case ConfigValue.KeyVaultRef reference:
+                    var secret = new SecretString(await secretStore.GetAsync(reference.SecretUri, ct));
+                    Put(values, key, null);
+                    Put(shared ? values : secrets, key, new(key, secret.Reveal(), entry.Scope));
+                    items[key] = new(key, entry.Scope, new StateValue.Secret(reference.SecretUri, fingerprinter.Fingerprint(secret)));
+                    secretsWritten++;
+                    break;
+                default:
+                    Put(values, key, null);
+                    Put(secrets, key, null);
+                    items.Remove(key);
+                    break;
+            }
+        }
+
+        if (!values.SequenceEqual(local.Values))
+        {
+            await targets.First(t => t.Kind == binding.ValuesTarget.Kind).WriteAsync(binding.ValuesTarget, values, ct);
+        }
+
+        if (!shared && !secrets.SequenceEqual(local.Secrets))
+        {
+            await secretsTarget.WriteAsync(binding.SecretsTarget, secrets, ct);
+        }
+
+        await state.SaveSnapshotAsync(binding.RepoPath, env.Name, new ConfigState(items), ct);
+        var selectedWarnings = warnings.Where(w => selected.Contains(w.Key)).ToList();
+        return new(env.Name, valuesWritten, secretsWritten, false, [])
+        {
+            Warnings = selectedWarnings.Count == 0 ? Array.Empty<SyncWarning>() : selectedWarnings,
+            Ignored = ignored.Count == 0 ? Array.Empty<string>() : ignored,
+        };
+    }
+
+    /// <summary>See <see cref="ISyncService.ResolveConflictAsync"/>. KeepLocal resolves only the secret of <paramref name="key"/> (to fingerprint it).</summary>
+    public async Task ResolveConflictAsync(ProjectBinding binding, ConfigEnvironment env, string key, ConflictResolution resolution, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(key);
+        EnsureActive(binding, env);
+        if (resolution == ConflictResolution.KeepRemote)
+        {
+            await PullSelectedAsync(binding, env, [key], ct);
+            return;
+        }
+
+        var entry = ScopeMerger.Merge((await ReadEntriesAsync(env, binding.Service, ct)).Entries).FirstOrDefault(e => e.Key == key);
+        var snapshot = await state.LoadSnapshotAsync(binding.RepoPath, env.Name, ct);
+        var items = new Dictionary<string, StateItem>(snapshot?.Items ?? new Dictionary<string, StateItem>(), StringComparer.Ordinal);
+        if (entry is not null && await ToStateItemAsync(entry, ct) is { } item)
+        {
+            items[key] = item;
+        }
+        else
+        {
+            items.Remove(key);
+        }
+
+        await state.SaveSnapshotAsync(binding.RepoPath, env.Name, new ConfigState(items), ct);
+    }
 
     public async Task<string> ExportPromoteJsonAsync(ProjectBinding binding, ConfigEnvironment from, ConfigEnvironment to, CancellationToken ct)
     {
@@ -128,7 +225,8 @@ public sealed class SyncService(
 
     /// <summary>
     /// Plans local changes against <paramref name="env"/>. <see cref="PushSource.Promote"/> plans only new service keys
-    /// (<c>Add</c>/<c>CreateSecret</c>, empty base, global ignored); <see cref="PushSource.EditedJson"/> uses the current remote state as base (it was exported from it); a key already in <paramref name="env"/> at service scope is a conflict (a global-only key gets a service override).
+    /// (<c>Add</c>/<c>CreateSecret</c>, empty base, global ignored); <see cref="PushSource.EditedJson"/> uses its <see cref="PushSource.EditedJson.BaseJson"/>
+    /// (parsed with the known secrets) as base, else the current remote state (it was exported from it); a key already in <paramref name="env"/> at service scope is a conflict (a global-only key gets a service override).
     /// <see cref="PushSource.LocalFiles"/> skips ignored keys; without <see cref="PushSource.LocalFiles.Delete"/> (upsert) a local
     /// deletion is not planned but returned as <see cref="SyncWarningKind.DeleteSkipped"/>. Edited and promoted JSON ignore neither.
     /// Throws <see cref="ArgumentException"/> naming the key for a null secret value.
@@ -137,7 +235,13 @@ public sealed class SyncService(
     {
         var (snapshot, merged, raw, readWarnings) = await ReadRemoteAsync(binding, env, ct);
         var promote = source is PushSource.Promote;
-        var @base = source switch { PushSource.Promote => new ConfigState(new Dictionary<string, StateItem>()), PushSource.EditedJson => merged, _ => snapshot };
+        var @base = source switch
+        {
+            PushSource.Promote => new ConfigState(new Dictionary<string, StateItem>()),
+            PushSource.EditedJson { BaseJson: { } baseJson } => JsonProjection.FromEditJson(baseJson, fingerprinter, KnownSecrets(merged, merged)).State,
+            PushSource.EditedJson => merged,
+            _ => snapshot,
+        };
         var remote = promote ? Service(merged) : merged;
         var json = source switch { PushSource.EditedJson e => e.Json, PushSource.Promote p => p.Json, _ => null };
         var local = json is null ? new ParsedEditJson(await ReadLocalAsync(binding, ct), []) : JsonProjection.FromEditJson(json, fingerprinter, KnownSecrets(@base, remote));
@@ -199,28 +303,20 @@ public sealed class SyncService(
     /// <summary>
     /// Creates Key Vault secrets first, then writes all changes to App Config in one call (references use the new secret URIs).
     /// Throws <see cref="InvalidOperationException"/> before any write on conflicts, a missing vault choice, an unconfirmed
-    /// protected environment (name, ignoring case) or unconfirmed global changes. When nothing failed, the snapshot is updated only for keys touched by the plan.
+    /// protected environment (name, ignoring case) or unconfirmed global changes (<see cref="ApplyGuard"/>; the message is
+    /// that of the first blocker). When nothing failed, the snapshot is updated only for keys touched by the plan.
     /// </summary>
     public async Task<ApplyResult> ApplyAsync(SyncPlan plan, ApplyOptions options, CancellationToken ct)
     {
-        if (plan.Conflicts.Count > 0)
+        if (ApplyGuard.Check(plan, options) is [var blocker, ..])
         {
-            throw new InvalidOperationException("Plan has conflicts; resolve them before applying.");
-        }
-
-        if (plan.RequiresVaultChoice)
-        {
-            throw new InvalidOperationException("Choose a Key Vault first.");
-        }
-
-        if (plan.Environment.IsProtected && !string.Equals(options.ConfirmedEnvironment, plan.Environment.Name, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Applying to protected environment '{plan.Environment.Name}' requires typing its name.");
-        }
-
-        if (plan.TouchesGlobal && !options.ConfirmGlobal)
-        {
-            throw new InvalidOperationException("Plan changes global keys; confirm global changes.");
+            throw new InvalidOperationException(blocker switch
+            {
+                ApplyBlocker.Conflicts => "Plan has conflicts; resolve them before applying.",
+                ApplyBlocker.VaultChoiceRequired => "Choose a Key Vault first.",
+                ApplyBlocker.EnvironmentNotConfirmed => $"Applying to protected environment '{plan.Environment.Name}' requires typing its name.",
+                _ => "Plan changes global keys; confirm global changes.",
+            });
         }
 
         var changes = new List<Change>();
@@ -259,6 +355,54 @@ public sealed class SyncService(
         return result;
     }
 
+    /// <summary>Gitignore step (profile mode, ADR 0009), then the secrets-target safety check; returns the secrets target.</summary>
+    private async Task<ILocalTarget> PrepareTargetsAsync(ProjectBinding binding, CancellationToken ct)
+    {
+        if ((await state.LoadProfileAsync(ct))?.GitIgnoreLocalFiles == true)
+        {
+            await targets.First(t => t.Kind == binding.ValuesTarget.Kind).EnsureGitIgnoredAsync(binding.ValuesTarget, ct);
+            if (binding.SecretsTarget != binding.ValuesTarget)
+            {
+                await targets.First(t => t.Kind == binding.SecretsTarget.Kind).EnsureGitIgnoredAsync(binding.SecretsTarget, ct);
+            }
+        }
+
+        var secretsTarget = targets.First(t => t.Kind == binding.SecretsTarget.Kind);
+        if (!(await secretsTarget.InspectAsync(binding.SecretsTarget, ct)).IsSafeForSecrets)
+        {
+            throw new InvalidOperationException($"{binding.SecretsTarget.Kind} target is not safe for secrets.");
+        }
+
+        return secretsTarget;
+    }
+
+    private static void EnsureActive(ProjectBinding binding, ConfigEnvironment env)
+    {
+        if (!string.Equals(binding.ActiveEnvironment, env.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Environment '{env.Name}' is not the active environment of the project; switch to it first.");
+        }
+    }
+
+    /// <summary>Replaces the value of <paramref name="key"/> in place, appends it when missing, or removes it when <paramref name="value"/> is null.</summary>
+    private static void Put(List<LocalValue> list, string key, LocalValue? value)
+    {
+        var index = list.FindIndex(v => v.Key == key);
+        if (value is null)
+        {
+            if (index >= 0)
+                list.RemoveAt(index);
+        }
+        else if (index >= 0)
+        {
+            list[index] = value;
+        }
+        else
+        {
+            list.Add(value);
+        }
+    }
+
     private async Task<ConfigState> ReadLocalAsync(ProjectBinding binding, CancellationToken ct)
     {
         var (values, secrets) = await ReadTargetsAsync(binding, ct);
@@ -287,20 +431,22 @@ public sealed class SyncService(
         var items = new Dictionary<string, StateItem>(StringComparer.Ordinal);
         foreach (var entry in ScopeMerger.Merge(raw))
         {
-            StateValue? value = entry.Value switch
+            if (await ToStateItemAsync(entry, ct) is { } item)
             {
-                ConfigValue.Plain plain => new StateValue.Plain(plain.Value),
-                ConfigValue.KeyVaultRef reference => new StateValue.Secret(reference.SecretUri, fingerprinter.Fingerprint(new SecretString(await secretStore.GetAsync(reference.SecretUri, ct)))),
-                _ => null,
-            };
-            if (value is not null)
-            {
-                items[entry.Key] = new(entry.Key, entry.Scope, value);
+                items[entry.Key] = item;
             }
         }
 
         return (await state.LoadSnapshotAsync(binding.RepoPath, env.Name, ct) ?? new(new Dictionary<string, StateItem>()), new(items), raw, warnings);
     }
+
+    /// <summary>Normalized remote item; a Key Vault reference is resolved only to fingerprint it. Other values → null.</summary>
+    private async Task<StateItem?> ToStateItemAsync(ConfigEntry entry, CancellationToken ct) => entry.Value switch
+    {
+        ConfigValue.Plain plain => new StateItem(entry.Key, entry.Scope, new StateValue.Plain(plain.Value)),
+        ConfigValue.KeyVaultRef reference => new StateItem(entry.Key, entry.Scope, new StateValue.Secret(reference.SecretUri, fingerprinter.Fingerprint(new SecretString(await secretStore.GetAsync(reference.SecretUri, ct))))),
+        _ => null,
+    };
 
     private static Dictionary<string, StateValue.Secret> KnownSecrets(ConfigState @base, ConfigState remote) => @base.Items.Values.Concat(remote.Items.Values)
         .Select(i => i.Value).OfType<StateValue.Secret>().Where(s => s.SecretUri is not null)
