@@ -1,13 +1,14 @@
 # 0002. Окремий App Configuration на кожне середовище
 
-Status: accepted
+Status: accepted; доповнено ADR 0008 (режим «один store, label на середовище» реалізовано — `LabelResolver`;
+у store-режимі читаються всі labels, а не лише ключі без label)
 
 ## Контекст
 Сьогодні dev / stage / prod мають окремі App Configuration. Згодом можливий один store з labels.
 
 ## Рішення
 Усі use cases працюють лише з `ConfigEnvironment(Name, StoreEndpoint, Label?)`.
-`IEnvironmentResolver` має дві стратегії: `SeparateStoresResolver` (зараз, Label = null) і `LabelResolver` (пізніше).
+`IEnvironmentResolver` має дві стратегії: `SeparateStoresResolver` (Label = null) і `LabelResolver` (ADR 0008).
 Мапінг stores на середовища: тег `environment`, потім суфікс назви (`-dev`, `-stg`, `-prod`).
 
 ## Наслідки

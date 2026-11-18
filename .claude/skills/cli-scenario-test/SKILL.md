@@ -34,7 +34,7 @@ the production command tree (`CliApp.Configure`) and the real Core services, wit
 - `InMemoryUserStateStore` stores everything as JSON (same options as `JsonUserStateStore`), so state must round-trip;
   `Profile`, `Binding(repo)`, `Snapshot(repo, env)`, `SnapshotJson(repo, env)` (assert secrets never land there).
 - Local files: `InMemoryLocalTarget` keeps `LocalValue`s per target and validates writes as nested JSON; helpers on the single
-  file: `Values()`, `Local(key)`, `SetLocal`, `RemoveLocal`, `Writes`.
+  file: `Values()`, `Local(key)`, `Scope(key)` (`Global` = marked `//@global`), `SetLocal` (keeps the scope), `RemoveLocal`, `Writes`.
 - Output helpers: `ScenarioJson` (`Parse`, `Warnings` → `(kind, key)`, `Changes` → `(kind, scope, key, label, beforeLabel)`,
   `Strings`, `AssertApplied(output, n)`), `ScenarioOutput.AssertLine(output, parts...)` for human tables/warnings.
 
