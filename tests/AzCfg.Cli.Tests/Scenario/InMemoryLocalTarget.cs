@@ -23,6 +23,8 @@ public sealed class InMemoryLocalTarget : ILocalTarget
     public Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct) =>
         Task.FromResult(new LocalTargetOption(target, _files.ContainsKey(target), IsSafeForSecrets: true));
 
+    public Task EnsureGitIgnoredAsync(LocalTargetBinding target, CancellationToken ct) => Task.CompletedTask;
+
     public Task<IReadOnlyList<LocalValue>> ReadAsync(LocalTargetBinding target, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<LocalValue>>(_files.TryGetValue(target, out var values) ? [.. values] : []);
 

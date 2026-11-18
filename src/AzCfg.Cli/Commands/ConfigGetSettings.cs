@@ -7,6 +7,6 @@ namespace AzCfg.Cli.Commands;
 public class ConfigGetSettings : GlobalSettings
 {
     [CommandArgument(0, "<KEY>")]
-    [Description("Setting key: mode, defaultLabel, env.<name>.endpoint, env.<name>.label or env.<name>.protected.")]
+    [Description("Setting key: mode, defaultLabel, gitignoreLocalFiles, env.<name>.endpoint, env.<name>.label or env.<name>.protected.")]
     public string Key { get; init; } = "";
 }

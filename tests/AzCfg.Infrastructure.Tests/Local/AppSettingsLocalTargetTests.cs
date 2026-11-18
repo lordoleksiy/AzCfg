@@ -148,6 +148,51 @@ public sealed class AppSettingsLocalTargetTests : IDisposable
     }
 
     [Fact]
+    public async Task EnsureGitIgnoredAsync_InGitRepo_AddsLineAndMakesFileSafe()
+    {
+        RunGit("init");
+
+        await _target.EnsureGitIgnoredAsync(Binding(), CancellationToken.None);
+
+        Assert.Equal(["appsettings.local.json"], File.ReadAllLines(Path.Combine(_root, ".gitignore")));
+        Assert.True((await _target.InspectAsync(Binding(), CancellationToken.None)).IsSafeForSecrets);
+    }
+
+    [Fact]
+    public async Task EnsureGitIgnoredAsync_CalledTwice_DoesNotDuplicateLine()
+    {
+        RunGit("init");
+
+        await _target.EnsureGitIgnoredAsync(Binding(), CancellationToken.None);
+        await _target.EnsureGitIgnoredAsync(Binding(), CancellationToken.None);
+
+        Assert.Equal(["appsettings.local.json"], File.ReadAllLines(Path.Combine(_root, ".gitignore")));
+    }
+
+    [Fact]
+    public async Task EnsureGitIgnoredAsync_AlreadyIgnoredByRootGitIgnore_DoesNotCreateProjectGitIgnore()
+    {
+        RunGit("init");
+        File.WriteAllText(Path.Combine(_root, ".gitignore"), "appsettings.local.json\n");
+        var project = Directory.CreateDirectory(Path.Combine(_root, "src")).FullName;
+
+        await _target.EnsureGitIgnoredAsync(new(LocalTargetKind.AppSettingsLocal, Path.Combine(project, "Service.csproj"), LocalFileFormat.NestedJson), CancellationToken.None);
+
+        Assert.False(File.Exists(Path.Combine(project, ".gitignore")));
+    }
+
+    [Fact]
+    public async Task EnsureGitIgnoredAsync_ExistingFileWithoutTrailingNewline_AppendsOnNewLine()
+    {
+        RunGit("init");
+        File.WriteAllText(Path.Combine(_root, ".gitignore"), "bin/");
+
+        await _target.EnsureGitIgnoredAsync(Binding(), CancellationToken.None);
+
+        Assert.Equal(["bin/", "appsettings.local.json"], File.ReadAllLines(Path.Combine(_root, ".gitignore")));
+    }
+
+    [Fact]
     public async Task InspectAsync_InGitRepoIgnoredButTracked_IsSafeForSecretsIsFalse()
     {
         RunGit("init");

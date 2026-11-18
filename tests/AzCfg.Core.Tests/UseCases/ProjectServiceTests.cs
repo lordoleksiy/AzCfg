@@ -106,6 +106,62 @@ public sealed class ProjectServiceTests
         Assert.Empty(binding.VaultByEnvironment);
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task ResolveAsync_ReportsOptionsSafeOnlyWhenGitIgnoreModeIsOn(bool gitIgnore, bool expectedSafe)
+    {
+        var state = new FakeUserStateStore { Profile = new UserProfile([Env("dev")], GitIgnoreLocalFiles: gitIgnore) };
+        var service = Create(state, [Project("Orders", "Orders")], [], new FakeLocalTarget(LocalTargetKind.AppSettingsLocal, isSafeForSecrets: false));
+
+        var result = await service.ResolveAsync(Repo, Ct);
+
+        Assert.Equal(expectedSafe, Assert.Single(result.TargetOptions).IsSafeForSecrets);
+    }
+
+    [Fact]
+    public async Task BindAsync_GitIgnoreModeOn_EnsuresBothTargetsBeforeSafetyCheck()
+    {
+        var state = new FakeUserStateStore { Profile = new UserProfile([], GitIgnoreLocalFiles: true) };
+        var values = new FakeLocalTarget(LocalTargetKind.AppSettingsLocal, isSafeForSecrets: false) { MakesSafeWhenGitIgnored = true };
+        var secrets = new FakeLocalTarget(LocalTargetKind.UserSecrets);
+        var service = Create(state, [], [], values, secrets);
+
+        await service.BindAsync(Repo, "orders", Values, Secrets, Ct);
+        var binding = await service.BindAsync(Repo, "orders", Values, Values, Ct);
+
+        Assert.Equal(Secrets, Assert.Single(secrets.EnsureGitIgnoredCalls));
+        Assert.Equal([Values, Values], values.EnsureGitIgnoredCalls);
+        Assert.Same(binding, state.Binding);
+    }
+
+    [Fact]
+    public async Task BindAsync_GitIgnoreModeOn_StillUnsafeTarget_Throws()
+    {
+        var state = new FakeUserStateStore { Profile = new UserProfile([], GitIgnoreLocalFiles: true) };
+        var target = new FakeLocalTarget(LocalTargetKind.AppSettingsLocal, isSafeForSecrets: false);
+        var service = Create(state, [], [], target);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.BindAsync(Repo, "orders", Values, Values, Ct));
+
+        Assert.Single(target.EnsureGitIgnoredCalls);
+        Assert.Null(state.Binding);
+    }
+
+    [Fact]
+    public async Task BindAsync_GitIgnoreModeOff_NeverEnsuresGitIgnored()
+    {
+        var state = new FakeUserStateStore { Profile = new UserProfile([]) };
+        var values = new FakeLocalTarget(LocalTargetKind.AppSettingsLocal);
+        var secrets = new FakeLocalTarget(LocalTargetKind.UserSecrets);
+        var service = Create(state, [], [], values, secrets);
+
+        await service.BindAsync(Repo, "orders", Values, Secrets, Ct);
+
+        Assert.Empty(values.EnsureGitIgnoredCalls);
+        Assert.Empty(secrets.EnsureGitIgnoredCalls);
+    }
+
     [Fact]
     public async Task BindAsync_UnsafeSecretsTarget_ThrowsAndSavesNothing()
     {

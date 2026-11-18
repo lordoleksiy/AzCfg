@@ -87,6 +87,17 @@ public sealed class UserSecretsTargetTests : IDisposable
     }
 
     [Fact]
+    public async Task EnsureGitIgnoredAsync_ChangesNoFiles()
+    {
+        var csproj = WithoutId();
+
+        await _target.EnsureGitIgnoredAsync(Binding(csproj), CancellationToken.None);
+
+        Assert.Equal([csproj], Directory.GetFileSystemEntries(_root));
+        Assert.DoesNotContain("UserSecretsId", await File.ReadAllTextAsync(csproj));
+    }
+
+    [Fact]
     public async Task InspectAsync_NoSecretsId_DoesNotModifyCsprojAndIsSafe()
     {
         var option = await _target.InspectAsync(Binding(WithoutId()), CancellationToken.None);

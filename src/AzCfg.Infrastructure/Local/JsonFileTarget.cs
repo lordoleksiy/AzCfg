@@ -22,6 +22,8 @@ public abstract class JsonFileTarget : ILocalTarget
 
     public abstract Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct);
 
+    public abstract Task EnsureGitIgnoredAsync(LocalTargetBinding target, CancellationToken ct);
+
     public Task<IReadOnlyList<LocalValue>> ReadAsync(LocalTargetBinding target, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(target);

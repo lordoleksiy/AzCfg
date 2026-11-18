@@ -31,6 +31,28 @@ public sealed class AppSettingsLocalTarget : JsonFileTarget
         return new LocalTargetOption(target, exists, isSafeForSecrets);
     }
 
+    public override async Task EnsureGitIgnoredAsync(LocalTargetBinding target, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+
+        var path = Path.GetFullPath(GetFilePath(target));
+        var directory = Path.GetDirectoryName(path)!;
+        if (await RunGitAsync(directory, ["check-ignore", "-q", path], ct) == 0)
+        {
+            return;
+        }
+
+        var gitIgnore = Path.Combine(directory, ".gitignore");
+        var existing = File.Exists(gitIgnore) ? await File.ReadAllTextAsync(gitIgnore, ct) : "";
+        if (existing.Split('\n').Select(l => l.Trim()).Any(l => l == FileName || l == "/" + FileName))
+        {
+            return;
+        }
+
+        var prefix = existing.Length == 0 || existing.EndsWith('\n') ? "" : Environment.NewLine;
+        await File.AppendAllTextAsync(gitIgnore, prefix + FileName + Environment.NewLine, ct);
+    }
+
     protected override string GetFilePath(LocalTargetBinding target)
     {
         var directory = Path.GetDirectoryName(target.ProjectPath);
