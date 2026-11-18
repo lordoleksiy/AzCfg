@@ -15,7 +15,7 @@ Configuration. Ships as the `azcfg` dotnet tool.
 Requires the .NET 10 SDK or runtime.
 
 ```bash
-dotnet tool install --global AzCfg --version 0.3.0
+dotnet tool install --global AzCfg --version 0.3.1
 azcfg --help
 ```
 
