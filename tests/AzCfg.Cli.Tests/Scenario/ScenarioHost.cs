@@ -3,6 +3,7 @@ using AzCfg.Core.Environments;
 using AzCfg.Core.Model;
 using AzCfg.Core.Security;
 using AzCfg.Core.UseCases;
+using AzCfg.Infrastructure.InMemory;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Spectre.Console.Cli;

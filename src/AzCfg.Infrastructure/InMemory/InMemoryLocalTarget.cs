@@ -3,13 +3,15 @@ using AzCfg.Core.Mapping;
 using AzCfg.Core.Model;
 using AzCfg.Core.UseCases;
 
-namespace AzCfg.Cli.Tests.Scenario;
+namespace AzCfg.Infrastructure.InMemory;
 
 /// <summary>
 /// In-memory user-secrets file per <see cref="LocalTargetBinding"/>: handles every project and is safe for secrets. Writes replace the
 /// file and are validated as nested JSON like the real target (no duplicate keys, no key that is both a value and a parent).
 /// The <c>Local</c>/<c>Scope</c>/<c>SetLocal</c>/<c>RemoveLocal</c> helpers edit the single written file, as a developer would
 /// (<c>SetLocal</c> keeps the key's scope, like editing a value next to its <c>//@global</c> marker).
+/// <c>SetLocal</c>/<c>Scope</c>/<c>RemoveLocal</c> throw <see cref="InvalidOperationException"/> unless exactly one file was
+/// written; <c>Scope</c>/<c>RemoveLocal</c> also unless the key is present exactly once.
 /// </summary>
 public sealed class InMemoryLocalTarget : ILocalTarget
 {
@@ -44,7 +46,7 @@ public sealed class InMemoryLocalTarget : ILocalTarget
     public string? Local(string key) => Values().GetValueOrDefault(key);
 
     /// <summary>Scope of <paramref name="key"/> in the single file (<see cref="ConfigScope.Global"/> = marked <c>//@global</c>).</summary>
-    public ConfigScope Scope(string key) => Assert.Single(File(), v => v.Key == key).Scope;
+    public ConfigScope Scope(string key) => File().Single(v => v.Key == key).Scope;
 
     public void SetLocal(string key, string value)
     {
@@ -56,7 +58,11 @@ public sealed class InMemoryLocalTarget : ILocalTarget
             file.Add(new(key, value));
     }
 
-    public void RemoveLocal(string key) => Assert.Equal(1, File().RemoveAll(v => v.Key == key));
+    public void RemoveLocal(string key)
+    {
+        if (File().RemoveAll(v => v.Key == key) != 1)
+            throw new InvalidOperationException($"Key '{key}' is not in the local file.");
+    }
 
-    private List<LocalValue> File() => Assert.Single(_files).Value;
+    private List<LocalValue> File() => _files.Single().Value;
 }

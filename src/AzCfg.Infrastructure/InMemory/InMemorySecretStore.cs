@@ -1,6 +1,6 @@
 using AzCfg.Core.Abstractions;
 
-namespace AzCfg.Cli.Tests.Scenario;
+namespace AzCfg.Infrastructure.InMemory;
 
 /// <summary>
 /// In-memory Key Vault: secrets keyed by <c>(vault, name)</c>. <see cref="GetAsync"/> accepts versioned and versionless
