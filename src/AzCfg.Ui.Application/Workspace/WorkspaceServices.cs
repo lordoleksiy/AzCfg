@@ -11,7 +11,7 @@ public static class WorkspaceServices
         return services
             .AddSingleton<IWorkspaceRegistry>(sp => new WorkspaceRegistry(sp.GetRequiredService<UiStatePaths>().Root, sp.GetRequiredService<TimeProvider>()))
             .AddSingleton<BindingLocator>()
-            .AddSingleton<IWorkspaceService>(sp => ActivatorUtilities.CreateInstance<WorkspaceService>(sp))
+            .AddSingleton<IWorkspaceService, WorkspaceService>()
             .AddSingleton<IDirectoryBrowser, DirectoryBrowser>();
     }
 }

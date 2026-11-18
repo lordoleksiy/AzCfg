@@ -10,6 +10,6 @@ public static class EnvironmentServices
         services.TryAddSingleton(TimeProvider.System);
         return services
             .AddSingleton<IEnvironmentService, EnvironmentService>()
-            .AddSingleton<IAzureStatusService>(sp => ActivatorUtilities.CreateInstance<AzureStatusService>(sp));
+            .AddSingleton<IAzureStatusService, AzureStatusService>();
     }
 }
