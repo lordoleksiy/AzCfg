@@ -1,11 +1,11 @@
 # AzCfg
 
-Локальний менеджер Azure App Configuration + Key Vault для .NET-розробників: двостороння синхронізація
-конфігів між Azure та локальними файлами (local.settings.json, user-secrets, appsettings) і редагування
-App Configuration у JSON. Core — class library, клієнт зараз CLI (`dotnet tool azcfg`), згодом UI.
-Мова спілкування — українська; код, ідентифікатори й коміти — англійською.
+Local manager for Azure App Configuration + Key Vault for .NET developers: two-way sync of config between Azure
+and local files (local.settings.json, user-secrets, appsettings) and JSON editing of App Configuration.
+Core is a class library; the client is currently a CLI (`dotnet tool azcfg`), a UI comes later.
+Code, identifiers, commits and docs are in English (existing ADRs and plans in `docs/` are in Ukrainian).
 
-## Команди
+## Commands
 ```
 dotnet build AzCfg.slnx
 dotnet test AzCfg.slnx
@@ -13,59 +13,59 @@ dotnet test tests/AzCfg.Core.Tests --filter "FullyQualifiedName~KeyMapper"
 dotnet format AzCfg.slnx
 dotnet run --project src/AzCfg.Cli -- <args>
 ```
-Warnings = errors (`Directory.Build.props`). Версії пакетів лише в `Directory.Packages.props`.
+Warnings = errors (`Directory.Build.props`). Package versions only in `Directory.Packages.props`.
 
-## Структура і межі шарів
+## Structure and layer boundaries
 ```
-src/AzCfg.Core            модель, Mapping, Sync, Abstractions (порти), UseCases
-src/AzCfg.Infrastructure  Azure SDK, файлова система, стан користувача, DI (AddAzCfg)
-src/AzCfg.Cli             Spectre.Console.Cli — лише взаємодія з користувачем
-tests/AzCfg.Core.Tests    основна маса тестів
+src/AzCfg.Core            model, Mapping, Sync, Abstractions (ports), UseCases
+src/AzCfg.Infrastructure  Azure SDK, file system, user state, DI (AddAzCfg)
+src/AzCfg.Cli             Spectre.Console.Cli — user interaction only
+tests/AzCfg.Core.Tests    the bulk of the tests
 tests/AzCfg.Infrastructure.Tests
 ```
-- **Core ні на що не посилається**: жодного Azure SDK, файлового IO, консолі. Лише BCL + `ILogger`.
-- **Core нічого не питає і не друкує** — повертає дані (`SyncPlan`, `ProjectResolution`), рішення приймає клієнт.
-- Infrastructure реалізує порти з `Core/Abstractions`; Cli залежить від Core і Infrastructure.
-- Усе, що виводить CLI, має мати `--json` еквівалент (серіалізація use-case record як є).
-- Один тип на файл, file-scoped namespaces.
+- **Core references nothing**: no Azure SDK, no file IO, no console. Only BCL + `ILogger`.
+- **Core never prompts or prints** — it returns data (`SyncPlan`, `ProjectResolution`); the client decides.
+- Infrastructure implements the ports from `Core/Abstractions`; Cli depends on Core and Infrastructure.
+- Everything the CLI prints must have a `--json` equivalent (the use-case record serialized as-is).
+- One type per file, file-scoped namespaces.
 
-## Конвенції ключів
-- Сервіс: `<service>:<Key:Path>`; глобальні: `global:<Key:Path>`.
-- Pull: `global:*` + `<service>:*`, префікс зрізається, сервісні перекривають global.
-- Push за замовчуванням лише scope сервісу; global — тільки явно через `@global`.
-- KV-секрети: `:` → `--`. Формат — властивість локальної цілі (`LocalTargetBinding.Format`): `NestedJson`
-  (сегменти шляху за `:`, без scope-префікса) для user-secrets/`appsettings.local.json`; `local.settings.json`
-  — лише `FlatDictionary` (плоский словник `Values`, ключі `A:B` як є, без вкладеності).
-- `{ "@kv": "name" }` → KV reference; з `"value"` → створити/оновити секрет.
-- Labels (ADR 0008): store-режим читає всі labels (дублікати → одна копія + `SyncWarning`); label-режим —
-  label середовища поверх ключів без label; Core ставить label кожного запису, Infrastructure пише `entry.Label`.
-- Push за замовчуванням — upsert (без видалень); `--delete` додає видалення. Ігнор — `ProjectBinding.Ignore`.
-- Global-ключі в локальних JSON-файлах позначаються `//@global` у кінці рядка (ADR 0009); push відносить їх до `global`.
+## Key conventions
+- Service: `<service>:<Key:Path>`; global: `global:<Key:Path>`.
+- Pull: `global:*` + `<service>:*`, the prefix is stripped, service keys override global.
+- Push by default touches only the service scope; global only explicitly via `@global`.
+- KV secrets: `:` → `--`. The format is a property of the local target (`LocalTargetBinding.Format`): `NestedJson`
+  (path segments split on `:`, no scope prefix) for user-secrets/`appsettings.local.json`; `local.settings.json`
+  — only `FlatDictionary` (flat `Values` dictionary, `A:B` keys as-is, no nesting).
+- `{ "@kv": "name" }` → KV reference; with `"value"` → create/update the secret.
+- Labels (ADR 0008): store mode reads all labels (duplicates → one copy + `SyncWarning`); label mode — the
+  environment's label on top of unlabeled keys; Core sets each entry's label, Infrastructure writes `entry.Label`.
+- Push is upsert by default (no deletes); `--delete` adds deletes. Ignore rules — `ProjectBinding.Ignore`.
+- Global keys in local JSON files are marked with `//@global` at the end of the line (ADR 0009); push assigns them to `global`.
 
-## Безпека
-- Auth лише `DefaultAzureCredential`.
-- Секрети ніколи не пишуться у git-tracked файли.
-- Запис в App Config з `If-Match: etag`; prod apply вимагає ввести назву середовища.
-- Значення секретів ніколи не потрапляють у знімки (`snapshots`), плани, логи чи `--json` вивід —
-  лише через `SecretString` (редагується до `"***"`) і fingerprint (`ISecretFingerprinter`).
+## Security
+- Auth only via `DefaultAzureCredential`.
+- Secrets are never written to git-tracked files.
+- Writes to App Config use `If-Match: etag`; prod apply requires typing the environment name.
+- Secret values never end up in snapshots, plans, logs or `--json` output —
+  only via `SecretString` (redacted to `"***"`) and a fingerprint (`ISecretFingerprinter`).
 
-## Правила роботи
-- TDD для Core: спершу падаючий тест, потім код.
-- Маленькі кроки: одна сутність/поведінка за раз; після кроку `dotnet build` + `dotnet test`.
-- Не додавай бізнес-логіку поза поточним кроком MVP; не рефактор чужого коду без запиту.
-- Нові залежності — лише через `Directory.Packages.props` і лише за потреби.
-- Модель: sealed records, immutable; async методи приймають `CancellationToken`.
+## Working rules
+- TDD for Core: failing test first, then code.
+- Small steps: one entity/behavior at a time; after each step `dotnet build` + `dotnet test`.
+- No business logic beyond the current MVP step; do not refactor others' code unasked.
+- New dependencies only via `Directory.Packages.props` and only when needed.
+- Model: sealed records, immutable; async methods take a `CancellationToken`.
 
-## Документація
-- Повна архітектура, моделі, порти, CLI, порядок MVP: `docs/architecture.md`
-- План MVP по задачах (брати одну через `/feature`): `docs/mvp-plan.md`
-- Рішення (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
+## Documentation
+- Full architecture, models, ports, CLI, MVP order: `docs/architecture.md`
+- MVP plan by task (take one via `/feature`): `docs/mvp-plan.md`
+- Decisions (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
   0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety,
   0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore)
 
 ## Skills
-- `/add-local-target` — новий `ILocalTarget` + тест + DI
-- `/add-cli-command` — нова команда + `--json`
-- `/adr` — новий ADR як контракт перед кодом
-- `/issue-orchestrator` — issue → ADR → агенти у worktree → merge → e2e перевірка
-- `/cli-scenario-test` — end-to-end сценарій CLI на in-memory фейках (init → pull → ignore → push)
+- `/add-local-target` — new `ILocalTarget` + test + DI
+- `/add-cli-command` — new command + `--json`
+- `/adr` — new ADR as a contract before code
+- `/issue-orchestrator` — issue → ADR → worktree agents → merge → e2e check
+- `/cli-scenario-test` — end-to-end CLI scenario on in-memory fakes (init → pull → ignore → push)
