@@ -1,0 +1,15 @@
+<div class="az-env-switcher" role="group" aria-label="Environments">
+    @foreach (var env in Environments)
+    {
+        <EnvPill @key="env.Name" Env="env" IsSelected="@string.Equals(env.Name, SelectedName, StringComparison.OrdinalIgnoreCase)"
+                 OnClick="() => OnSelect.InvokeAsync(env.Name)" />
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<EnvPillModel> Environments { get; set; } = [];
+
+    [Parameter] public string? SelectedName { get; set; }
+
+    [Parameter] public EventCallback<string> OnSelect { get; set; }
+}

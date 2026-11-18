@@ -1,0 +1,157 @@
+@using Microsoft.AspNetCore.Components.Web.Virtualization
+@typeparam TRow where TRow : class
+@inject IJSRuntime JS
+
+<div class="az-keytree" role="treegrid" aria-label="@AriaLabel" style="--az-keytree-cols: @GridColumns">
+    <div class="az-keytree-header" role="row">
+        <div class="az-keytree-cell" role="columnheader">@KeyHeader</div>
+        @foreach (var column in Columns)
+        {
+            <div class="az-keytree-cell" role="columnheader">@column.Title</div>
+        }
+    </div>
+    <div class="az-keytree-body">
+        <Virtualize TItem="KeyTreeRow<TRow>" Items="_rows" ItemSize="28" Context="row">
+            <div class="az-keytree-row @(row.Path == SelectedPath ? "selected" : "")" role="row" tabindex="@(row.Path == SelectedPath ? 0 : -1)"
+                 aria-selected="@((row.Path == SelectedPath).ToString().ToLowerInvariant())"
+                 aria-expanded="@(row.HasChildren ? row.IsExpanded.ToString().ToLowerInvariant() : null)"
+                 data-path="@row.Path" @key="row.Path"
+                 @onclick="() => SelectAsync(row)" @ondblclick="() => OnActivate.InvokeAsync(row)"
+                 @onkeydown="e => OnKeyDownAsync(e, row)">
+                <div class="az-keytree-cell az-keytree-key" role="gridcell" style="padding-left: @(row.Depth * 16 + 4)px">
+                    @if (row.HasChildren)
+                    {
+                        <button type="button" class="az-keytree-toggle" tabindex="-1" aria-label="@(row.IsExpanded ? "Collapse" : "Expand")"
+                                @onclick="() => Toggle(row)" @onclick:stopPropagation="true">
+                            <FluentIcon Value="@(row.IsExpanded ? (Icon)new Icons.Regular.Size16.ChevronDown() : new Icons.Regular.Size16.ChevronRight())" />
+                        </button>
+                    }
+                    else
+                    {
+                        <span class="az-keytree-toggle-space"></span>
+                    }
+                    <span class="az-mono az-keytree-name">
+                        @if (string.IsNullOrEmpty(HighlightText))
+                        {
+                            @row.Name
+                        }
+                        else
+                        {
+                            <FluentHighlighter HighlightedText="@HighlightText" Text="@row.Name" />
+                        }
+                    </span>
+                    @if (row.HasChildren)
+                    {
+                        <span class="az-keytree-count">@row.Count</span>
+                    }
+                </div>
+                @foreach (var column in Columns)
+                {
+                    <div class="az-keytree-cell" role="gridcell">@column.Cell(row)</div>
+                }
+            </div>
+        </Virtualize>
+    </div>
+</div>
+
+@code {
+    private KeyTreeRow<TRow>[] _rows = [];
+    private bool _focusPending;
+
+    [Parameter, EditorRequired] public KeyTreeModel<TRow> Model { get; set; } = default!;
+
+    /// <summary>Columns after the key column.</summary>
+    [Parameter] public IReadOnlyList<KeyTreeColumn<TRow>> Columns { get; set; } = [];
+
+    [Parameter] public string KeyHeader { get; set; } = "Key";
+
+    [Parameter] public string AriaLabel { get; set; } = "Keys";
+
+    /// <summary>Path of the selected row.</summary>
+    [Parameter] public string? SelectedPath { get; set; }
+
+    [Parameter] public EventCallback<string?> SelectedPathChanged { get; set; }
+
+    /// <summary>Raised with the row on double-click and on Enter.</summary>
+    [Parameter] public EventCallback<KeyTreeRow<TRow>> OnActivate { get; set; }
+
+    /// <summary>Highlights matches of this text in key names.</summary>
+    [Parameter] public string? HighlightText { get; set; }
+
+    private string GridColumns => string.Join(' ', Columns.Select(c => c.Width).Prepend("minmax(240px, 1.2fr)"));
+
+    protected override void OnParametersSet() => _rows = [.. Model.Flatten()];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPending && SelectedPath is not null)
+        {
+            _focusPending = false;
+            var selector = $"[data-path=\"{SelectedPath.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"]";
+            await using var element = await JS.InvokeAsync<IJSObjectReference>("document.querySelector", selector);
+            if (element is not null)
+            {
+                await element.InvokeVoidAsync("focus");
+            }
+        }
+    }
+
+    private async Task SelectAsync(KeyTreeRow<TRow> row, bool focus = false)
+    {
+        SelectedPath = row.Path;
+        _focusPending = focus;
+        await SelectedPathChanged.InvokeAsync(row.Path);
+    }
+
+    private void Toggle(KeyTreeRow<TRow> row)
+    {
+        Model.Toggle(row.Path);
+        _rows = [.. Model.Flatten()];
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e, KeyTreeRow<TRow> row)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                await MoveAsync(row, 1);
+                break;
+            case "ArrowUp":
+                await MoveAsync(row, -1);
+                break;
+            case "ArrowRight" when row.HasChildren && !row.IsExpanded:
+                Toggle(row);
+                break;
+            case "ArrowRight" when row.HasChildren:
+                await MoveAsync(row, 1);
+                break;
+            case "ArrowLeft" when row.HasChildren && row.IsExpanded:
+                Toggle(row);
+                break;
+            case "ArrowLeft":
+                await MoveToParentAsync(row);
+                break;
+            case "Enter":
+                await OnActivate.InvokeAsync(row);
+                break;
+        }
+    }
+
+    private async Task MoveAsync(KeyTreeRow<TRow> from, int delta)
+    {
+        var index = Array.FindIndex(_rows, r => r.Path == from.Path) + delta;
+        if (index >= 0 && index < _rows.Length)
+        {
+            await SelectAsync(_rows[index], focus: true);
+        }
+    }
+
+    private async Task MoveToParentAsync(KeyTreeRow<TRow> row)
+    {
+        var cut = row.Path.LastIndexOf(':');
+        if (cut > 0 && _rows.FirstOrDefault(r => r.Path == row.Path[..cut]) is { } parent)
+        {
+            await SelectAsync(parent, focus: true);
+        }
+    }
+}

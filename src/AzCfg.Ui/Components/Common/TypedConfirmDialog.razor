@@ -1,0 +1,43 @@
+<div class="az-typed-confirm">
+    <p>@Message</p>
+    <label class="az-typed-confirm-label">
+        Type <strong>@Expected</strong> to confirm
+        <input class="az-input" type="text" autocomplete="off" spellcheck="false" value="@_typed"
+               @oninput="OnInput" />
+    </label>
+    <div class="az-typed-confirm-actions">
+        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => CloseAsync(false)">Cancel</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" Disabled="!Matches" OnClick="() => CloseAsync(true)">Confirm</FluentButton>
+    </div>
+</div>
+
+@code {
+    private string _typed = string.Empty;
+
+    [CascadingParameter] public IDialogInstance? Dialog { get; set; }
+
+    [Parameter, EditorRequired] public string Message { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public string Expected { get; set; } = string.Empty;
+
+    /// <summary>Called with <c>true</c> (confirmed) or <c>false</c> (cancelled) before the hosting dialog, if any, is closed.</summary>
+    [Parameter] public EventCallback<bool> OnClose { get; set; }
+
+    private bool Matches => string.Equals(_typed.Trim(), Expected, StringComparison.OrdinalIgnoreCase);
+
+    private void OnInput(ChangeEventArgs e) => _typed = e.Value?.ToString() ?? string.Empty;
+
+    private async Task CloseAsync(bool confirmed)
+    {
+        if (confirmed && !Matches)
+        {
+            return;
+        }
+
+        await OnClose.InvokeAsync(confirmed);
+        if (Dialog is not null)
+        {
+            await (confirmed ? Dialog.CloseAsync() : Dialog.CancelAsync());
+        }
+    }
+}

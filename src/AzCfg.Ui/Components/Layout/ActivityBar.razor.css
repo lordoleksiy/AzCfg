@@ -1,0 +1,23 @@
+.az-activitybar {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    width: var(--az-activitybar-w);
+    height: 100%;
+    background: var(--colorNeutralBackground3);
+    border-right: 1px solid var(--colorNeutralStroke2);
+}
+
+.az-activitybar-account {
+    position: relative;
+    display: flex;
+    padding: 12px 0;
+    color: var(--colorNeutralForeground2);
+}
+
+.az-activitybar-account ::deep .az-status-dot {
+    position: absolute;
+    right: -2px;
+    bottom: 10px;
+}

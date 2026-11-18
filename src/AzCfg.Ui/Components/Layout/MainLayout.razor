@@ -1,7 +1,19 @@
+@using AzCfg.Ui.Features.Platform
 @inherits LayoutComponentBase
+@inject IThemeService ThemeService
 
 <FluentProviders />
 <FluentKeyCodeProvider />
-<main class="az-main">
+<main class="az-main-layout">
     @Body
 </main>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await ThemeService.SetThemeAsync(UiTheme.Settings);
+        }
+    }
+}

@@ -1,0 +1,52 @@
+.az-ops {
+    position: relative;
+}
+
+.az-ops-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: var(--az-statusbar-h);
+    padding: 0 8px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.az-ops-popover {
+    position: absolute;
+    bottom: var(--az-statusbar-h);
+    left: 0;
+    z-index: 900;
+    width: 360px;
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--colorNeutralStroke1);
+    border-radius: 4px;
+    background: var(--colorNeutralBackground3);
+    box-shadow: var(--shadow16);
+}
+
+.az-ops-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+.az-ops-row.failed .az-ops-row-message {
+    color: var(--az-diff-deleted);
+}
+
+.az-ops-row-message,
+.az-ops-empty {
+    color: var(--colorNeutralForeground3);
+}
+
+.az-ops-empty {
+    padding: 8px 10px;
+    font-size: 12px;
+}
