@@ -1,0 +1,70 @@
+:root {
+  --az-env-dev: #3fb68b; --az-env-stage: #e5a43b; --az-env-prod: #f0605d; --az-env-custom: #a78bfa;
+  --az-diff-added: #3fb68b; --az-diff-modified: #e5a43b; --az-diff-deleted: #f0605d;
+  --az-diff-conflict: #f472b6; --az-diff-remote: #5aa9e6; --az-draft: #5b9dff;
+  --az-font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+  --az-row-h: 28px; --az-header-h: 36px; --az-tab-h: 32px; --az-statusbar-h: 24px;
+  --az-activitybar-w: 48px; --az-sidebar-w: 280px; --az-inspector-w: 340px;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-size: 13px;
+  background: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
+}
+
+.az-main-layout {
+  height: 100vh;
+}
+
+.az-mono {
+  font-family: var(--az-font-mono);
+}
+
+.az-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--colorNeutralStroke1);
+  border-radius: 4px;
+  background: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
+  font: inherit;
+}
+
+.az-input:focus {
+  outline: 1px solid var(--colorStrokeFocus2);
+}
+
+.az-typed-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.az-typed-confirm p {
+  margin: 0;
+}
+
+.az-typed-confirm-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.az-typed-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Never a horizontal page scroll (§2.11). */
+@media (max-width: 767px) {
+  .az-tab-title {
+    max-width: 100px;
+  }
+}

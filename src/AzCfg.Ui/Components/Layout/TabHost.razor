@@ -1,0 +1,55 @@
+@using AzCfg.Ui.Application.State
+@using AzCfg.Ui.Components.Common
+@using AzCfg.Ui.Shared
+@implements IDisposable
+@inject TabsState Tabs
+@inject IEnumerable<TabRegistration> Registrations
+
+<div class="az-tabhost">
+    @foreach (var tab in Tabs.Tabs.Where(t => t.IsLoaded))
+    {
+        var active = tab.Id == Tabs.ActiveId;
+        <div class="az-tabpanel @(active ? "active" : "")" role="tabpanel" hidden="@(!active)" @key="tab.Id">
+            @if (Registrations.FirstOrDefault(r => r.Kind == tab.Descriptor.Kind) is { } registration)
+            {
+                <FluentErrorBoundary @key="(tab.Id, Generation(tab.Id))">
+                    <ChildContent>
+                        <DynamicComponent Type="registration.Component" Parameters="Parameters(tab)" />
+                    </ChildContent>
+                    <ErrorContent>
+                        <FluentMessageBar Intent="MessageBarIntent.Error" Layout="MessageBarLayout.SingleLine" AllowDismiss="false">
+                            <ChildContent>This tab failed to render.</ChildContent>
+                            <ActionsTemplate>
+                                <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Reload(tab.Id)">Reload tab</FluentButton>
+                            </ActionsTemplate>
+                        </FluentMessageBar>
+                    </ErrorContent>
+                </FluentErrorBoundary>
+            }
+            else
+            {
+                <EmptyState Text="@($"No view is registered for {tab.Descriptor.Kind} tabs")" />
+            }
+        </div>
+    }
+    @if (Tabs.Tabs.Count == 0)
+    {
+        <EmptyState Text="Open a folder to start" />
+    }
+</div>
+
+@code {
+    private readonly Dictionary<Guid, int> _generations = [];
+
+    protected override void OnInitialized() => Tabs.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    private int Generation(Guid id) => _generations.GetValueOrDefault(id);
+
+    private void Reload(Guid id) => _generations[id] = Generation(id) + 1;
+
+    private static Dictionary<string, object?> Parameters(WorkbenchTab tab) => new() { ["Tab"] = tab };
+
+    public void Dispose() => Tabs.Changed -= OnChanged;
+}

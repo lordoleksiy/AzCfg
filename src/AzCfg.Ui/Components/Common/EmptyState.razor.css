@@ -1,0 +1,9 @@
+.az-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px 12px;
+    color: var(--colorNeutralForeground3);
+    font-size: 13px;
+}

@@ -1,0 +1,10 @@
+<section class="az-inspector-section">
+    <h4 class="az-inspector-section-title">@Title</h4>
+    <div class="az-inspector-section-body">@ChildContent</div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

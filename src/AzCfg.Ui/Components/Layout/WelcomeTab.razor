@@ -1,0 +1,94 @@
+@using AzCfg.Ui.Application.Environments
+@using AzCfg.Ui.Application.Operations
+@using AzCfg.Ui.Application.State
+@using AzCfg.Ui.Application.Workspace
+@using AzCfg.Ui.Shared
+@implements IDisposable
+@inject IAzureStatusService AzureStatus
+@inject IOperationRunner Runner
+@inject IWorkspaceRegistry Registry
+@inject IWorkspaceService WorkspaceService
+@inject WorkspaceState Workspace
+@inject ICommandRegistry Commands
+
+<div class="az-welcome">
+    <h2 class="az-welcome-title">Welcome to AzCfg</h2>
+    <ol class="az-checklist">
+        <li class="az-check @(SignedIn ? "done" : "")">
+            <span class="az-check-mark">@(SignedIn ? "✓" : "1")</span>
+            <span class="az-check-text">
+                Azure sign-in
+                <span class="az-check-state">@(SignedIn ? AzureStatus.Account.Account ?? "Connected" : "Run az login, then Retry")</span>
+            </span>
+            @if (!SignedIn)
+            {
+                <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="RetryAsync">Retry</FluentButton>
+            }
+        </li>
+        <li class="az-check @(EnvironmentsReady ? "done" : "")">
+            <span class="az-check-mark">@(EnvironmentsReady ? "✓" : "2")</span>
+            <span class="az-check-text">Set up environments</span>
+            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Commands.ExecuteAsync(CommandIds.EnvSetup)">Set up…</FluentButton>
+        </li>
+        <li class="az-check @(Workspace.Tree is not null ? "done" : "")">
+            <span class="az-check-mark">@(Workspace.Tree is not null ? "✓" : "3")</span>
+            <span class="az-check-text">Open a folder</span>
+            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Commands.ExecuteAsync(CommandIds.WorkspaceOpenFolder)">Open…</FluentButton>
+        </li>
+    </ol>
+    @if (_recent.Count > 0)
+    {
+        <h3 class="az-welcome-sub">Recent folders</h3>
+        <ul class="az-recent">
+            @foreach (var entry in _recent)
+            {
+                <li>
+                    <button type="button" class="az-recent-item" title="@entry.RootPath" @onclick="() => OpenAsync(entry)">
+                        <span>@entry.DisplayName</span>
+                        <span class="az-recent-path">@entry.RootPath</span>
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private IReadOnlyList<WorkspaceEntry> _recent = [];
+
+    [Parameter, EditorRequired] public WorkbenchTab Tab { get; set; } = default!;
+
+    private bool SignedIn => AzureStatus.Account.State == ConnectionState.Connected;
+
+    private bool EnvironmentsReady => Workspace.Environments is { Profile: not null, Environments.Count: > 0 };
+
+    protected override async Task OnInitializedAsync()
+    {
+        AzureStatus.Changed += OnChanged;
+        Workspace.Changed += OnChanged;
+        _recent = await Registry.ListAsync(_cts.Token);
+    }
+
+    private Task RetryAsync() =>
+        Runner.RunAsync("Check Azure account", OperationKind.Read, ct => AzureStatus.CheckAccountAsync(ct), _cts.Token);
+
+    private async Task OpenAsync(WorkspaceEntry entry)
+    {
+        var result = await Runner.RunAsync($"Open {entry.DisplayName}", OperationKind.Read, ct => WorkspaceService.OpenAsync(entry.RootPath, ct), _cts.Token);
+        if (result is OperationResult<WorkspaceTree>.Success success)
+        {
+            Workspace.SetTree(success.Value);
+        }
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        AzureStatus.Changed -= OnChanged;
+        Workspace.Changed -= OnChanged;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

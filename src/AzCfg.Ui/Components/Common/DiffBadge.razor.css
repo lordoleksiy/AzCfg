@@ -1,0 +1,16 @@
+.az-diff-badge {
+    display: inline-block;
+    min-width: 12px;
+    margin-right: 2px;
+    text-align: center;
+    font-family: var(--az-font-mono);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.az-diff-badge.added { color: var(--az-diff-added); }
+.az-diff-badge.modified { color: var(--az-diff-modified); }
+.az-diff-badge.deleted { color: var(--az-diff-deleted); }
+.az-diff-badge.conflict { color: var(--az-diff-conflict); }
+.az-diff-badge.remote { color: var(--az-diff-remote); }
+.az-diff-badge.draft { color: var(--az-draft); font-size: 10px; }

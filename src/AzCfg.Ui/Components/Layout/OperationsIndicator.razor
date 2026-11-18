@@ -1,0 +1,43 @@
+@using AzCfg.Ui.Application.Operations
+@implements IDisposable
+@inject IOperationRunner Runner
+
+<div class="az-ops">
+    <button type="button" class="az-ops-button" aria-expanded="@(_open ? "true" : "false")" @onclick="() => _open = !_open">
+        @if (Runner.Running.Count > 0)
+        {
+            <FluentSpinner Size="SpinnerSize.Tiny" />
+            <span class="az-ops-title">@Runner.Running[0].Title@(Runner.Running.Count > 1 ? $" (+{Runner.Running.Count - 1})" : string.Empty)</span>
+        }
+        else
+        {
+            <span class="az-ops-title">Ready</span>
+        }
+    </button>
+    @if (_open)
+    {
+        <div class="az-ops-popover" role="dialog" aria-label="Recent operations">
+            @if (Runner.Recent.Count == 0)
+            {
+                <div class="az-ops-empty">No operations yet</div>
+            }
+            @foreach (var outcome in Runner.Recent)
+            {
+                <div class="az-ops-row @(outcome.Succeeded ? "ok" : "failed")">
+                    <span class="az-ops-row-title">@outcome.Info.Title</span>
+                    <span class="az-ops-row-message">@(outcome.Succeeded ? "done" : outcome.Message)</span>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private bool _open;
+
+    protected override void OnInitialized() => Runner.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Runner.Changed -= OnChanged;
+}

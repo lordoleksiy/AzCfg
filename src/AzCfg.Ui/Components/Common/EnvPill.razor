@@ -1,0 +1,32 @@
+@using AzCfg.Ui.Application.Environments
+
+<button type="button" class="az-envpill @KindClass @(IsSelected ? "selected" : "")" title="@Tooltip" aria-pressed="@IsSelected.ToString().ToLowerInvariant()"
+        @onclick="OnClick">
+    @if (Env.IsActive)
+    {
+        <span class="az-envpill-active" title="Active: local files reflect this environment"></span>
+    }
+    <span class="az-envpill-name">@Env.Name</span>
+    @if (Env.IsProtected)
+    {
+        <FluentIcon Value="@(new Icons.Regular.Size16.LockClosed())" Title="Protected" />
+    }
+</button>
+
+@code {
+    [Parameter, EditorRequired] public EnvPillModel Env { get; set; } = default!;
+
+    [Parameter] public bool IsSelected { get; set; }
+
+    [Parameter] public EventCallback OnClick { get; set; }
+
+    private string KindClass => Env.Kind switch
+    {
+        EnvironmentKind.Development => "kind-dev",
+        EnvironmentKind.Staging => "kind-stage",
+        EnvironmentKind.Production => "kind-prod",
+        _ => "kind-custom",
+    };
+
+    private string Tooltip => $"{Env.Name}{(Env.IsActive ? " (active)" : string.Empty)}{(Env.IsProtected ? " (protected)" : string.Empty)}";
+}

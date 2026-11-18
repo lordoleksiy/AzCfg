@@ -1,0 +1,19 @@
+@using AzCfg.Ui.Application.Environments
+
+<span class="az-status-dot @StateClass" role="img" aria-label="@Label" title="@Label"></span>
+
+@code {
+    [Parameter, EditorRequired] public ConnectionState State { get; set; }
+
+    [Parameter] public string? Detail { get; set; }
+
+    private string Label => Detail is { Length: > 0 } ? $"{State}: {Detail}" : State.ToString();
+
+    private string StateClass => State switch
+    {
+        ConnectionState.Connected => "ok",
+        ConnectionState.Checking => "busy",
+        ConnectionState.Unknown => "unknown",
+        _ => "bad",
+    };
+}
