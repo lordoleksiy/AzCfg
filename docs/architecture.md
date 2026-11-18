@@ -51,7 +51,7 @@
   MVP). Вибір запам'ятовується в `projects.json` (`ProjectBinding.ValuesTarget`/`SecretsTarget`) — наступного
   разу `ProjectResolution.Existing` повертає його без повторних запитань. Пропонуються лише реальні цілі
   (ADR 0009): class library і тест-проєкти пропускаються (`ProjectInfo.IsLibrary`), `appsettings.local.json` —
-  лише якщо поруч є `appsettings.json`/`appsettings.local.json`. Режим `gitignoreLocalFiles` (ADR 0009) дописує
+  лише якщо поруч є будь-який `appsettings*.json` (без урахування регістру). Режим `gitignoreLocalFiles` (ADR 0009) дописує
   файл цілі в `.gitignore` проєкту під час bind/pull (`ILocalTarget.EnsureGitIgnoredAsync`). Якщо сервіс не визначається —
   `pull/use --service <name>`.
 - **Key Vault — без хардкоду**:
