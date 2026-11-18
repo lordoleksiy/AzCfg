@@ -1,0 +1,35 @@
+.az-envpill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 11px;
+    border: 1px solid var(--pill-color);
+    background: transparent;
+    color: var(--colorNeutralForeground1);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.az-envpill.selected {
+    background: color-mix(in srgb, var(--pill-color) 28%, transparent);
+    font-weight: 600;
+}
+
+.az-envpill:hover {
+    background: color-mix(in srgb, var(--pill-color) 18%, transparent);
+}
+
+.az-envpill.kind-dev { --pill-color: var(--az-env-dev); }
+.az-envpill.kind-stage { --pill-color: var(--az-env-stage); }
+.az-envpill.kind-prod { --pill-color: var(--az-env-prod); }
+.az-envpill.kind-custom { --pill-color: var(--az-env-custom); }
+
+.az-envpill-active {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--pill-color);
+}

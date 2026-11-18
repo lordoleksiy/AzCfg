@@ -1,0 +1,8 @@
+@using Microsoft.AspNetCore.Components
+@using AzCfg.Ui.Application.State
+
+@code {
+    [Parameter, EditorRequired] public WorkbenchTab Tab { get; set; } = default!;
+
+    protected override void OnInitialized() => throw new InvalidOperationException("boom");
+}

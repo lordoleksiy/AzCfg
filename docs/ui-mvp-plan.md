@@ -129,13 +129,13 @@ what is not verified (e.g. manual browser check).
 | C2 | Core: sync use cases (pull selected, resolve, read remote, base JSON, guard) | F0 | W1 | [ ] |
 | T1 | In-memory adapters → Infrastructure | F0 | W1 | [ ] |
 | F1 | UI scaffold, contracts, state, `AzureErrors`, spike | F0 | W1 | [ ] |
-| I1 | Infrastructure: credential, state lock, scanner | F1 | W2 | [ ] |
-| P1 | UI platform: theme, workbench, tree-grid, palette | F1 | W2 | [ ] |
-| P2 | Host security + Monaco | F1 | W2 | [ ] |
-| S1 | Application: workspace, environments, Azure status, operations | F1, T1 | W2 | [ ] |
-| S2 | Application: configuration, compare, local values, reveal | F1, T1, C1, C2 | W2 | [ ] |
-| S3 | Application: sync workflow, drafts | F1, T1, C1, C2 | W2 | [ ] |
-| DH | Demo mode | F1, T1 | W2 | [ ] |
+| I1 | Infrastructure: credential, state lock, scanner | F1 | W2 | [x] |
+| P1 | UI platform: theme, workbench, tree-grid, palette | F1 | W2 | [x] |
+| P2 | Host security + Monaco | F1 | W2 | [x] |
+| S1 | Application: workspace, environments, Azure status, operations | F1, T1 | W2 | [x] |
+| S2 | Application: configuration, compare, local values, reveal | F1, T1, C1, C2 | W2 | [x] |
+| S3 | Application: sync workflow, drafts | F1, T1, C1, C2 | W2 | [x] |
+| DH | Demo mode | F1, T1 | W2 | [x] |
 | U1 | UI: workspace, environments, settings | P1, S1 | W3 | [ ] |
 | U2 | UI: project tab + Browse | P1, P2, S1, S2, S3 | W3 | [ ] |
 | U3 | UI: Compare | P1, P2, S1, S2 | W3 | [ ] |
@@ -1028,7 +1028,7 @@ public interface IDraftService
     IReadOnlyList<DraftKey> PendingKeys(RemoteDraft draft);
     /// EditedJson(Json with secret values injected via EditJsonPatch.SetSecretValue, BaseJson).
     PushSource ToPushSource(RemoteDraft draft);
-    /// Fresh export; KeepRemote: CopyKey(fresh → Json); KeepLocal: CopyKey(fresh → BaseJson).
+    /// Fresh export; KeepRemote: CopyKey(fresh → Json) and CopyKey(fresh → BaseJson) (key no longer pending); KeepLocal: CopyKey(fresh → BaseJson).
     Task<RemoteDraft> ResolveConflictAsync(RemoteDraft draft, string key, ConflictChoice choice, CancellationToken ct);
 }
 ```
@@ -1402,7 +1402,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     `Microsoft.AspNetCore*`, `Microsoft.JSInterop`, `Microsoft.FluentUI*` assembly.
   - **Tests:** `tests/AzCfg.Ui.Tests/{State,Composition,Architecture}/**`, `AzureErrorsTests`.
 
-- [ ] **I1 — Infrastructure: credential, state lock, scanner**
+- [x] **I1 — Infrastructure: credential, state lock, scanner**
   - **Goal:** G1, G2, G10, G11, G17.
   - **Read:** §3.3, §4 (G1, G2, G10, G11, G17), §7.1 (F1 block), §7.2 (I1).
   - **Scope:** `AddAzCfg()`: singleton `TokenCredential`, all clients take it from DI; `IWorkspaceScanner` registration.
@@ -1424,7 +1424,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     (5) CLI tests green.
   - **Tests:** as in "Files"; `.sln`/`.slnx` fixtures generated in the test.
 
-- [ ] **P1 — UI platform: theme, workbench, tree-grid, palette, guide**
+- [x] **P1 — UI platform: theme, workbench, tree-grid, palette, guide**
   - **Goal:** FR-U1…U5 platform part, AD-3, AD-10, G31, G35 — everything features only plug into.
   - **Read:** §2 (all), §5 (AD-3, AD-4, AD-6, AD-9, AD-10), §6, §7.3 (Operations, Security), §7.4, §7.5, §8, §9.
   - **Scope:**
@@ -1467,7 +1467,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Tests:** bUnit with test components in registrations; fakes of `IOperationRunner`, `IWorkspaceRegistry`,
     `IAzureStatusService` in the P1 test folders.
 
-- [ ] **P2 — Host security + Monaco**
+- [x] **P2 — Host security + Monaco**
   - **Goal:** AD-1, AD-11, G21, G22.
   - **Read:** §4 (G21, G22), §5 (AD-1, AD-11), §6, §7.3 (`JsonDiagnostic`), §2.12, §9.
   - **Scope:**
@@ -1497,7 +1497,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     and diff editor work under the CSP, no CDN requests.
   - **Tests:** as in "Files".
 
-- [ ] **S1 — Application: workspace, environments, Azure status, operations**
+- [x] **S1 — Application: workspace, environments, Azure status, operations**
   - **Goal:** backend of FR-W1…W6, FR-E1…E6, AD-9, AD-13; G3, G4, G5, G18, G19, G26, G30.
   - **Read:** §3.2, §3.4, §4 (G3–G5, G18, G19, G26, G30), §5 (AD-9, AD-13), §7.3 (Operations, Workspace,
     Environments), §9.
@@ -1526,7 +1526,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Tests:** real `ProjectService`/`SetupService` via `AddAzCfg().AddAzCfgInMemory(world)`; `FakeWorkspaceScanner` in
     `tests/AzCfg.Ui.Tests/Application/Workspace/Fakes`; temp folders.
 
-- [ ] **S2 — Application: configuration, compare, local values, reveal**
+- [x] **S2 — Application: configuration, compare, local values, reveal**
   - **Goal:** backend of FR-B1…B7, FR-C1…C4; AD-6; G13, G27.
   - **Read:** §3.2, §4 (G13, G27), §5 (AD-5, AD-6, AD-8), §7.1 (C1, C2 blocks), §7.3 (Security, Configuration), §9.
   - **Scope:** `ConfigurationService` (§7.3; rows = union of diff items, remote entries, ignored local keys; `Source`
@@ -1547,7 +1547,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     `InvalidOperationException`, nothing written; (7) reveal remote/local.
   - **Tests:** `AddAzCfg().AddAzCfgInMemory(world)` + a temp project folder for `AppSettingsLocalTarget`.
 
-- [ ] **S3 — Application: sync workflow, drafts**
+- [x] **S3 — Application: sync workflow, drafts**
   - **Goal:** backend of FR-B4, FR-S1…S6; AD-5, AD-8; G14, G20.
   - **Read:** §3.2, §3.4, §4 (G14, G20), §5 (AD-5…AD-8), §7.1 (C1, C2 blocks), §7.3 (Security, Sync), §9.
   - **Scope:** `SyncWorkflowService`, `DraftService`, `PlanRows` (maps `SyncPlan`/`DiffItem` → rows with
@@ -1567,7 +1567,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     from serialized `PushPreview`/`PullPreview` and from logs.
   - **Tests:** `AddAzCfg().AddAzCfgInMemory(world)`.
 
-- [ ] **DH — Demo mode**
+- [x] **DH — Demo mode**
   - **Goal:** FR-U6, AD-12, G36 — every screen visible without Azure.
   - **Read:** §1.3 (FR-U6), §2 (to know which states to seed), §5 (AD-12), §7.2 (T1 block).
   - **Scope:** `Demo/DemoSeed` writes a sample workspace to `<temp>/azcfg-demo/<yyyyMMdd-HHmmss>/Shop`: `Shop.slnx` with

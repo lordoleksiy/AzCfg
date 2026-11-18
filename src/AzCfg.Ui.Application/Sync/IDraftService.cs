@@ -36,6 +36,6 @@ public interface IDraftService
     /// <summary><c>EditedJson</c>(Json with secret values injected via <c>EditJsonPatch.SetSecretValue</c>, BaseJson).</summary>
     PushSource ToPushSource(RemoteDraft draft);
 
-    /// <summary>Fresh export; KeepRemote: <c>CopyKey(fresh → Json)</c>; KeepLocal: <c>CopyKey(fresh → BaseJson)</c>.</summary>
+    /// <summary>Fresh export; KeepRemote: <c>CopyKey(fresh → Json)</c> and <c>CopyKey(fresh → BaseJson)</c> (the key leaves <c>PendingKeys</c>); KeepLocal: <c>CopyKey(fresh → BaseJson)</c>.</summary>
     Task<RemoteDraft> ResolveConflictAsync(RemoteDraft draft, string key, ConflictChoice choice, CancellationToken ct);
 }

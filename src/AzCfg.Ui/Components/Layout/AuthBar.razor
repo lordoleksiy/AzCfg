@@ -1,0 +1,41 @@
+@using AzCfg.Ui.Application.Environments
+@using AzCfg.Ui.Application.Operations
+@implements IDisposable
+@inject IAzureStatusService AzureStatus
+@inject IOperationRunner Runner
+
+@if (AzureStatus.Account.State == ConnectionState.AuthRequired)
+{
+    <FluentMessageBar Intent="MessageBarIntent.Warning" Layout="MessageBarLayout.SingleLine" AllowDismiss="false">
+        <ChildContent>Azure sign-in required: run <code>az login</code>, then Retry.</ChildContent>
+        <ActionsTemplate>
+            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="RetryAsync">Retry</FluentButton>
+        </ActionsTemplate>
+    </FluentMessageBar>
+}
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override void OnInitialized() => AzureStatus.Changed += OnChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && AzureStatus.Account.State == ConnectionState.Unknown)
+        {
+            await RetryAsync();
+        }
+    }
+
+    private Task RetryAsync() =>
+        Runner.RunAsync("Check Azure account", OperationKind.Read, ct => AzureStatus.CheckAccountAsync(ct), _cts.Token);
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        AzureStatus.Changed -= OnChanged;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

@@ -1,0 +1,68 @@
+@using AzCfg.Ui.Application.State
+@using AzCfg.Ui.Features.Platform
+@implements IDisposable
+@inject TabsState Tabs
+@inject WorkspaceState Workspace
+@inject ProjectSessions Sessions
+@inject TabCloser Closer
+
+<div class="az-tabstrip" role="tablist">
+    @foreach (var tab in Tabs.Tabs)
+    {
+        var active = tab.Id == Tabs.ActiveId;
+        <div class="az-tab @(active ? "active" : "")" role="tab" aria-selected="@(active ? "true" : "false")" title="@tab.Title"
+             @key="tab.Id" @onclick="() => Tabs.Activate(tab.Id)" @onauxclick="e => OnAuxClickAsync(e, tab)">
+            <FluentIcon Value="@TabIcon(tab.Descriptor.Kind)" />
+            <span class="az-tab-title">@tab.Title</span>
+            @if (tab.IsDirty)
+            {
+                <span class="az-tab-dirty" title="Pending edits"></span>
+            }
+            @if (IsProtected(tab))
+            {
+                <FluentIcon Value="@(new Icons.Regular.Size16.LockClosed())" Title="Protected environment" />
+            }
+            <button type="button" class="az-tab-close" aria-label="Close @tab.Title" title="Close (Alt+W)"
+                    @onclick="() => Closer.CloseAsync(tab.Id)" @onclick:stopPropagation="true">
+                <FluentIcon Value="@(new Icons.Regular.Size16.Dismiss())" />
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Tabs.Changed += OnChanged;
+        Sessions.Changed += OnChanged;
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    private static Icon TabIcon(TabKind kind) => kind switch
+    {
+        TabKind.Welcome => new Icons.Regular.Size16.Home(),
+        TabKind.Settings => new Icons.Regular.Size16.Settings(),
+        _ => new Icons.Regular.Size16.Cube(),
+    };
+
+    private bool IsProtected(WorkbenchTab tab) =>
+        tab.Descriptor.ProjectId is { } id
+        && Sessions.TryGet(id, out var session)
+        && session.EnvironmentName is { } name
+        && Workspace.Environments?.Environments.FirstOrDefault(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase)) is { IsProtected: true };
+
+    private async Task OnAuxClickAsync(MouseEventArgs e, WorkbenchTab tab)
+    {
+        if (e.Button == 1)
+        {
+            await Closer.CloseAsync(tab.Id);
+        }
+    }
+
+    public void Dispose()
+    {
+        Tabs.Changed -= OnChanged;
+        Sessions.Changed -= OnChanged;
+    }
+}

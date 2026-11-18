@@ -1,0 +1,69 @@
+@using AzCfg.Ui.Application.State
+@using AzCfg.Ui.Features.Platform
+@using AzCfg.Ui.Shared
+@implements IDisposable
+@inject LayoutState Layout
+@inject TabsState Tabs
+@inject WorkbenchNavigator Navigator
+@inject ICommandRegistry Commands
+@inject IKeyCodeService KeyCodes
+
+<div class="az-workbench @(Layout.SidebarVisible ? "" : "sidebar-hidden") @(Layout.SidebarOverlayOpen ? "sidebar-overlay-open" : "")"
+     style="--az-sidebar-w: @(Layout.SidebarWidth)px; --az-inspector-w: @(Layout.InspectorWidth)px">
+    <AuthBar />
+    <div class="az-workbench-body">
+        <ActivityBar />
+        <div class="az-workbench-split">
+            <FluentMultiSplitter Orientation="Orientation.Horizontal" Width="100%" Height="100%">
+                <FluentMultiSplitterPane Size="@($"{Layout.SidebarWidth}px")" Min="@($"{LayoutState.SidebarMin}px")" Max="@($"{LayoutState.SidebarMax}px")"
+                                         Collapsed="!Layout.SidebarVisible" SizeChanged="OnSidebarResized" Class="az-sidebar-pane">
+                    <SidebarHost />
+                </FluentMultiSplitterPane>
+                <FluentMultiSplitterPane Class="az-main-pane">
+                    <div class="az-main">
+                        <TabStrip />
+                        <TabHost />
+                    </div>
+                </FluentMultiSplitterPane>
+            </FluentMultiSplitter>
+        </div>
+    </div>
+    <StatusBar />
+    <CommandPalette />
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Layout.Changed += OnChanged;
+        KeyCodes.RegisterListener(OnKeyAsync);
+        if (Tabs.Tabs.Count == 0)
+        {
+            Navigator.OpenWelcome();
+        }
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnSidebarResized(string size)
+    {
+        if (int.TryParse(size.Replace("px", string.Empty, StringComparison.Ordinal), out var width))
+        {
+            Layout.SetSidebarWidth(width);
+        }
+    }
+
+    private async Task OnKeyAsync(FluentKeyCodeEventArgs e)
+    {
+        if (e.Name == "keydown" && KeyBindings.Resolve(KeyChord.From(e)) is { } id)
+        {
+            await Commands.ExecuteAsync(id);
+        }
+    }
+
+    public void Dispose()
+    {
+        Layout.Changed -= OnChanged;
+        KeyCodes.UnregisterListener(OnKeyAsync);
+    }
+}

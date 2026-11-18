@@ -70,7 +70,8 @@ public sealed class AzCfgUiAppTests
     public async Task Get_Root_ServesShellWithLocalAssets()
     {
         await using var factory = new WebApplicationFactory<Program>();
-        var html = await factory.CreateClient().GetStringAsync("/");
+        var token = factory.Services.GetRequiredService<AccessToken>().Value;
+        var html = await factory.CreateClient().GetStringAsync($"/login?t={token}");
         Assert.Contains("_framework/blazor.web.js", html);
         Assert.Contains("_content/BlazorMonaco/lib/monaco-editor/min/vs/loader.js", html);
         Assert.Contains("Microsoft.FluentUI.AspNetCore.Components.bundle.scp.css", html);

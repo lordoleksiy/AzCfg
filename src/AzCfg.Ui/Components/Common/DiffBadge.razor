@@ -1,0 +1,47 @@
+@using AzCfg.Core.Sync
+
+@if (Kind is { } kind && kind != DiffKind.Unchanged)
+{
+    <span class="az-diff-badge @(Class(kind))" title="@Title(kind)">@Glyph(kind)</span>
+}
+@if (HasDraft)
+{
+    <span class="az-diff-badge draft" title="Pending edit">●</span>
+}
+
+@code {
+    /// <summary>The diff status; null (remote-only views, ignored keys) shows nothing.</summary>
+    [Parameter] public DiffKind? Kind { get; set; }
+
+    /// <summary>Adds the pending-draft dot.</summary>
+    [Parameter] public bool HasDraft { get; set; }
+
+    private static string Glyph(DiffKind kind) => kind switch
+    {
+        DiffKind.LocalAdded => "A",
+        DiffKind.LocalModified => "M",
+        DiffKind.LocalDeleted => "D",
+        DiffKind.Conflict => "!",
+        _ => "⇣",
+    };
+
+    private static string Class(DiffKind kind) => kind switch
+    {
+        DiffKind.LocalAdded => "added",
+        DiffKind.LocalModified => "modified",
+        DiffKind.LocalDeleted => "deleted",
+        DiffKind.Conflict => "conflict",
+        _ => "remote",
+    };
+
+    private static string Title(DiffKind kind) => kind switch
+    {
+        DiffKind.LocalAdded => "Added locally",
+        DiffKind.LocalModified => "Modified locally",
+        DiffKind.LocalDeleted => "Deleted locally",
+        DiffKind.RemoteAdded => "Added in Azure",
+        DiffKind.RemoteModified => "Changed in Azure",
+        DiffKind.RemoteDeleted => "Deleted in Azure",
+        _ => "Conflict",
+    };
+}

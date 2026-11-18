@@ -1,0 +1,30 @@
+.az-statusbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: var(--az-statusbar-h);
+    padding: 0 4px;
+    background: var(--colorNeutralBackground3);
+    border-top: 1px solid var(--colorNeutralStroke2);
+    font-size: 12px;
+    color: var(--colorNeutralForeground2);
+}
+
+.az-statusbar-side {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+.az-statusbar-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+}
+
+.az-statusbar-hint {
+    font-family: var(--az-font-mono);
+    color: var(--colorNeutralForeground3);
+}

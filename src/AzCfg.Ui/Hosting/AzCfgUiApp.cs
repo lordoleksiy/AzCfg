@@ -42,6 +42,7 @@ public static class AzCfgUiApp
         services.AddRazorComponents()
             .AddInteractiveServerComponents()
             .AddHubOptions(o => o.MaximumReceiveMessageSize = 2 * 1024 * 1024);
+        services.AddAzCfgHostSecurity();
         services.AddAzCfgUi();
         if (options.Demo is not null)
         {

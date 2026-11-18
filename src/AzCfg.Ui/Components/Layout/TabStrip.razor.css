@@ -1,0 +1,54 @@
+.az-tabstrip {
+    display: flex;
+    height: var(--az-tab-h);
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: var(--colorNeutralBackground3);
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+}
+
+.az-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    max-width: 220px;
+    padding: 0 8px 0 12px;
+    border-right: 1px solid var(--colorNeutralStroke2);
+    font-size: 13px;
+    color: var(--colorNeutralForeground2);
+    cursor: pointer;
+}
+
+.az-tab.active {
+    background: var(--colorNeutralBackground1);
+    color: var(--colorNeutralForeground1);
+    box-shadow: inset 0 2px 0 var(--az-draft);
+}
+
+.az-tab-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.az-tab-dirty {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--az-draft);
+}
+
+.az-tab-close {
+    display: inline-flex;
+    padding: 2px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+
+.az-tab-close:hover {
+    background: var(--colorNeutralBackground1Hover);
+}

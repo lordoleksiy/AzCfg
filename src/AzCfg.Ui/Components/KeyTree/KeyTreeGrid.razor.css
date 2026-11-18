@@ -1,0 +1,87 @@
+.az-keytree {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    font-size: 13px;
+}
+
+.az-keytree-header,
+.az-keytree-row {
+    display: grid;
+    grid-template-columns: var(--az-keytree-cols);
+    align-items: center;
+}
+
+.az-keytree-header {
+    height: var(--az-row-h);
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--colorNeutralForeground3);
+}
+
+.az-keytree-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.az-keytree-row {
+    height: var(--az-row-h);
+    outline: none;
+    cursor: default;
+}
+
+.az-keytree-row:hover {
+    background: var(--colorNeutralBackground1Hover);
+}
+
+.az-keytree-row.selected {
+    background: var(--colorNeutralBackground1Selected);
+}
+
+.az-keytree-row:focus-visible {
+    box-shadow: inset 0 0 0 1px var(--colorStrokeFocus2);
+}
+
+.az-keytree-cell {
+    min-width: 0;
+    padding: 0 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.az-keytree-key {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.az-keytree-toggle {
+    display: inline-flex;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+
+.az-keytree-toggle-space {
+    display: inline-block;
+    width: 16px;
+}
+
+.az-keytree-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.az-keytree-count {
+    margin-left: auto;
+    color: var(--colorNeutralForeground3);
+    font-size: 11px;
+}

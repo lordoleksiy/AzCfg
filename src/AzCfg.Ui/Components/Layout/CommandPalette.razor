@@ -1,0 +1,129 @@
+@using AzCfg.Ui.Features.Platform
+@using AzCfg.Ui.Shared
+@implements IDisposable
+@inject PaletteState Palette
+@inject PaletteSearch Search
+@inject ICommandRegistry Commands
+
+@if (Palette.IsOpen)
+{
+    <div class="az-palette-backdrop" @onclick="Palette.Close">
+        <div class="az-palette" role="dialog" aria-label="Command palette" @onclick:stopPropagation="true">
+            <input @ref="_input" class="az-input az-palette-input" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="@Placeholder" value="@_text" @oninput="OnInput" @onkeydown="OnKeyDownAsync" />
+            <ul class="az-palette-list" role="listbox">
+                @for (var i = 0; i < _items.Count; i++)
+                {
+                    var index = i;
+                    var item = _items[i];
+                    <li class="az-palette-item @(index == _active ? "active" : "") @(item.Enabled ? "" : "disabled")" role="option"
+                        aria-selected="@(index == _active ? "true" : "false")" aria-disabled="@(item.Enabled ? "false" : "true")"
+                        @onclick="() => RunAsync(item)">
+                        <span class="az-palette-label">@item.Label</span>
+                        @if (item.Detail is not null)
+                        {
+                            <span class="az-palette-detail">@item.Detail</span>
+                        }
+                        @if (item.Shortcut is not null)
+                        {
+                            <kbd class="az-palette-shortcut">@item.Shortcut</kbd>
+                        }
+                    </li>
+                }
+                @if (_items.Count == 0)
+                {
+                    <li class="az-palette-empty">No matches</li>
+                }
+            </ul>
+            <div class="az-palette-hints">&gt; commands · # projects · @@ keys · env: environments</div>
+        </div>
+    </div>
+}
+
+@code {
+    private ElementReference _input;
+    private IReadOnlyList<PaletteItem> _items = [];
+    private string _text = string.Empty;
+    private int _active;
+    private bool _wasOpen;
+
+    private string Placeholder => Palette.Mode == PaletteMode.QuickOpen ? "Go to project or key…" : "Type a command…";
+
+    protected override void OnInitialized()
+    {
+        Palette.Changed += OnChanged;
+        Commands.Changed += OnChanged;
+    }
+
+    protected override void OnParametersSet() => Refresh();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Palette.IsOpen && !_wasOpen)
+        {
+            await _input.FocusAsync();
+        }
+
+        _wasOpen = Palette.IsOpen;
+    }
+
+    private void OnChanged() => InvokeAsync(() =>
+    {
+        if (Palette.IsOpen && !_wasOpen)
+        {
+            _text = string.Empty;
+        }
+
+        Refresh();
+        StateHasChanged();
+    });
+
+    private void Refresh()
+    {
+        _items = Palette.IsOpen ? Search.Search(_text, Palette.Mode) : [];
+        _active = Math.Clamp(_active, 0, Math.Max(0, _items.Count - 1));
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        _text = e.Value?.ToString() ?? string.Empty;
+        _active = 0;
+        Refresh();
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                _active = _items.Count == 0 ? 0 : (_active + 1) % _items.Count;
+                break;
+            case "ArrowUp":
+                _active = _items.Count == 0 ? 0 : (_active - 1 + _items.Count) % _items.Count;
+                break;
+            case "Enter" when _items.Count > 0:
+                await RunAsync(_items[_active]);
+                break;
+            case "Escape":
+                Palette.Close();
+                break;
+        }
+    }
+
+    private async Task RunAsync(PaletteItem item)
+    {
+        if (!item.Enabled)
+        {
+            return;
+        }
+
+        Palette.Close();
+        await item.Run();
+    }
+
+    public void Dispose()
+    {
+        Palette.Changed -= OnChanged;
+        Commands.Changed -= OnChanged;
+    }
+}
