@@ -4,10 +4,13 @@
     <Project Path="src/AzCfg.Core/AzCfg.Core.csproj" />
     <Project Path="src/AzCfg.DevConsole/AzCfg.DevConsole.csproj" />
     <Project Path="src/AzCfg.Infrastructure/AzCfg.Infrastructure.csproj" />
+    <Project Path="src/AzCfg.Ui.Application/AzCfg.Ui.Application.csproj" />
+    <Project Path="src/AzCfg.Ui/AzCfg.Ui.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AzCfg.Cli.Tests/AzCfg.Cli.Tests.csproj" />
     <Project Path="tests/AzCfg.Core.Tests/AzCfg.Core.Tests.csproj" />
     <Project Path="tests/AzCfg.Infrastructure.Tests/AzCfg.Infrastructure.Tests.csproj" />
+    <Project Path="tests/AzCfg.Ui.Tests/AzCfg.Ui.Tests.csproj" />
   </Folder>
 </Solution>
