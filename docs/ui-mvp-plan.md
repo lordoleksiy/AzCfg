@@ -1255,7 +1255,7 @@ Tests:
 Common to all: build without warnings, tests green, `dotnet format` clean; TDD for Core; §9 is binding. "Files" is the
 complete list of allowed changes (plus the task's `[x]` line here).
 
-- [ ] **F0 — Sync `dev` with `master`, package versions** — orchestrator, see 0.1.
+- [x] **F0 — Sync `dev` with `master`, package versions** — orchestrator, see 0.1.
 
 - [ ] **D1 — ADR 0010 and 0011**
   - **Goal:** decisions recorded as contracts before code (G34).
