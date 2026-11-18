@@ -36,6 +36,28 @@ public sealed class CsprojDetectorTests : IDisposable
         Assert.Equal([Path.Combine(repo, "Service", "Service.csproj")], result.Select(p => p.CsprojPath));
     }
 
+    [Theory]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk.Web\"></Project>", false)]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk.Web/9.0.0\"></Project>", false)]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk.Worker\"></Project>", false)]
+    [InlineData("<Project><Sdk Name=\"Microsoft.NET.Sdk.Web\" Version=\"9.0.0\" /></Project>", false)]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup></Project>", false)]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>winexe</OutputType></PropertyGroup></Project>", false)]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><AzureFunctionsVersion>v4</AzureFunctionsVersion></PropertyGroup></Project>", false)]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"></Project>", true)]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Library</OutputType></PropertyGroup></Project>", true)]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.0.0\" /></ItemGroup></Project>", true)]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><IsTestProject>true</IsTestProject></PropertyGroup></Project>", true)]
+    public async Task DetectAsync_ClassifiesLibraries(string csproj, bool expectedIsLibrary)
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "Service/Service.csproj", csproj);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.Equal(expectedIsLibrary, result[0].IsLibrary);
+    }
+
     [Fact]
     public async Task DetectAsync_UserSecretsIdPresent_ParsesIt()
     {

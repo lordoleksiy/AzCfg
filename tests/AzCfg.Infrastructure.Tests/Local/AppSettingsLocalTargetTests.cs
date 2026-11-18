@@ -42,11 +42,38 @@ public sealed class AppSettingsLocalTargetTests : IDisposable
     }
 
     [Fact]
-    public void CanHandle_AnyProject_ReturnsTrue()
+    public void CanHandle_AppWithAppSettings_ReturnsTrue()
     {
-        var project = new ProjectInfo(_root, CsprojPath(), "Service", IsAzureFunctions: true, UserSecretsId: null);
+        File.WriteAllText(Path.Combine(_root, "appsettings.json"), "{}");
+        var project = new ProjectInfo(_root, CsprojPath(), "Service", IsAzureFunctions: false, UserSecretsId: null);
 
         Assert.True(_target.CanHandle(project));
+    }
+
+    [Fact]
+    public void CanHandle_AppWithAppSettingsLocalOnly_ReturnsTrue()
+    {
+        File.WriteAllText(Path.Combine(_root, "appsettings.local.json"), "{}");
+        var project = new ProjectInfo(_root, CsprojPath(), "Service", IsAzureFunctions: false, UserSecretsId: null);
+
+        Assert.True(_target.CanHandle(project));
+    }
+
+    [Fact]
+    public void CanHandle_LibraryWithAppSettings_ReturnsFalse()
+    {
+        File.WriteAllText(Path.Combine(_root, "appsettings.json"), "{}");
+        var project = new ProjectInfo(_root, CsprojPath(), "Service", IsAzureFunctions: false, UserSecretsId: null, IsLibrary: true);
+
+        Assert.False(_target.CanHandle(project));
+    }
+
+    [Fact]
+    public void CanHandle_AppWithoutAppSettings_ReturnsFalse()
+    {
+        var project = new ProjectInfo(_root, CsprojPath(), "Service", IsAzureFunctions: false, UserSecretsId: null);
+
+        Assert.False(_target.CanHandle(project));
     }
 
     [Fact]

@@ -20,10 +20,12 @@ public sealed class UserSecretsTargetTests : IDisposable
     public void Kind_IsUserSecrets() => Assert.Equal(LocalTargetKind.UserSecrets, _target.Kind);
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void CanHandle_AnyProject_ReturnsTrue(bool hasSecretsId) =>
-        Assert.True(_target.CanHandle(new ProjectInfo(_root, CsprojPath(), "Service", false, hasSecretsId ? _secretsId : null)));
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, true)]
+    public void CanHandle_AppOrProjectWithSecretsId_ReturnsTrue(bool isLibrary, bool hasSecretsId, bool expected) =>
+        Assert.Equal(expected, _target.CanHandle(new ProjectInfo(_root, CsprojPath(), "Service", false, hasSecretsId ? _secretsId : null, isLibrary)));
 
     [Fact]
     public async Task ReadAsync_FileMissing_ReturnsEmptyList() =>
