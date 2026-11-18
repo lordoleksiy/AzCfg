@@ -85,6 +85,46 @@ public sealed class SyncServiceDiffPlanTests
     private static StateItem PlainItem(string key, string value, ConfigScope scope = ConfigScope.Service) => new(key, scope, new StateValue.Plain(value));
 
     [Fact]
+    public async Task PlanPushAsync_LocalFiles_ModifiedGlobalMarkedKey_UpdatesGlobal()
+    {
+        var s = Create([Plain("G", "g", ConfigScope.Global)], values: [new("G", "x", ConfigScope.Global)], snapshot: State(PlainItem("G", "g", ConfigScope.Global)));
+
+        var plan = await s.Service.PlanPushAsync(Binding(Values), Env, new PushSource.LocalFiles(), Ct);
+
+        var change = Assert.Single(plan.Changes);
+        Assert.Equal((ChangeKind.Update, ConfigScope.Global, "G"), (change.Kind, change.After!.Scope, change.After.Key));
+        Assert.Equal(ConfigScope.Global, change.Before!.Scope);
+        Assert.True(plan.TouchesGlobal);
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_LocalFiles_ModifiedUnmarkedGlobalKey_AddsServiceOverride()
+    {
+        var s = Create([Plain("G", "g", ConfigScope.Global)], values: [new("G", "x")], snapshot: State(PlainItem("G", "g", ConfigScope.Global)));
+
+        var plan = await s.Service.PlanPushAsync(Binding(Values), Env, new PushSource.LocalFiles(), Ct);
+
+        var change = Assert.Single(plan.Changes);
+        Assert.Equal((ChangeKind.Add, ConfigScope.Service, "G"), (change.Kind, change.After!.Scope, change.After.Key));
+        Assert.False(plan.TouchesGlobal);
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_LocalFiles_GlobalMarkers_UnchangedIsNoChange_NewKeyIsGlobalAdd()
+    {
+        var s = Create(
+            [Plain("G", "g", ConfigScope.Global)],
+            values: [new("G", "g", ConfigScope.Global), new("N", "n", ConfigScope.Global)],
+            snapshot: State(PlainItem("G", "g", ConfigScope.Global)));
+
+        var plan = await s.Service.PlanPushAsync(Binding(Values), Env, new PushSource.LocalFiles(), Ct);
+
+        var change = Assert.Single(plan.Changes);
+        Assert.Equal((ChangeKind.Add, ConfigScope.Global, "N"), (change.Kind, change.After!.Scope, change.After.Key));
+        Assert.True(plan.TouchesGlobal);
+    }
+
+    [Fact]
     public async Task PlanPushAsync_LocalFiles_Upsert_SkipsLocalDeletesWithWarning()
     {
         var s = Create([Plain("A", "1"), Plain("B", "2")], values: [new("A", "3"), new("N", "x")], snapshot: State(PlainItem("A", "1"), PlainItem("B", "2")));
