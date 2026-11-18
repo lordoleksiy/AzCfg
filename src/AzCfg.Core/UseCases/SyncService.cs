@@ -13,6 +13,7 @@ namespace AzCfg.Core.UseCases;
 /// Keys matched by <see cref="ProjectBinding.Ignore"/> (scope = provenance: remote, else snapshot, else local service; ADR 0008)
 /// belong to the local files: pull keeps their local values in the target they were read from, never writes their remote
 /// values, leaves them out of the snapshot and never blocks on them; <see cref="PushSource.LocalFiles"/> plans and diffs skip them.
+/// With <see cref="UserProfile.GitIgnoreLocalFiles"/> (ADR 0009) pull first asks both targets to git-ignore their files.
 /// </summary>
 public sealed class SyncService(
     IConfigStore store,
@@ -23,6 +24,15 @@ public sealed class SyncService(
 {
     public async Task<PullResult> PullAsync(ProjectBinding binding, ConfigEnvironment env, IProgress<SyncProgress>? progress, bool force, CancellationToken ct)
     {
+        if ((await state.LoadProfileAsync(ct))?.GitIgnoreLocalFiles == true)
+        {
+            await targets.First(t => t.Kind == binding.ValuesTarget.Kind).EnsureGitIgnoredAsync(binding.ValuesTarget, ct);
+            if (binding.SecretsTarget != binding.ValuesTarget)
+            {
+                await targets.First(t => t.Kind == binding.SecretsTarget.Kind).EnsureGitIgnoredAsync(binding.SecretsTarget, ct);
+            }
+        }
+
         var secretsTarget = targets.First(t => t.Kind == binding.SecretsTarget.Kind);
         if (!(await secretsTarget.InspectAsync(binding.SecretsTarget, ct)).IsSafeForSecrets)
         {

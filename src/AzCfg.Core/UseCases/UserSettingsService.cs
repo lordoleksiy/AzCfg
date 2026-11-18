@@ -8,6 +8,7 @@ public sealed class UserSettingsService(IUserStateStore state) : IUserSettingsSe
 {
     private const string ModeKey = "mode";
     private const string DefaultLabelKey = "defaultLabel";
+    private const string GitIgnoreKey = "gitignoreLocalFiles";
     private const string EnvPrefix = "env.";
     private const string Endpoint = "endpoint";
     private const string Label = "label";
@@ -31,6 +32,7 @@ public sealed class UserSettingsService(IUserStateStore state) : IUserSettingsSe
     [
         new(ModeKey, EnvironmentModeNames.Format(profile.Mode)),
         new(DefaultLabelKey, profile.DefaultLabel),
+        new(GitIgnoreKey, profile.GitIgnoreLocalFiles ? "true" : "false"),
         .. profile.Environments.SelectMany(e => new UserSetting[]
         {
             new(EnvKey(e.Name, Endpoint), e.StoreEndpoint.OriginalString),
@@ -56,6 +58,13 @@ public sealed class UserSettingsService(IUserStateStore state) : IUserSettingsSe
 
         if (key.Equals(DefaultLabelKey, StringComparison.OrdinalIgnoreCase))
             return profile with { DefaultLabel = LabelOrNull(value) };
+
+        if (key.Equals(GitIgnoreKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return bool.TryParse(value?.Trim(), out var gitIgnore)
+                ? profile with { GitIgnoreLocalFiles = gitIgnore }
+                : throw Invalid(GitIgnoreKey, value, "'true' or 'false'");
+        }
 
         if (!TrySplitEnvKey(key, out var name, out var property))
             throw UnknownKey(key, List(profile));

@@ -40,6 +40,20 @@ public sealed class SyncServicePullTests
         return new(service, state, valuesTarget, secretsTarget);
     }
 
+    [Theory]
+    [InlineData(true, 1)]
+    [InlineData(false, 0)]
+    public async Task PullAsync_EnsuresGitIgnoredOnlyWhenModeIsOn(bool gitIgnore, int calls)
+    {
+        var s = Create([Plain("A", "1")]);
+        s.State.Profile = new UserProfile([], GitIgnoreLocalFiles: gitIgnore);
+
+        await s.Service.PullAsync(Binding(Values, Secrets), Env, null, false, Ct);
+
+        Assert.Equal(calls, s.ValuesTarget.EnsureGitIgnoredCalls.Count);
+        Assert.Equal(calls, s.SecretsTarget.EnsureGitIgnoredCalls.Count);
+    }
+
     [Fact]
     public async Task PullAsync_SplitsValuesAndSecretsIntoTheirTargets()
     {

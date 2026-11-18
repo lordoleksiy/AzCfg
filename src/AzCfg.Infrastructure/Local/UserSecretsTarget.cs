@@ -22,6 +22,8 @@ public sealed class UserSecretsTarget : JsonFileTarget
     public override Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct) =>
         Task.FromResult(new LocalTargetOption(target, GetReadFilePath(target) is { } path && File.Exists(path), true));
 
+    public override Task EnsureGitIgnoredAsync(LocalTargetBinding target, CancellationToken ct) => Task.CompletedTask;
+
     protected override string? GetReadFilePath(LocalTargetBinding target) =>
         ReadSecretsId(target.ProjectPath) is { } id ? SecretsPath(id) : null;
 

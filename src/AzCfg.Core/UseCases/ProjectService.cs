@@ -11,6 +11,8 @@ namespace AzCfg.Core.UseCases;
 /// <see cref="InvalidOperationException"/> when the secrets target is not safe for secrets. <see cref="AddIgnoreAsync"/> and
 /// <see cref="RemoveIgnoreAsync"/> only edit the saved binding's ignore patterns: they throw <see cref="ArgumentException"/>
 /// for a blank pattern and <see cref="InvalidOperationException"/> when the project is not bound yet.
+/// With <see cref="UserProfile.GitIgnoreLocalFiles"/> (ADR 0009) <see cref="ResolveAsync"/> reports every option as safe for secrets,
+/// and <see cref="BindAsync"/> first asks the targets to git-ignore their files (it still throws when the target stays unsafe).
 /// </summary>
 public sealed class ProjectService(
     IUserStateStore state,
@@ -45,7 +47,8 @@ public sealed class ProjectService(
             foreach (var target in targets.Where(t => t.CanHandle(project)))
             {
                 var format = target.Kind == LocalTargetKind.LocalSettings ? LocalFileFormat.FlatDictionary : LocalFileFormat.NestedJson;
-                options.Add(await target.InspectAsync(new(target.Kind, project.CsprojPath, format), ct));
+                var option = await target.InspectAsync(new(target.Kind, project.CsprojPath, format), ct);
+                options.Add(profile?.GitIgnoreLocalFiles == true ? option with { IsSafeForSecrets = true } : option);
             }
         }
 
@@ -59,6 +62,15 @@ public sealed class ProjectService(
         LocalTargetBinding secretsTarget,
         CancellationToken ct)
     {
+        if ((await state.LoadProfileAsync(ct))?.GitIgnoreLocalFiles == true)
+        {
+            await targets.First(t => t.Kind == valuesTarget.Kind).EnsureGitIgnoredAsync(valuesTarget, ct);
+            if (secretsTarget != valuesTarget)
+            {
+                await targets.First(t => t.Kind == secretsTarget.Kind).EnsureGitIgnoredAsync(secretsTarget, ct);
+            }
+        }
+
         var option = await targets.First(t => t.Kind == secretsTarget.Kind).InspectAsync(secretsTarget, ct);
         if (!option.IsSafeForSecrets)
         {
