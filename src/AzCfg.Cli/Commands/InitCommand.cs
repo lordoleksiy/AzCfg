@@ -166,14 +166,15 @@ public sealed class InitCommand(ISetupService setup, IAnsiConsole console) : Asy
 
         var environments = chosen.Select(l => AskLabelEnvironment(store, l)).ToList();
         while (console.Confirm("Add an environment label manually?", environments.Count == 0))
-            environments.Add(AskLabelEnvironment(store, console.Prompt(new TextPrompt<string>("Label:"))));
+            environments.Add(AskLabelEnvironment(store, null));
 
         return environments;
     }
 
-    private ConfigEnvironment AskLabelEnvironment(Uri store, string label)
+    private ConfigEnvironment AskLabelEnvironment(Uri store, string? storeLabel)
     {
-        var name = AskName($"label '{label}'", SuggestName(label));
+        var name = storeLabel is null ? AskName("a new environment", null) : AskName($"label '{storeLabel}'", SuggestName(storeLabel));
+        var label = console.Prompt(new TextPrompt<string>($"Label for '{Markup.Escape(name)}':").DefaultValue(storeLabel ?? name));
         return new(name, store, label, AskProtected(name, ConfigEnvironment.IsProtectedByName(name)));
     }
 
