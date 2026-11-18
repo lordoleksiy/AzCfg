@@ -37,6 +37,35 @@ public sealed class CsprojDetectorTests : IDisposable
     }
 
     [Theory]
+    [InlineData(".git")]
+    [InlineData(".vs")]
+    [InlineData(".idea")]
+    [InlineData(".hidden")]
+    [InlineData("node_modules")]
+    [InlineData("NODE_MODULES")]
+    public async Task DetectAsync_SkipsDotFoldersAndNodeModules(string skipped)
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "Service/Service.csproj", MinimalCsproj);
+        WriteCsproj(repo, skipped + "/x/X.csproj", MinimalCsproj);
+
+        var result = await _detector.DetectAsync(repo, CancellationToken.None);
+
+        Assert.Equal([Path.Combine(repo, "Service", "Service.csproj")], result.Select(p => p.CsprojPath));
+    }
+
+    [Fact]
+    public async Task DetectAsync_CancelledToken_Throws()
+    {
+        var repo = CreateRepo();
+        WriteCsproj(repo, "A/A.csproj", MinimalCsproj);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => _detector.DetectAsync(repo, cts.Token));
+    }
+
+    [Theory]
     [InlineData("<Project Sdk=\"Microsoft.NET.Sdk.Web\"></Project>", false)]
     [InlineData("<Project Sdk=\"Microsoft.NET.Sdk.Web/9.0.0\"></Project>", false)]
     [InlineData("<Project Sdk=\"Microsoft.NET.Sdk.Worker\"></Project>", false)]
