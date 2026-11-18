@@ -18,4 +18,26 @@ public interface ISyncService
     Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct);
 
     Task<ApplyResult> ApplyAsync(SyncPlan plan, ApplyOptions options, CancellationToken ct);
+
+    /// <summary>Reads the remote configuration of <c>binding.Service</c> in <paramref name="env"/>. Never calls <c>ISecretStore</c>.</summary>
+    Task<RemoteConfig> ReadRemoteConfigAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct);
+
+    /// <summary>
+    /// Pulls only <paramref name="keys"/> of <paramref name="env"/>, keeping every other local value. <paramref name="env"/> must
+    /// equal <c>binding.ActiveEnvironment</c> (OrdinalIgnoreCase), else <see cref="InvalidOperationException"/> (also when there
+    /// is no active environment). Before any write: the same gitignore and secrets-target safety steps as <see cref="PullAsync"/>.
+    /// A selected key: remote plain → ValuesTarget (removed from SecretsTarget); KV reference → secret value to SecretsTarget
+    /// (removed from ValuesTarget); missing remotely → removed locally; the scope marker follows the remote entry. Ignored
+    /// keys are skipped (listed in Ignored). The snapshot is updated only for <paramref name="keys"/> (secrets as fingerprint).
+    /// Returns counts; Blocked = false, LocalChanges = [].
+    /// </summary>
+    Task<PullResult> PullSelectedAsync(ProjectBinding binding, ConfigEnvironment env, IReadOnlyCollection<string> keys, CancellationToken ct);
+
+    /// <summary>
+    /// Resolves a local-files conflict of <paramref name="key"/> (active env only, same rule as <see cref="PullSelectedAsync"/>).
+    /// KeepRemote = <c>PullSelectedAsync([key])</c>. KeepLocal = the snapshot item of <paramref name="key"/> becomes the current
+    /// remote item (removed when missing remotely); local files are untouched, so the next <c>PlanPushAsync(LocalFiles)</c>
+    /// plans the local value (Add/Update; a local deletion is a Delete only with <c>LocalFiles.Delete</c>, else DeleteSkipped).
+    /// </summary>
+    Task ResolveConflictAsync(ProjectBinding binding, ConfigEnvironment env, string key, ConflictResolution resolution, CancellationToken ct);
 }
