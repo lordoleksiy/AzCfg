@@ -1,33 +1,22 @@
 using System.Security.Claims;
-using AzCfg.Ui.Hosting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.StaticAssets;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-[assembly: HostingStartup(typeof(HostSecurityExtensions.Startup))]
-
 namespace AzCfg.Ui.Hosting;
 
 /// <summary>
-/// Loopback token login, cookie auth, fallback policy and security headers (AD-1, G21, G22). Services are registered by
-/// <see cref="Startup"/> (ASP.NET Core runs the hosting startup of the application assembly), so the composition root
-/// only calls <see cref="UseAzCfgHostSecurity"/> and <see cref="MapAzCfgEndpoints"/>.
+/// Loopback token login, cookie auth, fallback policy and security headers (AD-1, G21, G22). The composition root calls
+/// <see cref="AddAzCfgHostSecurity"/>, <see cref="UseAzCfgHostSecurity"/> and <see cref="MapAzCfgEndpoints"/>.
 /// </summary>
 public static class HostSecurityExtensions
 {
     public const string CookieName = "azcfg_ui";
-
-    /// <summary>Hosting startup of this assembly: registers <see cref="AddAzCfgHostSecurity"/> without touching the composition root.</summary>
-    public sealed class Startup : IHostingStartup
-    {
-        public void Configure(IWebHostBuilder builder) => builder.ConfigureServices(s => s.AddAzCfgHostSecurity());
-    }
 
     /// <summary>Token, cookie authentication (<c>azcfg_ui</c>, 401 instead of redirects), the authenticated-user fallback policy and the browser launcher.</summary>
     public static IServiceCollection AddAzCfgHostSecurity(this IServiceCollection services)
