@@ -1,11 +1,9 @@
 @using AzCfg.Ui.Application.Environments
 @using AzCfg.Ui.Components.Common
-@using AzCfg.Ui.Hosting
 @using AzCfg.Ui.Shared
 @implements IDisposable
 @inject IEnumerable<StatusBarItemRegistration> Registrations
 @inject IAzureStatusService AzureStatus
-@inject UiHostOptions HostOptions
 
 <footer class="az-statusbar">
     <div class="az-statusbar-side left">
@@ -23,10 +21,6 @@
         @foreach (var item in Items(StatusBarAlignment.Right))
         {
             <span class="az-statusbar-item"><DynamicComponent Type="item.Component" /></span>
-        }
-        @if (HostOptions.Demo is not null)
-        {
-            <span class="az-statusbar-item az-demo-badge">DEMO</span>
         }
         <span class="az-statusbar-item az-statusbar-hint">Ctrl+K</span>
     </div>

@@ -1,5 +1,7 @@
 using AzCfg.Ui.Components.Layout;
+using AzCfg.Ui.Demo;
 using AzCfg.Ui.Hosting;
+using AzCfg.Ui.Shared;
 
 namespace AzCfg.Ui.Tests.Components.Layout;
 
@@ -13,11 +15,12 @@ public sealed class StatusBarTests
     }
 
     [Fact]
-    public void Render_DemoHost_ShowsDemoBadgeAndShortcutHint()
+    public void Render_DemoHostWithRegisteredBadge_ShowsDemoBadgeOnceAndShortcutHint()
     {
         using var ctx = new Ctx(new UiHostOptions { Demo = "full" });
+        ctx.Services.AddStatusBarItem(typeof(DemoBadge), StatusBarAlignment.Right, 100);
         var markup = ctx.Render<StatusBar>().Markup;
-        Assert.Contains("DEMO", markup);
+        Assert.Single(markup.Split("DEMO</span>").Skip(1));
         Assert.Contains("Ctrl+K", markup);
     }
 

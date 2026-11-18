@@ -24,11 +24,6 @@
     padding: 0 8px;
 }
 
-.az-demo-badge {
-    font-weight: 600;
-    color: var(--az-env-stage);
-}
-
 .az-statusbar-hint {
     font-family: var(--az-font-mono);
     color: var(--colorNeutralForeground3);
