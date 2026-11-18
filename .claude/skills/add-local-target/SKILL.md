@@ -14,11 +14,12 @@ public interface ILocalTarget
     Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct);
     Task<IReadOnlyList<LocalValue>> ReadAsync(LocalTargetBinding target, CancellationToken ct);
     Task WriteAsync(LocalTargetBinding target, IReadOnlyList<LocalValue> values, CancellationToken ct);
+    Task EnsureGitIgnoredAsync(LocalTargetBinding target, CancellationToken ct);
 }
 ```
 `LocalTargetBinding(Kind, ProjectPath, Format)` carries the `.csproj` path and the file's serialization
-format (`LocalFileFormat`); `LocalValue(Key, Value)` is a single key/value pair, `Key` without the scope
-prefix. Spec: `docs/architecture.md`, ADR 0006.
+format (`LocalFileFormat`); `LocalValue(Key, Value, Scope)` is a single key/value pair, `Key` without the scope
+prefix, `Scope = Global` for a key marked `//@global` in the file. Spec: `docs/architecture.md`, ADR 0006, ADR 0009.
 
 Files to touch:
 1. `src/AzCfg.Infrastructure/Local/<Name>Target.cs` — one public sealed class implementing `ILocalTarget`. All file IO lives here, never in Core.
@@ -34,4 +35,10 @@ Rules:
   secret target outside the repo.
 - `InspectAsync` must report `IsSafeForSecrets` correctly: `true` for user-secrets; for a file inside the
   repo, `true` only if it is git-ignored and not tracked.
+- JSON targets derive from `JsonFileTarget`: write via `JsonProjection.ToNestedJsonText` (indented, `//@global`
+  markers), read scopes via `JsonProjection.ReadGlobalMarkers` (ADR 0009).
+- `CanHandle` offers only real targets: skip `ProjectInfo.IsLibrary` projects (user-secrets: unless the project has a
+  `UserSecretsId`); a file target also needs an existing `appsettings*.json` next to the `.csproj`.
+- `EnsureGitIgnoredAsync`: for a file inside the repo, add it to the project's `.gitignore` unless
+  `git check-ignore` already ignores it (no duplicates); no-op for targets outside the repo. Core decides when to call it.
 - Finish with `dotnet build` and `dotnet test`.

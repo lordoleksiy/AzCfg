@@ -1,7 +1,8 @@
 # AzCfg
 
 Local manager for Azure App Configuration + Key Vault for .NET developers: two-way sync of config between Azure
-and local files (local.settings.json, user-secrets, appsettings) and JSON editing of App Configuration.
+and local files (user-secrets, `appsettings.local.json`; `local.settings.json` is designed, not implemented yet)
+and JSON editing of App Configuration.
 Core is a class library; the client is currently a CLI (`dotnet tool azcfg`), a UI comes later.
 Code, identifiers, commits and docs are in English (existing ADRs and plans in `docs/` are in Ukrainian).
 
@@ -17,11 +18,13 @@ Warnings = errors (`Directory.Build.props`). Package versions only in `Directory
 
 ## Structure and layer boundaries
 ```
-src/AzCfg.Core            model, Mapping, Sync, Abstractions (ports), UseCases
+src/AzCfg.Core            model, Mapping, Environments, Sync, Security, Abstractions (ports), UseCases
 src/AzCfg.Infrastructure  Azure SDK, file system, user state, DI (AddAzCfg)
-src/AzCfg.Cli             Spectre.Console.Cli — user interaction only
-tests/AzCfg.Core.Tests    the bulk of the tests
+src/AzCfg.Cli             Spectre.Console.Cli — user interaction only; command tree in CliApp.Configure
+src/AzCfg.DevConsole      debug harness: runs CLI commands in-process (F5 + breakpoints)
+tests/AzCfg.Core.Tests    the bulk of the tests; hand-written port fakes in Fakes/
 tests/AzCfg.Infrastructure.Tests
+tests/AzCfg.Cli.Tests     command tests + Scenario/ (end-to-end on in-memory fakes)
 ```
 - **Core references nothing**: no Azure SDK, no file IO, no console. Only BCL + `ILogger`.
 - **Core never prompts or prints** — it returns data (`SyncPlan`, `ProjectResolution`); the client decides.
@@ -57,13 +60,16 @@ tests/AzCfg.Infrastructure.Tests
 - Model: sealed records, immutable; async methods take a `CancellationToken`.
 
 ## Documentation
-- Full architecture, models, ports, CLI, MVP order: `docs/architecture.md`
-- MVP plan by task (take one via `/feature`): `docs/mvp-plan.md`
+- Full architecture, models, ports, CLI: `docs/architecture.md`
+- CLI MVP plan (done; where it differs from later ADRs, the ADR wins): `docs/mvp-plan.md`
+- UI plan (tasks for the orchestrator): `docs/ui-mvp-plan.md`
+- User-facing CLI reference, RBAC roles, release: `README.md`
 - Decisions (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
   0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety,
   0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore)
 
 ## Skills
+- `/feature` — one task → branch from `dev` → tests → code → PR into `dev`
 - `/add-local-target` — new `ILocalTarget` + test + DI
 - `/add-cli-command` — new command + `--json`
 - `/adr` — new ADR as a contract before code

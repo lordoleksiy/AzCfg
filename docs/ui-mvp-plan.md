@@ -99,7 +99,7 @@ App Configuration, переглядати конфігурацію середо�
 | Рівень | Що це | Звідки |
 | --- | --- | --- |
 | Project | `.csproj` + `ProjectBinding` (сервіс, цілі, vault на середовище, активне середовище) | `IProjectDetector`, `IProjectService`, `projects.json` |
-| Environment | `ConfigEnvironment(Name, StoreEndpoint, Label, IsProtected)` | `profile.json` (спільний для всіх проєктів) |
+| Environment | `ConfigEnvironment(Name, StoreEndpoint, Label, IsProtected, WriteLabel)`; режим — `UserProfile.Mode` (ADR 0008) | `profile.json` (спільний для всіх проєктів) |
 | Sources | локальні цілі (user-secrets, `appsettings.local.json`), App Configuration store, Key Vault-и з KV references | `ILocalTarget`, `IConfigStore`, `ISecretStore` |
 
 App Configuration і Key Vault — одне джерело середовища: секрет існує в UI лише як KV reference
@@ -109,7 +109,8 @@ App Configuration і Key Vault — одне джерело середовища:
 (`init`, `pull`, `use`, `plan`, `push`, `edit`) + дерево, Monaco, diff, вибір окремих змін, конфлікти; секрети не
 потрапляють у браузер до явного Reveal; Production read-only за замовчуванням.
 
-**Не-цілі:** promote у UI, `LabelResolver`, запис у `local.settings.json`, створення Key Vault, ранжування vault-ів,
+**Не-цілі:** promote у UI, вибір/зміна режиму середовищ і labels у UI (є в CLI: `init --mode`, `azcfg config`; UI
+лише показує режим і працює в будь-якому), редагування шаблонів ігнору в UI (CLI `azcfg ignore`), запис у `local.settings.json`, створення Key Vault, ранжування vault-ів,
 перейменування середовищ, віддалений/багатокористувацький доступ, E2E у браузері, пакування UI як dotnet tool,
 міжпроцесний lock CLI↔UI.
 
@@ -130,11 +131,11 @@ AzCfg.Cli             Spectre.Console.Cli; композиція сценарії
 | `ISetupService.DiscoverEnvironmentsAsync` / `SaveProfileAsync` | Майстер середовищ (кандидати з тегу/суфікса, `IsProtected`) |
 | `IUserStateStore.LoadProfileAsync` + `IEnvironmentResolver.Resolve` | Список середовищ (`null` профіль → майстер) |
 | `IProjectService.ResolveAsync(repoPath)` → `ProjectResolution(Candidates, IsConfident, TargetOptions, Existing)` | Майстер прив'язки. **Є binding → `Existing`, а `Candidates`/`TargetOptions` порожні** (G20) |
-| `IProjectService.BindAsync(repoPath, service, values, secrets)` | Збереження binding; небезпечна ціль секретів → `InvalidOperationException`; **скидає** `VaultByEnvironment`/`ActiveEnvironment` (G5) |
+| `IProjectService.BindAsync(repoPath, service, values, secrets)` | Збереження binding; небезпечна ціль секретів → `InvalidOperationException`; **скидає** `VaultByEnvironment`/`ActiveEnvironment`/`Ignore` (G5) |
 | `ISyncService.DiffAsync` → `ConfigDiff(Items: DiffItem(Key, Kind, Base, Local, Remote))` | Дерево зі статусами, Changes. `StateItem.Value` — `Plain(Value)` або `Secret(SecretUri?, Fingerprint)` |
-| `ISyncService.PlanPushAsync(binding, env, PushSource)` → `SyncPlan(Changes, Conflicts, RequiresVaultChoice, TouchesGlobal)` | `LocalFiles` — base = знімок; `EditedJson` — base = **поточний remote** (G15) |
+| `ISyncService.PlanPushAsync(binding, env, PushSource)` → `SyncPlan(Changes, Conflicts, RequiresVaultChoice, TouchesGlobal)` + `Warnings` | `LocalFiles(Delete = false)` — base = знімок, upsert (локальні видалення → `SyncWarning(DeleteSkipped)`), ігноровані ключі не потрапляють; `EditedJson` — base = **поточний remote** (G15) |
 | `ISyncService.ApplyAsync(plan, ApplyOptions(ConfirmedEnvironment, ConfirmGlobal))` | Кидає до будь-якого запису: конфлікти, `RequiresVaultChoice`, protected без назви (ignore case), global без підтвердження. Спершу KV, потім App Config. Без `Failed` — знімок оновлюється **лише для ключів плану** |
-| `ISyncService.PullAsync(binding, env, progress, force)` → `PullResult(Env, ValuesWritten, SecretsWritten, Blocked, LocalChanges)` | Повний перезапис цілей. Блокує лише при локальних змінах відносно знімка **активного** середовища; **без `ActiveEnvironment` не перевіряє нічого** (G21). Ставить `ActiveEnvironment = env` |
+| `ISyncService.PullAsync(binding, env, progress, force)` → `PullResult(Env, ValuesWritten, SecretsWritten, Blocked, LocalChanges)` + `Warnings`, `Ignored` | Повний перезапис цілей (ігноровані ключі зберігають локальне значення). Блокує лише при локальних змінах відносно знімка **активного** середовища; **без `ActiveEnvironment` не перевіряє нічого** (G21). Ставить `ActiveEnvironment = env` |
 | `ISyncService.ExportJsonAsync` | Edit JSON середовища (секрети як `{"@kv": name}`, global під `@global`) |
 | `JsonProjection.ToEditJson` / `FromEditJson(json, fingerprinter, knownSecrets)` / `ToNestedJson` | JSON view, валідація без мережі, серіалізація локальних файлів |
 | `KeyMapper.ToStoreKey(scope, service, path)`, `ToKeyVaultSecretName`, `ScopeMerger.Merge` | Імена секретів, remote-only перегляд |
@@ -146,7 +147,9 @@ AzCfg.Cli             Spectre.Console.Cli; композиція сценарії
 `ThreeWayDiff.SecretName` — `internal`; UI не додає `InternalsVisibleTo`, а розбирає URI сам (G25).
 
 ### 2.3 Infrastructure
-- `AppConfigStore(TokenCredential)` — `global:*` + `<service>:*`, ETag-запис, 412 → `ApplyResult.Failed`.
+- `AppConfigStore(TokenCredential)` — `global:*` + `<service>:*`; `env.Label == null` → усі labels, інакше без label +
+  label середовища; `ConfigEntry.Label` переноситься; запис рівно з `entry.Label`; ETag-запис, 412 → `ApplyResult.Failed`;
+  `ListLabelsAsync` для майстра.
 - `KeyVaultSecretStore` — `GetAsync(secretUri)`, `SetAsync(vault, name, value)`, кеш `SecretClient` на vault.
 - `ResourceGraphDiscovery(ArmClient)` — stores і vault-и. `CsprojDetector` — `*.csproj`, пропускає лише `bin/obj`.
 - `AppSettingsLocalTarget`, `UserSecretsTarget` (база `JsonFileTarget`: читання через `ConfigurationBuilder.AddJsonFile`,
@@ -161,6 +164,19 @@ AzCfg.Cli             Spectre.Console.Cli; композиція сценарії
 - Push: конфлікти → відмова; `RequiresVaultChoice` → вибір із `FindKeyVaultsAsync` → зберегти `VaultByEnvironment[env]`
   → перепланувати; protected → ввести назву; `TouchesGlobal` → окреме підтвердження.
 - `use <env>` = `PullAsync(force: false)` → `Blocked` → показати ключі → за згодою `force: true`.
+- Середовища: `IEnvironmentResolver` у DI — `ProfileEnvironmentResolver` (store- або label-режим за `profile.Mode`).
+- `PullResult.Warnings` / `SyncPlan.Warnings` (`DuplicateLabels`, `LabelOverride`, `DeleteSkipped`) показуються
+  користувачу (CLI — жовтим). Push видаляє remote-ключі лише з `--delete` (`LocalFiles(Delete: true)`).
+
+### 2.5 ADR 0008 для UI
+- Режим середовищ, labels і ігнор — дані профілю/binding; UI не змінює їх поведінку, лише відображає
+  (режим у Environments, label ключа в інспекторі, бейдж «ignored» у дереві з `IgnoreRules`/`binding.Ignore`).
+- Попередження з `Warnings` — обов'язково видимі в PlanReview і PullPreview.
+- `BindAsync` скидає й `Ignore` разом з `VaultByEnvironment`/`ActiveEnvironment` — G5 зберігає всі три.
+- ADR 0009 (0.3.0): `LocalValue.Scope` з позначки `//@global` — UI зберігає позначки при записі локальних файлів
+  (`JsonProjection.ToNestedJsonText`, `ReadGlobalMarkers`), `FromNestedJson` (G8) має повертати той самий scope;
+  `ProjectInfo.IsLibrary` — бібліотеки/тест-проєкти без цілей; `GitIgnoreLocalFiles` робить файл проєкту безпечним
+  для секретів через `ILocalTarget.EnsureGitIgnoredAsync` під час bind/pull.
 
 ---
 
@@ -172,7 +188,7 @@ AzCfg.Cli             Spectre.Console.Cli; композиція сценарії
 | G2 | `CsprojDetector` обходить `.git`, `node_modules` | Пропускати `.git`, `.vs`, `.idea`, `node_modules`, `bin`, `obj`, теки з `.` | B2 |
 | G3 | Немає списку воркспейсів | `<state-root>/ui/workspaces.json` | S1 |
 | G4 | Binding один на `RepoPath`, у воркспейсі кілька проєктів | Новий binding: `RepoPath` = тека `.csproj`. Пошук: тека `.csproj`, далі предки до кореня воркспейсу; binding предка приймається, лише якщо `ValuesTarget.ProjectPath` або `SecretsTarget.ProjectPath` == цей `.csproj`. **Прийнятий binding використовується як є** (його `RepoPath` — ключ знімків, спільний із CLI) | S1 |
-| G5 | `BindAsync` скидає `VaultByEnvironment`/`ActiveEnvironment` | `WorkspaceService.BindAsync`: після Core `BindAsync` — `SaveBindingAsync(binding with { старі поля })` | S1 |
+| G5 | `BindAsync` скидає `VaultByEnvironment`/`ActiveEnvironment`/`Ignore` | `WorkspaceService.BindAsync`: після Core `BindAsync` — `SaveBindingAsync(binding with { старі поля })` | S1 |
 | G6 | Pull лише «все або нічого» | `ISyncService.PullSelectedAsync` (Core, TDD) | B1 |
 | G7 | Вибір окремих змін push | Без Core: `plan with { Changes = subset }` — `ApplyAsync` оновлює знімок лише для ключів плану | S2 |
 | G8 | Немає зворотного до `ToNestedJson` | `JsonProjection.FromNestedJson` (паритет із `JsonFileTarget.ReadAsync`) | B1 |
@@ -253,7 +269,8 @@ CLI-поведінка не змінюється (CLI-тести не правл
 - FR-A5 [MVP] 401/403/404/412/мережа — повідомлення з `AzureErrors.Describe` (ролі RBAC).
 
 ### 4.6 Synchronization
-- FR-S1 [MVP] Local → Azure (`PushSource.LocalFiles`) лише в **активне** середовище.
+- FR-S1 [MVP] Local → Azure (`PushSource.LocalFiles`) лише в **активне** середовище; за замовчуванням upsert,
+  видалення — явним перемикачем (`Delete: true`).
 - FR-S2 [MVP] Azure → Local: preview (лише активне), pull усього або вибраних ключів.
 - FR-S3 [MVP] Diff viewer: список змін + Monaco diff (секрети — `***`/статус fingerprint).
 - FR-S4 [MVP] Чекбокси окремих змін в обох напрямках.
