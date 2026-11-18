@@ -8,7 +8,8 @@ namespace AzCfg.Infrastructure.Local;
 
 /// <summary>
 /// <see cref="LocalTargetKind.UserSecrets"/>: the project's dotnet user-secrets file, nested JSON (ADR 0006).
-/// Always safe for secrets, since it lives outside the repo. A project without <c>UserSecretsId</c> reads as
+/// Offered for application projects and for any project that already has a <c>UserSecretsId</c>. Always safe for
+/// secrets, since it lives outside the repo. A project without <c>UserSecretsId</c> reads as
 /// empty and is not modified by reading or <see cref="InspectAsync"/>; <see cref="JsonFileTarget.WriteAsync"/> runs
 /// <c>dotnet user-secrets init</c> first and throws <see cref="InvalidOperationException"/> if that fails.
 /// </summary>
@@ -16,10 +17,12 @@ public sealed class UserSecretsTarget : JsonFileTarget
 {
     public override LocalTargetKind Kind => LocalTargetKind.UserSecrets;
 
-    public override bool CanHandle(ProjectInfo project) => true;
+    public override bool CanHandle(ProjectInfo project) => !project.IsLibrary || project.UserSecretsId is not null;
 
     public override Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct) =>
         Task.FromResult(new LocalTargetOption(target, GetReadFilePath(target) is { } path && File.Exists(path), true));
+
+    public override Task EnsureGitIgnoredAsync(LocalTargetBinding target, CancellationToken ct) => Task.CompletedTask;
 
     protected override string? GetReadFilePath(LocalTargetBinding target) =>
         ReadSecretsId(target.ProjectPath) is { } id ? SecretsPath(id) : null;

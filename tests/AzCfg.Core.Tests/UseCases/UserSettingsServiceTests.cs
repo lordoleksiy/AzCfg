@@ -28,6 +28,7 @@ public class UserSettingsServiceTests
             [
                 new UserSetting("mode", "stores"),
                 new UserSetting("defaultLabel", "Shared"),
+                new UserSetting("gitignoreLocalFiles", "false"),
                 new UserSetting("env.dev.endpoint", "https://dev.azconfig.io"),
                 new UserSetting("env.dev.label", "Development"),
                 new UserSetting("env.dev.protected", "false"),
@@ -45,12 +46,13 @@ public class UserSettingsServiceTests
 
         var settings = await service.ListAsync(CancellationToken.None);
 
-        Assert.Equal([new UserSetting("mode", "labels"), new UserSetting("defaultLabel", null)], settings);
+        Assert.Equal([new UserSetting("mode", "labels"), new UserSetting("defaultLabel", null), new UserSetting("gitignoreLocalFiles", "false")], settings);
     }
 
     [Theory]
     [InlineData("mode", "mode", "stores")]
     [InlineData("DefaultLabel", "defaultLabel", "Shared")]
+    [InlineData("GitIgnoreLocalFiles", "gitignoreLocalFiles", "false")]
     [InlineData("env.DEV.label", "env.dev.label", "Development")]
     [InlineData("env.prod.protected", "env.prod.protected", "true")]
     public async Task Get_MatchesKeyCaseInsensitively(string key, string expectedKey, string expectedValue)
@@ -83,6 +85,8 @@ public class UserSettingsServiceTests
         { "MODE", "Stores", "stores", p => p.Mode, EnvironmentMode.StorePerEnvironment },
         { "defaultLabel", "Staging", "Staging", p => p.DefaultLabel, "Staging" },
         { "defaultLabel", "  ", null, p => p.DefaultLabel, null },
+        { "gitignoreLocalFiles", "True", "true", p => p.GitIgnoreLocalFiles, true },
+        { "GITIGNORELOCALFILES", "false", "false", p => p.GitIgnoreLocalFiles, false },
         { "env.dev.label", "Dev", "Dev", p => p.Environments[0].Label, "Dev" },
         { "env.Dev.label", "", null, p => p.Environments[0].Label, null },
         { "env.prod.endpoint", "https://other.azconfig.io", "https://other.azconfig.io", p => p.Environments[1].StoreEndpoint, new Uri("https://other.azconfig.io") },
@@ -119,6 +123,7 @@ public class UserSettingsServiceTests
     [InlineData("env.dev.endpoint", "ftp://dev.azconfig.io", "URL")]
     [InlineData("env.dev.endpoint", "/relative", "URL")]
     [InlineData("env.dev.protected", "maybe", "true")]
+    [InlineData("gitignoreLocalFiles", "maybe", "'true' or 'false'")]
     [InlineData("env.qa.label", "QA", "dev, prod")]
     [InlineData("env..label", "QA", "Unknown")]
     [InlineData("color", "red", "env.dev.endpoint")]

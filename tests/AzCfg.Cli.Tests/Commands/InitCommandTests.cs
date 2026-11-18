@@ -161,8 +161,8 @@ public sealed class InitCommandTests
         var input = $"{Down}\n" // mode: one store, a label per environment
             + "\n" // shared store: the discovered one
             + $" {Down} \n" // labels: Development + Production
-            + "\n\n" // Development -> dev, not protected
-            + "\n\n" // Production -> prod, protected
+            + "\n\n\n" // Development -> dev, label Development, not protected
+            + "\n\n\n" // Production -> prod, label Production, protected
             + "\n"; // no manual labels
 
         var (code, output, _) = await Run(new InitSettings(), setup, input);
@@ -217,14 +217,39 @@ public sealed class InitCommandTests
     {
         var setup = new FakeSetup { Labels = { [Shared] = [] } };
         var input = "\n" // add a label manually (default yes)
-            + "Staging\n" // label
-            + "\n\n" // name: stage (suggested), not protected
+            + "stage\n" // name
+            + "\n" // label: defaults to the name
+            + "\n" // not protected
             + "\n"; // no more labels
 
         await Run(new InitSettings { Mode = "labels", Store = Shared.OriginalString }, setup, input);
 
         Assert.False(setup.Discovered);
+        Assert.Equal([new ConfigEnvironment("stage", Shared, "stage", false)], setup.Saved!.Environments);
+    }
+
+    [Fact]
+    public async Task Interactive_LabelsMode_TypedLabelIsSavedInProfile()
+    {
+        var setup = new FakeSetup { Labels = { [Shared] = [] } };
+        var input = "\nstage\nStaging\n\n\n"; // add manually, name, typed label, not protected, no more
+
+        await Run(new InitSettings { Mode = "labels", Store = Shared.OriginalString }, setup, input);
+
         Assert.Equal([new ConfigEnvironment("stage", Shared, "Staging", false)], setup.Saved!.Environments);
+    }
+
+    [Fact]
+    public async Task Interactive_LabelsMode_SelectedStoreLabelIsKeptByDefault()
+    {
+        var setup = new FakeSetup { Labels = { [Shared] = ["Development"] } };
+        var input = " \n" // labels: Development
+            + "\n\n\n" // name dev, label Development, not protected
+            + "\n"; // no manual labels
+
+        await Run(new InitSettings { Mode = "labels", Store = Shared.OriginalString }, setup, input);
+
+        Assert.Equal([new ConfigEnvironment("dev", Shared, "Development", false)], setup.Saved!.Environments);
     }
 
     [Theory]

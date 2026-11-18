@@ -46,7 +46,7 @@ public static class CliApp
         });
         config.AddBranch("config", settings =>
         {
-            settings.SetDescription("Show or change your global settings: mode, defaultLabel, env.<name>.endpoint|label|protected.");
+            settings.SetDescription("Show or change your global settings: mode, defaultLabel, gitignoreLocalFiles, env.<name>.endpoint|label|protected.");
             settings.AddCommand<ConfigListCommand>("list").WithDescription("List all settings.");
             settings.AddCommand<ConfigGetCommand>("get").WithDescription("Show one setting.");
             settings.AddCommand<ConfigSetCommand>("set").WithDescription("Change one setting.");

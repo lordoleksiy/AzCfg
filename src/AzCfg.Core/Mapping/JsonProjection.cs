@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AzCfg.Core.Abstractions;
@@ -39,6 +41,125 @@ public static class JsonProjection
         }
 
         return Build(nodes, "values");
+    }
+
+    /// <summary>
+    /// Writes <see cref="ToNestedJson"/> as indented text (2 spaces, like <c>WriteIndented</c>); every leaf whose value has
+    /// <see cref="ConfigScope.Global"/> ends its line with <c> //@global</c>, after the comma if there is one (ADR 0009).
+    /// Without global values the result equals <c>ToNestedJson(values).ToJsonString(new() { WriteIndented = true })</c>.
+    /// Throws like <see cref="ToNestedJson"/>.
+    /// </summary>
+    public static string ToNestedJsonText(IEnumerable<LocalValue> values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+
+        var list = values.ToList();
+        var root = ToNestedJson(list);
+        var globals = list.Where(v => v.Scope == ConfigScope.Global).Select(v => v.Key).ToHashSet(StringComparer.Ordinal);
+        var text = new StringBuilder();
+        WriteObject(root, [], 0);
+        return text.ToString();
+
+        void WriteObject(JsonObject obj, IReadOnlyList<string> prefix, int depth)
+        {
+            if (obj.Count == 0)
+            {
+                text.Append("{}");
+                return;
+            }
+
+            text.Append('{');
+            var index = 0;
+            foreach (var (name, node) in obj)
+            {
+                var last = ++index == obj.Count;
+                string[] path = [.. prefix, name];
+                text.Append(Environment.NewLine).Append(' ', (depth + 1) * 2).Append(JsonSerializer.Serialize(name)).Append(": ");
+                if (node is JsonObject child)
+                {
+                    WriteObject(child, path, depth + 1);
+                    text.Append(last ? "" : ",");
+                }
+                else
+                {
+                    text.Append(node!.ToJsonString()).Append(last ? "" : ",");
+                    text.Append(globals.Contains(KeyMapper.FromLocalJsonPath(path)) ? " //@global" : "");
+                }
+            }
+
+            text.Append(Environment.NewLine).Append(' ', depth * 2).Append('}');
+        }
+    }
+
+    /// <summary>
+    /// Returns the configuration paths (<c>A:B</c>, array items as <c>A:0</c>; compared ignoring case) of the scalar leaves
+    /// that are immediately followed, on the same line, by an <c>@global</c> comment (<c>//@global</c>, <c>// @global</c>,
+    /// <c>/*@global*/</c>; a comma may stand between). Throws <see cref="JsonException"/> for invalid JSON.
+    /// </summary>
+    public static IReadOnlySet<string> ReadGlobalMarkers(string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Allow, AllowTrailingCommas = true });
+        var markers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var path = new List<string>();
+        var next = new Stack<int>();
+        string? name = null, leaf = null;
+        var leafEnd = 0;
+        while (reader.Read())
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.Comment:
+                    if (leaf is not null && reader.GetComment().Trim() == "@global"
+                        && !bytes.AsSpan(leafEnd, (int)reader.TokenStartIndex - leafEnd).Contains((byte)'\n'))
+                    {
+                        markers.Add(leaf);
+                    }
+
+                    leaf = null;
+                    continue;
+                case JsonTokenType.PropertyName:
+                    name = reader.GetString();
+                    leaf = null;
+                    continue;
+                case JsonTokenType.EndObject or JsonTokenType.EndArray:
+                    next.Pop();
+                    if (next.Count > 0)
+                    {
+                        path.RemoveAt(path.Count - 1);
+                    }
+
+                    leaf = null;
+                    continue;
+            }
+
+            string? segment = null;
+            if (next.TryPop(out var item))
+            {
+                segment = item < 0 ? name : item.ToString(CultureInfo.InvariantCulture);
+                next.Push(item < 0 ? item : item + 1);
+            }
+
+            leaf = null;
+            if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+            {
+                if (segment is not null)
+                {
+                    path.Add(segment);
+                }
+
+                next.Push(reader.TokenType == JsonTokenType.StartArray ? 0 : -1);
+            }
+            else if (segment is not null)
+            {
+                leaf = string.Join(':', [.. path, segment]);
+                leafEnd = (int)reader.BytesConsumed;
+            }
+        }
+
+        return markers;
     }
 
     /// <summary>

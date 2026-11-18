@@ -20,10 +20,12 @@ public sealed class UserSecretsTargetTests : IDisposable
     public void Kind_IsUserSecrets() => Assert.Equal(LocalTargetKind.UserSecrets, _target.Kind);
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void CanHandle_AnyProject_ReturnsTrue(bool hasSecretsId) =>
-        Assert.True(_target.CanHandle(new ProjectInfo(_root, CsprojPath(), "Service", false, hasSecretsId ? _secretsId : null)));
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, true)]
+    public void CanHandle_AppOrProjectWithSecretsId_ReturnsTrue(bool isLibrary, bool hasSecretsId, bool expected) =>
+        Assert.Equal(expected, _target.CanHandle(new ProjectInfo(_root, CsprojPath(), "Service", false, hasSecretsId ? _secretsId : null, isLibrary)));
 
     [Fact]
     public async Task ReadAsync_FileMissing_ReturnsEmptyList() =>
@@ -51,11 +53,25 @@ public sealed class UserSecretsTargetTests : IDisposable
     }
 
     [Fact]
-    public async Task WriteAsync_WritesNestedJsonToSecretsFile()
+    public async Task WriteAsync_WritesIndentedNestedJsonToSecretsFile()
     {
         await _target.WriteAsync(Binding(WithId()), [new LocalValue("A:B", "v")], CancellationToken.None);
 
-        Assert.Equal("""{"A":{"B":"v"}}""", await File.ReadAllTextAsync(PathHelper.GetSecretsPathFromSecretsId(_secretsId)));
+        Assert.Equal(
+            "{\n  \"A\": {\n    \"B\": \"v\"\n  }\n}".ReplaceLineEndings(Environment.NewLine),
+            await File.ReadAllTextAsync(PathHelper.GetSecretsPathFromSecretsId(_secretsId)));
+    }
+
+    [Fact]
+    public async Task WriteAsync_ThenReadAsync_RoundTripsGlobalMarker()
+    {
+        var binding = Binding(WithId());
+        LocalValue[] written = [new("A:B", "v", ConfigScope.Global), new("A:C", "s")];
+
+        await _target.WriteAsync(binding, written, CancellationToken.None);
+
+        Assert.Contains("\"B\": \"v\", //@global", await File.ReadAllTextAsync(PathHelper.GetSecretsPathFromSecretsId(_secretsId)));
+        Assert.Equal(written, (await _target.ReadAsync(binding, CancellationToken.None)).OrderBy(v => v.Key, StringComparer.Ordinal));
     }
 
     [Fact]
@@ -84,6 +100,17 @@ public sealed class UserSecretsTargetTests : IDisposable
 
         Assert.Equal(fileExists, option.Exists);
         Assert.True(option.IsSafeForSecrets);
+    }
+
+    [Fact]
+    public async Task EnsureGitIgnoredAsync_ChangesNoFiles()
+    {
+        var csproj = WithoutId();
+
+        await _target.EnsureGitIgnoredAsync(Binding(csproj), CancellationToken.None);
+
+        Assert.Equal([csproj], Directory.GetFileSystemEntries(_root));
+        Assert.DoesNotContain("UserSecretsId", await File.ReadAllTextAsync(csproj));
     }
 
     [Fact]

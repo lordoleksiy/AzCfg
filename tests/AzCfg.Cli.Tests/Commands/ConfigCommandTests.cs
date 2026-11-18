@@ -80,7 +80,7 @@ public sealed class ConfigCommandTests
         var (_, output, _) = await Run("list", "--json");
 
         Assert.Equal(
-            """[{"key":"mode","value":"labels"},{"key":"defaultLabel","value":null},{"key":"env.dev.endpoint","value":"https://shared.azconfig.io"},{"key":"env.dev.label","value":"Development"},{"key":"env.dev.protected","value":"false"},{"key":"env.prod.endpoint","value":"https://shared.azconfig.io"},{"key":"env.prod.label","value":"Production"},{"key":"env.prod.protected","value":"true"}]""",
+            """[{"key":"mode","value":"labels"},{"key":"defaultLabel","value":null},{"key":"gitignoreLocalFiles","value":"false"},{"key":"env.dev.endpoint","value":"https://shared.azconfig.io"},{"key":"env.dev.label","value":"Development"},{"key":"env.dev.protected","value":"false"},{"key":"env.prod.endpoint","value":"https://shared.azconfig.io"},{"key":"env.prod.label","value":"Production"},{"key":"env.prod.protected","value":"true"}]""",
             output.Trim());
     }
 

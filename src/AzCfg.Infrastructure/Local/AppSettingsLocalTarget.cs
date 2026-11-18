@@ -6,8 +6,9 @@ namespace AzCfg.Infrastructure.Local;
 
 /// <summary>
 /// <see cref="LocalTargetKind.AppSettingsLocal"/>: <c>appsettings.local.json</c> next to the project's
-/// <c>.csproj</c> (<see cref="LocalTargetBinding.ProjectPath"/>), nested JSON (ADR 0006). Any project can
-/// use it, so <see cref="CanHandle"/> always returns <c>true</c>. A secrets target must live outside git's
+/// <c>.csproj</c> (<see cref="LocalTargetBinding.ProjectPath"/>), nested JSON (ADR 0006). Offered only for
+/// application projects (not libraries) that already have <c>appsettings.json</c> or <c>appsettings.local.json</c>
+/// next to the <c>.csproj</c> (see <see cref="CanHandle"/>). A secrets target must live outside git's
 /// reach: <see cref="InspectAsync"/> reports it safe only when the file is git-ignored
 /// (<c>git check-ignore -q</c>) and not already tracked (<c>git ls-files --error-unmatch</c> fails);
 /// outside a git repository it is always unsafe.
@@ -18,7 +19,10 @@ public sealed class AppSettingsLocalTarget : JsonFileTarget
 
     public override LocalTargetKind Kind => LocalTargetKind.AppSettingsLocal;
 
-    public override bool CanHandle(ProjectInfo project) => true;
+    public override bool CanHandle(ProjectInfo project) =>
+        !project.IsLibrary
+        && Path.GetDirectoryName(project.CsprojPath) is { } directory
+        && (File.Exists(Path.Combine(directory, "appsettings.json")) || File.Exists(Path.Combine(directory, FileName)));
 
     public override async Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct)
     {
@@ -29,6 +33,28 @@ public sealed class AppSettingsLocalTarget : JsonFileTarget
         var isSafeForSecrets = await IsSafeForSecretsAsync(path, ct);
 
         return new LocalTargetOption(target, exists, isSafeForSecrets);
+    }
+
+    public override async Task EnsureGitIgnoredAsync(LocalTargetBinding target, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+
+        var path = Path.GetFullPath(GetFilePath(target));
+        var directory = Path.GetDirectoryName(path)!;
+        if (await RunGitAsync(directory, ["check-ignore", "-q", path], ct) == 0)
+        {
+            return;
+        }
+
+        var gitIgnore = Path.Combine(directory, ".gitignore");
+        var existing = File.Exists(gitIgnore) ? await File.ReadAllTextAsync(gitIgnore, ct) : "";
+        if (existing.Split('\n').Select(l => l.Trim()).Any(l => l == FileName || l == "/" + FileName))
+        {
+            return;
+        }
+
+        var prefix = existing.Length == 0 || existing.EndsWith('\n') ? "" : Environment.NewLine;
+        await File.AppendAllTextAsync(gitIgnore, prefix + FileName + Environment.NewLine, ct);
     }
 
     protected override string GetFilePath(LocalTargetBinding target)
