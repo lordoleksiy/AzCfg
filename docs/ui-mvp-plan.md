@@ -1028,7 +1028,7 @@ public interface IDraftService
     IReadOnlyList<DraftKey> PendingKeys(RemoteDraft draft);
     /// EditedJson(Json with secret values injected via EditJsonPatch.SetSecretValue, BaseJson).
     PushSource ToPushSource(RemoteDraft draft);
-    /// Fresh export; KeepRemote: CopyKey(fresh → Json); KeepLocal: CopyKey(fresh → BaseJson).
+    /// Fresh export; KeepRemote: CopyKey(fresh → Json) and CopyKey(fresh → BaseJson) (key no longer pending); KeepLocal: CopyKey(fresh → BaseJson).
     Task<RemoteDraft> ResolveConflictAsync(RemoteDraft draft, string key, ConflictChoice choice, CancellationToken ct);
 }
 ```

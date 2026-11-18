@@ -139,7 +139,12 @@ public sealed partial class DraftService(ISyncService sync, ISecretFingerprinter
             }
 
             result = choice == ConflictChoice.KeepRemote
-                ? result with { Json = EditJsonPatch.CopyKey(fresh, result.Json, scoped), Secrets = Without(result, new(scope, key)) }
+                ? result with
+                {
+                    Json = EditJsonPatch.CopyKey(fresh, result.Json, scoped),
+                    BaseJson = EditJsonPatch.CopyKey(fresh, result.BaseJson, scoped),
+                    Secrets = Without(result, new(scope, key)),
+                }
                 : result with { BaseJson = EditJsonPatch.CopyKey(fresh, result.BaseJson, scoped) };
         }
 

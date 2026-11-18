@@ -198,6 +198,8 @@ public sealed class DraftServiceTests
         var remotePreview = await w.Workflow.PreviewDraftAsync(keepRemote, w.Ct);
         Assert.Empty(remotePreview.Conflicts);
         Assert.Empty(remotePreview.Changes);
+        Assert.DoesNotContain(new DraftKey(ConfigScope.Service, "Db:Host"), w.Drafts.PendingKeys(keepRemote));
+        Assert.Contains(new DraftKey(ConfigScope.Service, "Db:Host"), w.Drafts.PendingKeys(keepLocal));
         var localPreview = await w.Workflow.PreviewDraftAsync(keepLocal, w.Ct);
         Assert.Empty(localPreview.Conflicts);
         var row = Assert.Single(localPreview.Changes);
