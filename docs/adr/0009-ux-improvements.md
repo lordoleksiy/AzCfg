@@ -51,7 +51,7 @@ Status: accepted (MVP, етап 7: U1–U5)
     `WriteIndented`), листи зі `Scope == Global` отримують ` //@global`; без global-ключів результат дорівнює
     `ToNestedJson(values).ToJsonString(new() { WriteIndented = true })`.
   - `IReadOnlySet<string> ReadGlobalMarkers(string json)` — шляхи (`A:B`, регістр ігнорується) листів, за значенням
-    яких одразу йде коментар `@global` (`Utf8JsonReader`, `CommentHandling.Allow`, `AllowTrailingCommas`; пробіли в
+    яких одразу йде коментар `@global` на тому ж рядку (`Utf8JsonReader`, `CommentHandling.Allow`, `AllowTrailingCommas`; пробіли в
     коментарі ігноруються, `/*@global*/` теж приймається).
 - `JsonFileTarget`: запис — `ToNestedJsonText`; читання — значення як і раніше через configuration provider, scope —
   `Global` для ключів із `ReadGlobalMarkers`.
