@@ -10,9 +10,11 @@ namespace AzCfg.Infrastructure.Local;
 /// <summary>
 /// Base for local targets backed by a nested JSON file (<see cref="LocalFileFormat.NestedJson"/>, ADR 0006).
 /// Reading uses <c>Microsoft.Extensions.Configuration.Json</c>, which already flattens nested objects into
-/// colon-separated keys; writing uses <see cref="JsonProjection.ToNestedJson"/> and fully overwrites the file.
-/// A missing file reads as an empty list. <see cref="CanHandle"/> and <see cref="InspectAsync"/> are left to
-/// derived classes, since they differ per target kind (file location, project applicability, secret safety).
+/// colon-separated keys; a key whose leaf is marked <c>//@global</c> (<see cref="JsonProjection.ReadGlobalMarkers"/>, ignoring
+/// case) reads with <see cref="ConfigScope.Global"/> (ADR 0009). Writing uses <see cref="JsonProjection.ToNestedJsonText"/>
+/// (indented, global values marked) and fully overwrites the file. A missing file reads as an empty list.
+/// <see cref="CanHandle"/> and <see cref="InspectAsync"/> are left to derived classes, since they differ per target kind
+/// (file location, project applicability, secret safety).
 /// </summary>
 public abstract class JsonFileTarget : ILocalTarget
 {
@@ -39,9 +41,10 @@ public abstract class JsonFileTarget : ILocalTarget
             .AddJsonFile(path, optional: true)
             .Build();
 
+        var globals = JsonProjection.ReadGlobalMarkers(File.ReadAllText(path));
         IReadOnlyList<LocalValue> values = configuration.AsEnumerable()
             .Where(pair => pair.Value is not null)
-            .Select(pair => new LocalValue(pair.Key, pair.Value!))
+            .Select(pair => new LocalValue(pair.Key, pair.Value!, globals.Contains(pair.Key) ? ConfigScope.Global : ConfigScope.Service))
             .ToList();
 
         return Task.FromResult(values);
@@ -53,7 +56,7 @@ public abstract class JsonFileTarget : ILocalTarget
         ArgumentNullException.ThrowIfNull(values);
         ct.ThrowIfCancellationRequested();
 
-        var json = JsonProjection.ToNestedJson(values);
+        var json = JsonProjection.ToNestedJsonText(values);
         var path = GetFilePath(target);
 
         var directory = Path.GetDirectoryName(path);
@@ -62,7 +65,7 @@ public abstract class JsonFileTarget : ILocalTarget
             Directory.CreateDirectory(directory);
         }
 
-        await File.WriteAllTextAsync(path, json.ToJsonString(), ct);
+        await File.WriteAllTextAsync(path, json, ct);
     }
 
     /// <summary>File to read, or <c>null</c> when there is none yet. Defaults to <see cref="GetFilePath"/>.</summary>

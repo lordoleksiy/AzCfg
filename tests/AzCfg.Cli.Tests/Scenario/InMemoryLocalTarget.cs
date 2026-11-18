@@ -8,7 +8,8 @@ namespace AzCfg.Cli.Tests.Scenario;
 /// <summary>
 /// In-memory user-secrets file per <see cref="LocalTargetBinding"/>: handles every project and is safe for secrets. Writes replace the
 /// file and are validated as nested JSON like the real target (no duplicate keys, no key that is both a value and a parent).
-/// The <c>Local</c>/<c>SetLocal</c>/<c>RemoveLocal</c> helpers edit the single written file, as a developer would.
+/// The <c>Local</c>/<c>Scope</c>/<c>SetLocal</c>/<c>RemoveLocal</c> helpers edit the single written file, as a developer would
+/// (<c>SetLocal</c> keeps the key's scope, like editing a value next to its <c>//@global</c> marker).
 /// </summary>
 public sealed class InMemoryLocalTarget : ILocalTarget
 {
@@ -42,12 +43,15 @@ public sealed class InMemoryLocalTarget : ILocalTarget
 
     public string? Local(string key) => Values().GetValueOrDefault(key);
 
+    /// <summary>Scope of <paramref name="key"/> in the single file (<see cref="ConfigScope.Global"/> = marked <c>//@global</c>).</summary>
+    public ConfigScope Scope(string key) => Assert.Single(File(), v => v.Key == key).Scope;
+
     public void SetLocal(string key, string value)
     {
         var file = File();
         var index = file.FindIndex(v => v.Key == key);
         if (index >= 0)
-            file[index] = new(key, value);
+            file[index] = file[index] with { Value = value };
         else
             file.Add(new(key, value));
     }

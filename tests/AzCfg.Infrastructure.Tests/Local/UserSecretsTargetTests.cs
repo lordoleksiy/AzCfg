@@ -53,11 +53,25 @@ public sealed class UserSecretsTargetTests : IDisposable
     }
 
     [Fact]
-    public async Task WriteAsync_WritesNestedJsonToSecretsFile()
+    public async Task WriteAsync_WritesIndentedNestedJsonToSecretsFile()
     {
         await _target.WriteAsync(Binding(WithId()), [new LocalValue("A:B", "v")], CancellationToken.None);
 
-        Assert.Equal("""{"A":{"B":"v"}}""", await File.ReadAllTextAsync(PathHelper.GetSecretsPathFromSecretsId(_secretsId)));
+        Assert.Equal(
+            "{\n  \"A\": {\n    \"B\": \"v\"\n  }\n}".ReplaceLineEndings(Environment.NewLine),
+            await File.ReadAllTextAsync(PathHelper.GetSecretsPathFromSecretsId(_secretsId)));
+    }
+
+    [Fact]
+    public async Task WriteAsync_ThenReadAsync_RoundTripsGlobalMarker()
+    {
+        var binding = Binding(WithId());
+        LocalValue[] written = [new("A:B", "v", ConfigScope.Global), new("A:C", "s")];
+
+        await _target.WriteAsync(binding, written, CancellationToken.None);
+
+        Assert.Contains("\"B\": \"v\", //@global", await File.ReadAllTextAsync(PathHelper.GetSecretsPathFromSecretsId(_secretsId)));
+        Assert.Equal(written, (await _target.ReadAsync(binding, CancellationToken.None)).OrderBy(v => v.Key, StringComparer.Ordinal));
     }
 
     [Fact]

@@ -105,7 +105,18 @@ public sealed class SyncServicePullTests
 
         await s.Service.PullAsync(Binding(Values, Secrets), Env, null, false, Ct);
 
-        Assert.Equal([new LocalValue("A", "service"), new LocalValue("B", "g")], s.ValuesTarget.Writes.Single().Values);
+        Assert.Equal([new LocalValue("A", "service"), new LocalValue("B", "g", ConfigScope.Global)], s.ValuesTarget.Writes.Single().Values);
+    }
+
+    [Fact]
+    public async Task PullAsync_WritesEntryScope_ForValuesAndSecrets()
+    {
+        var s = Create([Plain("G", "g", ConfigScope.Global), Plain("S", "s"), new("Db:Password", ConfigScope.Global, new ConfigValue.KeyVaultRef(SecretUri))]);
+
+        await s.Service.PullAsync(Binding(Values, Secrets), Env, null, false, Ct);
+
+        Assert.Equal([new LocalValue("G", "g", ConfigScope.Global), new LocalValue("S", "s")], s.ValuesTarget.Writes.Single().Values);
+        Assert.Equal([new LocalValue("Db:Password", SecretText, ConfigScope.Global)], s.SecretsTarget.Writes.Single().Values);
     }
 
     [Fact]

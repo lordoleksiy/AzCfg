@@ -104,14 +104,45 @@ public sealed class AppSettingsLocalTargetTests : IDisposable
     }
 
     [Fact]
-    public async Task WriteAsync_WritesNestedJsonToFile()
+    public async Task WriteAsync_WritesIndentedNestedJsonToFile()
     {
         var binding = Binding();
 
         await _target.WriteAsync(binding, [new LocalValue("A:B", "v")], CancellationToken.None);
 
         var text = await File.ReadAllTextAsync(FilePath());
-        Assert.Equal("""{"A":{"B":"v"}}""", text);
+        Assert.Equal("{\n  \"A\": {\n    \"B\": \"v\"\n  }\n}".ReplaceLineEndings(Environment.NewLine), text);
+    }
+
+    [Fact]
+    public async Task WriteAsync_ThenReadAsync_RoundTripsGlobalMarker()
+    {
+        var binding = Binding();
+        LocalValue[] written = [new("Api:Timeout", "30"), new("Api:Url", "https://x", ConfigScope.Global), new("Logging:LogLevel", "Information", ConfigScope.Global)];
+
+        await _target.WriteAsync(binding, written, CancellationToken.None);
+        var read = await _target.ReadAsync(binding, CancellationToken.None);
+
+        Assert.Contains("\"LogLevel\": \"Information\" //@global", await File.ReadAllTextAsync(FilePath()));
+        Assert.Equal(written, read.OrderBy(v => v.Key, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReadAsync_HandWrittenMarkers_MarkKeysGlobalIgnoringCase()
+    {
+        await File.WriteAllTextAsync(FilePath(), """
+            {
+              "api": { "url": "u", /* @global */ "Timeout": "30" },
+              "Items": [ "a", "b" // @global
+              ]
+            }
+            """);
+
+        var read = await _target.ReadAsync(Binding(), CancellationToken.None);
+
+        Assert.Equal(
+            [new("Items:0", "a"), new("Items:1", "b", ConfigScope.Global), new("api:Timeout", "30"), new("api:url", "u", ConfigScope.Global)],
+            read.OrderBy(v => v.Key, StringComparer.Ordinal));
     }
 
     [Fact]
