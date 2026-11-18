@@ -4,7 +4,7 @@ Local manager for Azure App Configuration + Key Vault for .NET developers: two-w
 and local files (user-secrets, `appsettings.local.json`; `local.settings.json` is designed, not implemented yet)
 and JSON editing of App Configuration.
 Core is a class library; the client is currently a CLI (`dotnet tool azcfg`), a UI comes later.
-Code, identifiers, commits and docs are in English (existing ADRs and plans in `docs/` are in Ukrainian).
+Code, identifiers, commits and docs are in English (ADRs 0001–0009, `docs/architecture.md` and `docs/mvp-plan.md` are in Ukrainian).
 
 ## Commands
 ```

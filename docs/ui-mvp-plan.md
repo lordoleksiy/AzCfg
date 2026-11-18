@@ -1,463 +1,853 @@
-# AzCfg UI — план реалізації MVP
+# AzCfg UI — MVP implementation plan
 
-Самодостатній план для **агента-оркестратора**: він роздає задачі розділу 10 агентам-виконавцям, які не мають
-іншого контексту, крім репозиторію, `CLAUDE.md` і цього файлу. Розділ 0 — для оркестратора, решта — довідка,
-на яку посилаються брифи задач (поле «Читати»).
+Self-contained plan for an **orchestrator agent**. It hands the tasks of §10 to executor agents that have no other
+context than the repository, `CLAUDE.md` and this file. §0 is for the orchestrator; everything else is reference
+material that task briefs point to (field **Read**).
 
-Позначення: **[є]** — механізм уже існує в коді, **[нове]** — рішення цього плану. `G*` — прогалини (розділ 3),
-`AD-*` — архітектурні рішення (розділ 5), `FR-*` — вимоги (розділ 4).
+Baseline: `master` @ `15419ba` (2026-11-18). Notation: **[exists]** — already in code; **[new]** — introduced here.
+`G*` — gaps (§4), `AD-*` — architecture decisions (§5), `FR-*` — requirements (§1.3), `F0…Q2` — tasks (§10).
+
+### What changed against the previous revision (review summary)
+- **UX:** three working modes inside one project tab — **Browse / Compare / Sync** — with a persistent inspector and a
+  *draft* of pending Azure edits, instead of opening a separate review tab per action. Environment ↔ environment
+  compare added (§2).
+- **Reuse instead of hand-made code:** Microsoft **Fluent UI Blazor v5** replaces ~25 self-written components
+  (dialogs, toasts, data grid, splitters, menus, icons, key handling, theming). Hosting follows the **.NET Aspire
+  dashboard** pattern (Blazor Server + Fluent UI + one-time browser token → cookie) using ASP.NET Core cookie
+  authentication instead of custom middleware; host tests use `WebApplicationFactory`; `.sln/.slnx` parsing uses
+  Microsoft `SolutionPersistence` (§5.4, §6).
+- **One source of truth for rules:** apply gate, plan subset, edit-JSON patching, environment comparison, conflict
+  resolution and stale-edit protection live in **Core** (TDD, reusable by the CLI). The UI Application layer only
+  orchestrates (§7.1).
+- **Stale Remote JSON** is fixed in Core by a 3-way base (`PushSource.EditedJson.BaseJson`) instead of a UI-side
+  "remote changed" detector (G14).
+- **Testability:** `AzCfg.Ui.Application` is a plain class library (no Razor/ASP.NET); the in-memory Azure adapters
+  move from CLI tests into Infrastructure and power both tests and a **`--demo` mode** — the UI runs without Azure,
+  so agents and reviewers can see every screen (G36).
+- **Simpler:** no raw local-file editor (inspector edits local values through `ILocalTarget`), no single-instance
+  lock, three tab kinds (Welcome / Project / Settings), no custom `shortcuts.js`.
+- **Defects of the previous revision fixed:** UI ADR numbers collided with 0008/0009 (→ 0010/0011, G34); saving
+  *resolved* environments would corrupt profile labels/mode (G26); `Ctrl+W`/`F5` are browser-reserved (G31); PR base
+  `dev` is 35 commits behind `master` (G32); environment mode (stores/labels) could not be set without the CLI (FR-E1).
 
 ---
 
-## 0. Протокол оркестратора
+## 0. Orchestrator protocol
 
-### 0.1 Цикл
-1. Візьми задачі з розділу 10, у яких усі «Залежить від» уже змерджені в `origin/dev` (статус — у 0.6).
-   Хвилі паралельного запуску — розділ 11.2.
-2. Для кожної задачі запусти агента-виконавця в **окремому git worktree** з брифом за шаблоном 0.2.
-   Паралельно — лише задачі однієї хвилі (у них не перетинаються файли, див. 11.3).
-3. Коли агент повернув PR — перевір за чеклістом 0.4.
-4. Мердж PR у `dev` робить користувач (або оркестратор лише з явного дозволу користувача). Після мерджу
-   онови статус у 0.6 і стартуй задачі, що розблокувалися, від свіжого `origin/dev`.
-5. Агент повернув блокер або відхилення від контракту → див. 0.5. Не вирішуй за агента, якщо рішення змінює контракт.
+### 0.1 F0 — before the first wave (orchestrator itself, each push only with the user's OK)
+1. `git fetch origin`. If `git rev-list --count origin/dev..origin/master` > 0, ask the user, then fast-forward:
+   `git push origin origin/master:refs/heads/dev` (never force; if rejected — stop and ask).
+2. From `origin/dev` create `chore/ui-packages`; add to `Directory.Packages.props` (versions verified on nuget.org
+   2026-11-18):
 
-### 0.2 Шаблон брифу для виконавця
-Підстав `<ID>`, `<назва>`, `<slug>`, `<Читати>` з блоку задачі. Більше нічого не додавай — бриф самодостатній.
+   | Package | Version | Used by |
+   | --- | --- | --- |
+   | `Microsoft.FluentUI.AspNetCore.Components` | 5.1.0 | AzCfg.Ui |
+   | `Microsoft.FluentUI.AspNetCore.Components.Icons` | 5.1.0 | AzCfg.Ui |
+   | `BlazorMonaco` | 3.5.0 | AzCfg.Ui |
+   | `Microsoft.VisualStudio.SolutionPersistence` | 1.0.52 | AzCfg.Infrastructure |
+   | `Microsoft.Extensions.Hosting.Abstractions` | 10.0.10 | AzCfg.Ui.Application |
+   | `bunit` | 2.15.2 | AzCfg.Ui.Tests |
+   | `Microsoft.AspNetCore.Mvc.Testing` | 10.0.10 | AzCfg.Ui.Tests |
+   | `Microsoft.Extensions.TimeProvider.Testing` | 10.10.0 | AzCfg.Ui.Tests |
+
+   ASP.NET/Extensions packages stay on the same patch as the existing `Microsoft.Extensions.*` pins (10.0.10) to avoid
+   NU1605 downgrade errors (warnings are errors). `dotnet build AzCfg.slnx` + `dotnet test AzCfg.slnx` green → PR into
+   `dev` → the user merges.
+
+### 0.2 Cycle
+1. Pick the tasks of §10 whose **Depends on** are all merged into `origin/dev` (status in 0.7; waves in §11.2).
+2. Start one executor per task in its **own git worktree** with the brief of 0.3. In parallel only tasks of one wave
+   (their files do not overlap, §11.3). Start the biggest task of a wave first (W1: F1, W2: P1).
+3. When an executor returns a PR — check it with 0.5.
+4. Merging into `dev` is done by the user (or by the orchestrator only with the user's explicit permission). After a
+   merge update 0.7 and start the unblocked tasks from a fresh `origin/dev`.
+5. A blocker or a contract deviation → 0.6. Never decide for the executor when the decision changes a contract.
+
+### 0.3 Executor brief (substitute `<ID>`, `<title>`, `<slug>`, `<Read>`; add nothing else)
 ```text
-Ти виконуєш задачу <ID> «<назва>» у репозиторії AzCfg (.NET 10, мова спілкування — українська, код англійською).
+You implement task <ID> "<title>" in the AzCfg repository (.NET 10). Code, comments, commits: English.
 
-Контекст (читай лише це):
-1. CLAUDE.md (правила шарів, безпека, конвенції).
-2. docs/ui-mvp-plan.md: розділ 9 (кодстайл), блок задачі <ID> у розділі 10, розділи <Читати>.
-3. Код — лише файли, названі в задачі, і найближчий сусідній файл/тест як зразок стилю.
+Context (read only this):
+1. CLAUDE.md (layer rules, security, conventions).
+2. docs/ui-mvp-plan.md: §9 (coding rules), the block of task <ID> in §10, and sections <Read>.
+3. Code: only the files named in the task, plus the nearest sibling file/test as a style sample.
+4. UI tasks (P1, P2, U*): docs/ui-components.md once it exists. Do not use Fluent UI or BlazorMonaco APIs from memory —
+   Fluent UI v5 differs from v4; check the package XML docs under ~/.nuget/packages/<package>/<version>/lib/net10.0/.
 
-Git (ти в окремому worktree; гілку dev НЕ checkout-ь — вона зайнята іншим worktree):
+Git (you are in your own worktree; never check out dev — another worktree holds it):
   git fetch origin && git switch -c feature/ui-<id>-<slug> origin/dev
-Далі — процес скіла /feature, кроки 2–7 (тести першими, build/test, коміт, push, PR у dev).
+Then follow skill /feature from step 2 (tests first, build/test, commit, push, PR into dev).
 
-Правила:
-- Змінюй лише файли з поля «Файли» задачі + відмітку `- [ ] **<ID>` → `- [x]` у docs/ui-mvp-plan.md (розділ 10).
-- Контракти розділу 7 — обов'язкові 1:1. Якщо контракт неможливо виконати — зупинись і поверни блокер
-  (що саме, чому, запропонована зміна), нічого не комітячи.
-- Жодних нових пакетів, mock-бібліотек, змін Directory.Packages.props / AzCfg.slnx (якщо задача їх не називає).
-- Значення секретів ніколи не потрапляють у логи, винятки, розмітку до Reveal, ToString/JSON.
-- `dotnet build AzCfg.slnx` без warnings і `dotnet test AzCfg.slnx` зелені перед комітом.
+Rules:
+- Change only the files in the task's "Files" field, plus `- [ ] **<ID>` → `- [x]` in docs/ui-mvp-plan.md §10.
+- The contracts of §7 are binding 1:1. If one cannot be met — stop and return a blocker (what, why, proposed change)
+  without committing.
+- No packages beyond §6, no mock libraries, no changes to Directory.Packages.props / AzCfg.slnx unless the task names them.
+- Secret values never reach logs, exceptions, markup before Reveal, ToString or JSON.
+- `dotnet build AzCfg.slnx` without warnings, `dotnet test AzCfg.slnx` green, `dotnet format AzCfg.slnx --verify-no-changes`
+  clean before committing.
+- UI tasks: run `dotnet run --project src/AzCfg.Ui -- --demo` (after DH is merged) and check your screens; if you cannot,
+  say so under "not verified".
 
-Відповідь (лише це): URL PR; 1–3 пункти що зроблено; відхилення від плану (або «немає»);
-що не перевірено (наприклад, ручна перевірка в браузері).
+Reply (only this): PR URL; 1–3 bullets of what was done; deviations from the plan (or "none");
+what is not verified (e.g. manual browser check).
 ```
 
-### 0.3 Гілки, worktree, PR
-- Одна задача = одна гілка `feature/ui-<id>-<slug>` від `origin/dev` = один PR у `dev`.
-- Скіл `/feature` у кроці 1 робить `git switch dev` — у worktree це падає, тому бриф замінює крок 1 на
-  `git switch -c … origin/dev` (G27).
-- Залежна задача стартує лише після мерджу залежностей у `origin/dev` (не від гілки іншого агента).
-- CI немає — оркестратор перевіряє build/test локально (0.4).
+### 0.4 Branches, worktrees, PRs
+- One task = one branch `feature/ui-<id>-<slug>` from `origin/dev` = one PR into `dev`.
+- Skill `/feature` step 1 runs `git switch dev`, which fails inside a worktree; the brief replaces step 1 (G33).
+- A dependent task starts only after its dependencies are merged into `origin/dev` (never from another agent's branch).
+- There is no CI: the orchestrator verifies build/test locally (0.5).
 
-### 0.4 Чекліст перевірки PR
-1. `gh pr diff <N> --name-only` — лише файли з поля «Файли» задачі (+ рядок відмітки в цьому плані).
-2. У worktree гілки PR: `dotnet build AzCfg.slnx -v q --nologo`, `dotnet test AzCfg.slnx -v q --nologo`,
+### 0.5 PR checklist
+1. `gh pr diff <N> --name-only` — only the task's "Files" (+ its `[x]` line in this plan).
+2. In a worktree of the PR branch: `dotnet build AzCfg.slnx -v q --nologo`, `dotnet test AzCfg.slnx -v q --nologo`,
    `dotnet format AzCfg.slnx --verify-no-changes`.
-3. Пункти «Приймання» задачі покриті тестами (назви тестів відповідають пунктам).
-4. Сигнатури розділу 7 не змінені (або змінені з оновленням розділу 7 у тому ж PR і з погодження — 0.5).
-5. Grep по диффу: немає `Reveal()` поза дозволеними місцями (Application Reveal/Apply-шлях), немає логування
-   `PlanRequest`/`PushSource`/значень, немає `static` змінного стану, немає нових `PackageReference` без версій у props.
-6. Відповідь агента містить «що не перевірено» — перенеси це в чекліст задачі Q2 (ручний smoke).
+3. Every "Acceptance" item is covered by a test whose name matches it (except items marked *manual*).
+4. Signatures of §7 unchanged (or changed in the same PR together with §7, after 0.6).
+5. Grep the diff: no `Reveal()` outside Core, the `SecretValue` component and `LocalValuesService.SetSecretAsync`;
+   no logging of `PlanRequest`/`PushSource`/`RemoteDraft`/values/tokens; no `static` mutable state; no
+   `PackageReference` with a version; no hex colours in `.razor`/`.razor.css` (only `app.css` defines `--az-*`).
+6. Move the executor's "not verified" items into the Q2 smoke checklist.
 
-### 0.5 Блокери і зміни контрактів
-- Дрібне уточнення, що не змінює сигнатур (наприклад, повідомлення помилки) — агент вирішує сам і пише у «відхиленнях».
-- Зміна сигнатури розділу 7 — лише через оркестратора: оцінити, які задачі зачеплені (розділ 11.3), оновити розділ 7
-  в окремому PR `docs/ui-plan-contract-<slug>` або в PR задачі, і перезапустити зачеплені незмерджені задачі з новим брифом.
-- Агент упав двічі на тій самій задачі — розбий задачу на дві за межею «Application / UI» і повідом користувача.
+### 0.6 Blockers and contract changes
+- A clarification that changes no signature (message text, private helper) — the executor decides and lists it under
+  "deviations".
+- A change of a §7 signature — only via the orchestrator: find affected tasks (§11.3), update §7 in a PR
+  `docs/ui-plan-contract-<slug>` (or in the task PR), restart affected unmerged tasks with a new brief.
+- An executor failed twice on the same task — split it at the "Application / UI" boundary and tell the user.
+- F1 spike fails (Fluent UI 5.1.0 or BlazorMonaco 3.5.0 broken on net10) → try Fluent 5.0.1; still broken → ask the
+  user about Fluent 4.14.5 (R4). Only P1/U* components are affected.
 
-### 0.6 Статус
-| ID | Задача | Залежить від | Хвиля | Статус |
+### 0.7 Status
+| ID | Task | Depends on | Wave | Status |
 | --- | --- | --- | --- | --- |
-| F1 | Каркас UI, контракти, `AzureErrors` | — | W1 | [ ] |
-| B1 | Core: `FromNestedJson`, redaction, `PullSelectedAsync` | — | W1 | [ ] |
-| B2 | Infrastructure: credential, lock, `WorkspaceScanner` | F1 | W2 | [ ] |
-| P1 | UI-платформа: дизайн-система, workbench, палітра | F1 | W2 | [ ] |
-| P2 | Безпека хосту + Monaco | F1 | W2 | [ ] |
-| S1 | Сервіси: workspace, середовища, Azure status, операції | F1 | W2 | [ ] |
-| S2 | Сервіси: explorer, sync workflow, документи | F1, B1 | W2 | [ ] |
-| U1 | UI: проєкти, прив'язка, середовища | P1, S1, S2 | W3 | [ ] |
-| U2 | UI: Configuration Explorer + інспектор | P1, P2, S1, S2 | W3 | [ ] |
-| U3 | UI: JSON-документи + Sync/Diff | P1, P2, S1, S2 | W3 | [ ] |
-| Q1 | Наскрізні та безпекові тести | B2, U1, U2, U3 | W4 | [ ] |
-| Q2 | Документація, ADR, полірування, smoke | Q1 | W5 | [ ] |
+| F0 | Sync `dev` with `master`, package versions | — | W0 | [ ] |
+| D1 | ADR 0010, 0011 | F0 | W1 | [ ] |
+| C1 | Core: pure helpers (patch, selection, comparer) | F0 | W1 | [ ] |
+| C2 | Core: sync use cases (pull selected, resolve, read remote, base JSON, guard) | F0 | W1 | [ ] |
+| T1 | In-memory adapters → Infrastructure | F0 | W1 | [ ] |
+| F1 | UI scaffold, contracts, state, `AzureErrors`, spike | F0 | W1 | [ ] |
+| I1 | Infrastructure: credential, state lock, scanner | F1 | W2 | [ ] |
+| P1 | UI platform: theme, workbench, tree-grid, palette | F1 | W2 | [ ] |
+| P2 | Host security + Monaco | F1 | W2 | [ ] |
+| S1 | Application: workspace, environments, Azure status, operations | F1, T1 | W2 | [ ] |
+| S2 | Application: configuration, compare, local values, reveal | F1, T1, C1, C2 | W2 | [ ] |
+| S3 | Application: sync workflow, drafts | F1, T1, C1, C2 | W2 | [ ] |
+| DH | Demo mode | F1, T1 | W2 | [ ] |
+| U1 | UI: workspace, environments, settings | P1, S1 | W3 | [ ] |
+| U2 | UI: project tab + Browse | P1, P2, S1, S2, S3 | W3 | [ ] |
+| U3 | UI: Compare | P1, P2, S1, S2 | W3 | [ ] |
+| U4 | UI: Sync + make active | P1, P2, S1, S3 | W3 | [ ] |
+| Q1 | Integration and security tests | I1, DH, U1–U4 | W4 | [ ] |
+| Q2 | Docs, polish, measurements, smoke checklist | Q1 | W5 | [ ] |
 
 ---
 
-## 1. Продукт і межі MVP
+## 1. Product and scope
 
-**AzCfg UI** — локальний developer workspace: відкрити теку з .NET-проєктами, прив'язати проєкт до сервісу в Azure
-App Configuration, переглядати конфігурацію середовищ, редагувати її (дерево або JSON у Monaco) і синхронізувати
-локальні файли з Azure з попереднім переглядом змін.
+### 1.1 Product
+**AzCfg UI** is a local developer workspace on top of `AzCfg.Core`/`AzCfg.Infrastructure`: open a folder with .NET
+projects, bind a project to a service in Azure App Configuration, browse an environment's configuration, compare it
+(local ↔ Azure, environment ↔ environment), edit it and synchronise local files with Azure with a preview.
 
-Модель: **Project → Environment → Configuration Sources**.
+Model: **Project → Environment → Sources**.
 
-| Рівень | Що це | Звідки |
+| Level | What | Where from |
 | --- | --- | --- |
-| Project | `.csproj` + `ProjectBinding` (сервіс, цілі, vault на середовище, активне середовище) | `IProjectDetector`, `IProjectService`, `projects.json` |
-| Environment | `ConfigEnvironment(Name, StoreEndpoint, Label, IsProtected, WriteLabel)`; режим — `UserProfile.Mode` (ADR 0008) | `profile.json` (спільний для всіх проєктів) |
-| Sources | локальні цілі (user-secrets, `appsettings.local.json`), App Configuration store, Key Vault-и з KV references | `ILocalTarget`, `IConfigStore`, `ISecretStore` |
+| Project | `.csproj` + `ProjectBinding` (service, targets, vault per env, active env, ignore) | `IWorkspaceScanner`, `IProjectService`, `projects.json` |
+| Environment | `ConfigEnvironment(Name, StoreEndpoint, Label, IsProtected, WriteLabel)`; mode `UserProfile.Mode` (ADR 0008) | `profile.json` (one per user) |
+| Sources | local targets (user-secrets, `appsettings.local.json`), App Configuration store, Key Vaults of KV references | `ILocalTarget`, `IConfigStore`, `ISecretStore` |
 
-App Configuration і Key Vault — одне джерело середовища: секрет існує в UI лише як KV reference
-(`ConfigValue.KeyVaultRef`), vault — з URI референса (ADR 0005). Окремого перегляду всього Key Vault немає.
+App Configuration and Key Vault are one source per environment: a secret exists in the UI only as a KV reference;
+the vault comes from the reference URI (ADR 0005). There is no "browse a whole Key Vault" view.
 
-**Цілі:** UI поверх наявних `AzCfg.Core`/`AzCfg.Infrastructure` без дублювання бізнес-логіки; усі сценарії CLI
-(`init`, `pull`, `use`, `plan`, `push`, `edit`) + дерево, Monaco, diff, вибір окремих змін, конфлікти; секрети не
-потрапляють у браузер до явного Reveal; Production read-only за замовчуванням.
+### 1.2 Goals and non-goals
+**Goals:** every CLI scenario (`init`, `pull`, `use`, `plan`, `push`, `edit`, `ignore`, `config`) available in the UI
+without the CLI; tree + JSON view; compare; selective sync; conflicts; secrets never reach the browser before an
+explicit Reveal; protected environments read-only by default; demo mode without Azure.
 
-**Не-цілі:** promote у UI, вибір/зміна режиму середовищ і labels у UI (є в CLI: `init --mode`, `azcfg config`; UI
-лише показує режим і працює в будь-якому), редагування шаблонів ігнору в UI (CLI `azcfg ignore`), запис у `local.settings.json`, створення Key Vault, ранжування vault-ів,
-перейменування середовищ, віддалений/багатокористувацький доступ, E2E у браузері, пакування UI як dotnet tool,
-міжпроцесний lock CLI↔UI.
+**Non-goals (MVP):** promote UI (Compare "copy to right" is [S]), environment rename, writing `local.settings.json`,
+raw editing of local files in the UI, creating Key Vaults, vault ranking, light theme, remote/multi-user access,
+browser E2E (Playwright), packaging the UI as a dotnet tool, cross-process lock CLI ↔ UI.
+
+### 1.3 Functional requirements
+**[MVP]** is part of the DoD; **[S]** — stretch.
+
+Workspace
+- FR-W1 [MVP] Open folder: server-side folder browser (AD-1), path input with completion, recent and pinned folders.
+- FR-W2 [MVP] Scan `.sln`, `.slnx`, `.csproj` (G2): tree Solution → Project → config files; projects outside any
+  solution under "Projects"; a project in several solutions under each; libraries/test projects dimmed (no targets).
+- FR-W3 [MVP] Config files shown: `appsettings.json`, `appsettings.{Env}.json`, `appsettings.local.json`, user-secrets,
+  `local.settings.json` (read-only, "not supported yet"); badges "values"/"secrets" on bound targets.
+- FR-W4 [MVP] Project status: unbound / bound (service, active env); change counters once a view is loaded.
+- FR-W5 [MVP] Bind / re-bind wizard: service (candidates, confident one preselected, free text), values target,
+  secrets target (only `IsSafeForSecrets`, disabled ones with the reason); re-bind keeps vaults, active env and
+  ignore patterns (G5, G19).
+- FR-W6 [MVP] Recent folders: remove (bindings untouched), pin.
+
+Environments
+- FR-E1 [MVP] First-run wizard: mode (one store per environment / one store + labels), discovery candidates, names,
+  `IsProtected` (default from `IsProtectedByName`), labels in label mode (offered from the store), manual endpoint.
+- FR-E2 [MVP] Settings: add/remove environments, edit endpoint/label/protected, default label, `gitignoreLocalFiles`;
+  no rename (G15).
+- FR-E3 [MVP] Kind and colour (Development/Staging/Production/Custom), derived (`EnvironmentRules.KindOf`).
+- FR-E4 [MVP] *Select* an environment to view (no side effects) vs *Make active* (= `azcfg use`, writes local files).
+- FR-E5 [MVP] Vault for new secrets per environment (`VaultByEnvironment`).
+- FR-E6 [MVP] Status: account; per environment Connected / Checking / Auth required / Forbidden / Unreachable.
+
+Browse
+- FR-B1 [MVP] Key tree-grid (segments by `:`): Key / Local / Azure·env / Status; branch counters; virtualised.
+- FR-B2 [MVP] Search (key + plain values, never secret values) and filters (changed, secrets, ignored, scope).
+- FR-B3 [MVP] Inspector: key, scope (+ "overrides global" with the global value), label, type, local value + source
+  target + `//@global` marker, remote value or KV reference (vault host, secret name), status, warnings, Reveal (30 s).
+- FR-B4 [MVP] Azure edits go into the environment's draft: edit value, add key (service; global with confirmation),
+  delete, set secret value, move to Key Vault, revert; draft bar with the count → Review.
+- FR-B5 [MVP] Local edits: set/remove a local value, toggle the `//@global` marker, ignore locally / stop ignoring.
+- FR-B6 [MVP] Tree ↔ JSON: Azure JSON = the draft in Monaco (editable, schema, diagnostics); Local JSON read-only
+  (secrets as `***`).
+- FR-B7 [MVP] Non-active environment → remote-only view + "Make active" bar.
+
+Compare
+- FR-C1 [MVP] Sides: Local or any environment on each side; default Local ↔ active env; swap.
+- FR-C2 [MVP] Grid Key / Left / Right / Result (same, different, only left, only right); "differences only" (default);
+  counts.
+- FR-C3 [MVP] JSON diff (Monaco diff editor) of both sides; secrets as references (Azure) or `***` (local).
+- FR-C4 [MVP] Secrets compared without exposing values: local ↔ Azure by fingerprint, Azure ↔ Azure by secret name.
+- FR-C5 [S] "Copy to <right env>" for plain values (adds to the right environment's draft).
+
+Sync
+- FR-S1 [MVP] Push local files → **active** env: conflicts, changes with checkboxes, warnings; "Include deletions"
+  (default off = upsert).
+- FR-S2 [MVP] Pending edits (draft) → selected env: same list and apply.
+- FR-S3 [MVP] Pull active env → local: incoming changes with checkboxes; Pull selected / Pull all (blocked handling).
+- FR-S4 [MVP] Conflicts: base/local/remote; Keep local / Keep remote; a conflict blocks only its own key.
+- FR-S5 [MVP] Apply: summary; protected → typed name; touches global → checkbox; requires vault → vault picker;
+  failures (412) → "Refresh plan".
+- FR-S6 [MVP] Make active: first-pull overwrite warning (G20), blocked → Push first / Discard local changes / Cancel;
+  protected → warning that its secrets will be written locally.
+- FR-S7 [MVP] Sync summary (⇡ local, ⇣ remote, ! conflicts) in the project header and the status bar.
+
+Security, protected environments
+- FR-X1 [MVP] Protected env read-only until "Unlock editing" (per browser tab, per env); red top border, lock,
+  PROTECTED badge.
+- FR-X2 [MVP] Secret values never rendered before Reveal; auto-hide after 30 s, on tab change and on dispose.
+- FR-X3 [MVP] Loopback host with a one-time token (AD-1).
+
+General
+- FR-U1 [MVP] Dark theme. FR-U2 [MVP] Tabs keep state. FR-U3 [MVP] Command palette, quick open, keyboard (§2.10).
+- FR-U4 [MVP] Notifications, loading/empty/error states (§2.9). FR-U5 [MVP] Responsive (§2.11).
+- FR-U6 [MVP] `--demo` mode on in-memory Azure, never touching real Azure or real user state (DH).
 
 ---
 
-## 2. Що вже є в коді (довідка)
+## 2. UX specification
 
-### 2.1 Шари
-```
-AzCfg.Core            BCL + ILogger. Model, Mapping, Sync, Abstractions (порти), UseCases. Нічого не питає/не друкує.
-AzCfg.Infrastructure  Azure SDK, ФС, стан користувача; DI: services.AddAzCfg() — усе singleton.
-AzCfg.Cli             Spectre.Console.Cli; композиція сценаріїв і промпти (зразок для Application-шару UI).
-```
+### 2.1 Principles
+- **Dark-first developer workspace**, visual language of VS Code, Postman and Infisical. Fluent 2 dark theme as the
+  base, brand/accent `#5B9DFF`.
+- **Compact and information-dense:** 28 px rows, 13 px UI text, monospace keys/values, small (24 px) controls. No
+  cards, no hero blocks, no illustrations, no oversized buttons; an empty state is one line of text + one action.
+- **Three modes, no screen hopping:** Browse / Compare / Sync live in one project tab and switch in place (`Alt+1/2/3`)
+  keeping the environment, filter and selected key. An operation never navigates away from the project.
+- **Context always visible:** environment colour pills, sync summary in the tab header and status bar, inspector on
+  the right always describing the selected key.
+- **Non-intrusive notifications:** results → toast; view-blocking errors → inline message bar with Retry; long
+  operations → status bar.
+- **Visible safety:** secrets masked with a key icon; protected environment framed red with a lock; destructive actions
+  confirmed; production apply needs the typed name.
+- **Keyboard-first:** command palette, quick open, shortcuts for modes and main actions.
 
-### 2.2 Публічний API, який перевикористовує UI
-| API | Для чого в UI |
+### 2.2 Workbench layout
+```
+┌────┬──────────────────────┬──────────────────────────────────────────────────────────────────────────────────┐
+│ ▣  │ EXPLORER             │ [⌂ Welcome] [◆ Orders.Api ●] [⚙ Settings]                                         │
+│ ⌕  │ ▾ WORKSPACE · Shop   ├──────────────────────────────────────────────────────────────────────────────────┤
+│ ⚙  │  ▾ ◫ Shop.slnx       │ ◆ Orders.Api · orders   (dev ●)(stage)(prod 🔒)   [Browse│Compare│Sync 4]  ⇡2 ⇣1 !1 ⟳ │
+│    │   ▾ ◆ Orders.Api dev │ ⌕ filter keys…   ☐ changed ☐ secrets ☐ ignored  scope ▾        [Tree│JSON]  ＋     │
+│    │      appsettings.json│ ┌──────────────────────────────────────────────────────┬───────────────────────┐ │
+│    │      appsettings.lo… │ │ KEY                    LOCAL          AZURE · dev  ST │ ConnectionStrings:Db  │ │
+│    │      user-secrets 🔑 │ │ ▾ ConnectionStrings                                1M │ ● modified locally    │ │
+│    │   ▸ ◆ Billing.Worker │ │     Db                 🔑 ••••••      🔑 orders-db  M │ scope service · no lbl│ │
+│    │   ▸ ◇ Shop.Contracts │ │ ▾ Logging:LogLevel                                 1⇣ │ LOCAL  🔑 •••••• 👁    │ │
+│    │ ▾ ENVIRONMENTS       │ │     Default            Information    Warning      ⇣ │   user-secrets        │ │
+│    │  ● dev   connected   │ │ ▸ Features                                       2 ● │ AZURE  🔑 kv-shop-dev  │ │
+│    │  ● stage connected   │ │     Payments:Enabled   true           false        ! │   /orders-db  👁       │ │
+│    │  🔒 prod  sign in    │ │                                                      │ [Edit] [Set secret]   │ │
+│    │ ▾ RESOURCES          │ │                                                      │ [Revert] [Delete]     │ │
+│    │  dev  appcs-shop-dev │ └──────────────────────────────────────────────────────┴───────────────────────┘ │
+│    │       kv-shop-dev    │ ▌ 3 pending edits to dev        [Discard]  [Review ▸]                              │
+├────┴──────────────────────┴──────────────────────────────────────────────────────────────────────────────────┤
+│ 👤 dev@contoso.com ● │ Orders.Api · dev ⇡2 ⇣1 !1 │ ⟳ Reading dev…                       │ DEMO │   Ctrl+K   │
+└───────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+Sizes: activity bar 48 px; sidebar 280 px (resizable 200–480, `Ctrl+B`); inspector 340 px (resizable 260–560,
+`Alt+I`); tab strip 32 px; project header 36 px; toolbar 32 px; rows 28 px; status bar 24 px.
+
+### 2.3 Sidebar (one Explorer view with collapsible sections, VS Code style)
+- **WORKSPACE** — header: folder name + Open folder, Refresh, Collapse all. Tree Solution → Project → config files;
+  loose projects under "Projects". Project row: icon (application ◆, library/test ◇ dimmed), name, on the right the
+  active-env pill (bound) or muted "unbound", counters ⇡⇣! when known. Click opens/activates the project tab. Context
+  menu: Open, Bind… / Binding settings…, Make ‹env› active ▸, Copy path. Config file rows are informational (badges
+  values/secrets; `local.settings.json` with tooltip "read-only, not supported yet"); context: Copy path.
+- **ENVIRONMENTS** — row per environment: colour dot by kind, name, detail (store host, or label in label mode),
+  connection state; protected → lock. Click selects that environment in the active project tab. Context: Check
+  connection, Copy endpoint, Make active (for the active project). Header action: Manage → Settings tab.
+- **RESOURCES** — per environment: App Configuration store host and the Key Vault for new secrets of the selected
+  project ("not set — Choose…"); "Discover in Azure…" lists stores and vaults from Resource Graph with Copy buttons.
+- Activity bar: Explorer, Search (opens the palette), Settings; account avatar at the bottom.
+
+### 2.4 Project tab
+- **Header:** project name · service; environment pills (all environments; `●` marks the *active* one = reflected in
+  local files; the *selected* one is highlighted); mode switch Browse │ Compare │ Sync (Sync shows the number of
+  pending items); summary ⇡ local changes ⇣ remote changes ! conflicts (selected env when it is active);
+  Refresh (`Alt+R`); lock button for protected envs; overflow: Binding settings, Make ‹env› active.
+- **Selected ≠ active:** info bar "Viewing stage — remote only. Local files reflect dev. [Make stage active]".
+- **Protected env:** 2 px top border `--az-env-prod` around the body; header "PROTECTED · read-only [Unlock editing]";
+  after unlock "Editing unlocked [Lock]". Unlock lasts for this browser tab only.
+- **Body** = the mode view. Each mode renders its own inspector content in the same right pane (same width, same
+  `Alt+I` toggle); the selected key is shared across modes.
+- **Draft bar** (bottom; only when the selected env has pending edits): "N pending edits to ‹env› [Discard] [Review ▸]";
+  Review switches to Sync › Pending edits.
+- **Tab:** title = project name; dirty dot when any environment of the project has pending edits; closing a dirty tab
+  asks "Discard N pending edits?".
+
+### 2.5 Browse mode
+- **Toolbar:** search (`Ctrl+F`; key and plain values, highlights matches), toggles Changed / Secrets / Ignored, scope
+  (All / Service / Global), Tree │ JSON, expand/collapse all, Add key (`+`).
+- **Columns:** Key (tree indent, monospace) │ Local (value or mask; source icon user-secrets/appsettings.local; `global`
+  badge for `//@global`) │ Azure · ‹env› (value or KV reference `kv-host/secret-name`) │ Status (A/M/D local in diff
+  colours, ⇣ remote change, ! conflict, `ignored` muted, accent dot = pending draft edit). Branch rows show aggregate
+  counts. Remote-only: Local and Status columns hidden (draft dots stay).
+- **Interactions:** click selects (inspector); double-click on the Azure cell or `F2` → inline edit (plain) into the
+  draft; `Del` → delete into the draft; context menu: Edit value, Set secret value…, Move to Key Vault, Revert, Delete,
+  Copy key, Copy value (plain), Ignore locally / Stop ignoring, Mark as global / service (local marker), Compare across
+  environments (→ Compare with this key selected).
+- **JSON view:** sub-toggle Azure │ Local. Azure = the draft edit JSON in Monaco (schema + diagnostics; read-only while
+  protected and locked); edits update the draft after 250 ms; invalid JSON keeps the last valid draft and shows
+  diagnostics. Local = read-only nested JSON of local values (secrets `***`).
+- **Inspector:** key path (copy), status chip, scope (+ "overrides global: ‹value›"), label, warnings for the key
+  (duplicate labels, label override); Local section (value masked + Reveal, source target, global marker toggle,
+  Edit / Remove); Azure section (value or KV ref with vault host and secret name, Reveal, Edit / Set secret value /
+  Move to Key Vault / Delete); Draft section when pending (before → after, Revert).
+
+### 2.6 Compare mode
+- **Toolbar:** Left [Local │ dev │ stage │ prod ▾] ⇄ Right [… ▾], swap; default Local ⇄ selected env when it is
+  active, else active env ⇄ selected env; "Differences only" (on); search; Tree │ JSON diff.
+- **Grid:** Key │ Left │ Right │ Result (`=` muted, `≠` warning colour, `←` only left, `→` only right). Toolbar counts:
+  "12 different · 3 only left · 1 only right".
+- **Secrets:** local ↔ Azure by fingerprint ("same secret value" / "different secret value"); Azure ↔ Azure by
+  reference name ("values not compared"). Ignored keys are excluded (count shown as a hint).
+- **JSON diff:** read-only Monaco diff editor of `LeftJson` / `RightJson`.
+- **Inspector:** both values side by side with scope/label/vault; Open in Browse; [S] Copy to ‹right env›.
+- Loading local ↔ Azure fingerprints remote secrets: indeterminate progress "Reading secrets…".
+
+### 2.7 Sync mode
+- **Sub-views:** Push (Local → ‹active›) · Pull (‹active› → Local) · Pending edits (→ ‹selected›, only when a draft
+  exists). When the selected env is not active, Push/Pull are disabled with "Make ‹env› active to sync local files".
+- **Groups:** Conflicts first (not selectable; base / local / remote mini-table; [Keep local] [Keep remote]); Changes
+  (checkbox per row + select all; Kind Add/Update/Delete/Secret, Key, before → after (plain), scope badge); Warnings
+  (DeleteSkipped, LabelOverride, DuplicateLabels).
+- **Push:** "Include deletions" toggle (off). **Pull:** incoming remote changes (selectable) + "local changes Pull all
+  would overwrite" (info).
+- **Inspector:** the selected row; small Monaco diff for plain before/after; secret rows show only "secret value will be
+  set/changed".
+- **Footer (sticky):** "3 of 5 changes · 1 secret · touches global" + primary action: Apply to ‹env› (`Ctrl+Enter`) /
+  Pull selected (+ secondary Pull all…) / Apply edits to ‹env›. When disabled, a tooltip lists the reasons (nothing
+  selected, vault required → "Choose vault…", confirmation needed). When the plan `RequiresVaultChoice`, the vault picker
+  is shown above the list first.
+- **Apply dialog:** summary table; protected → "Type ‘prod’ to confirm" (button enabled only on a case-insensitive
+  match, Enter does not submit); touches global → checkbox "I understand this changes global keys shared by all
+  services". Result: toast "Applied 3 changes to dev" or message bar "1 change failed: ‹key› changed in Azure (412)
+  [Refresh plan]".
+- After any write: the project's views are invalidated and the current sub-view re-previews.
+
+### 2.8 Key flows
+1. **First run (no profile):** Welcome tab shows a 3-step checklist (rows, not cards): ① Azure sign-in (state; "Run
+   `az login`, then Retry") ② Set up environments [Set up…] ③ Open a folder [Open…]. Environment wizard
+   (`FluentWizard`): mode → discovered stores table (name guessed, protected guessed, label options in label mode, Add
+   manually) → review → Save.
+2. **Open folder:** dialog with path input (completion), folder list (".NET" marker on folders with
+   `.sln/.slnx/.csproj`), recent and pinned → background scan → tree.
+3. **Bind:** click an unbound project → Bind wizard → after Bind "Pull ‹env› now?" → Make active flow.
+4. **Make active** (= `azcfg use`): no active env and local targets have keys → confirm "N local keys will be replaced
+   by ‹env›"; protected → warning "Secrets of ‹env› will be written to local files"; pull → blocked → dialog listing the
+   local changes: [Push first] (opens Sync › Push) / [Discard local changes] (danger, force) / [Cancel].
+5. **Edit in Azure:** Browse → edit (draft bar counts) → Review → resolve conflicts if Azure changed meanwhile → Apply.
+6. **Push local changes:** edit files in the IDE or via the inspector → Sync › Push → select → Apply.
+7. **Pull:** Sync › Pull → select → Pull selected.
+8. **Conflict:** Keep remote (pulls that key) / Keep local (accepts Azure as the base; the key becomes an Update).
+9. **Protected:** Unlock editing (confirm) → edit → Apply → typed confirmation.
+10. **Compare dev ↔ stage:** Compare → pick sides → differences only → inspect.
+
+### 2.9 Notifications, status, errors, states
+- **Toasts** (`INotificationService`): success/info 5 s, warning 8 s, error until closed; at most 3 visible.
+- **Message bars** (`FluentMessageBar`) inline for view-blocking errors with [Retry] and [Copy details] (exception type
+  + message — Core never puts values into messages). Auth required → workbench-level bar "Azure sign-in required: run
+  `az login`, then Retry".
+- **Status bar:** account (state dot) │ selected project sync summary (click → Sync) │ running operation (spinner +
+  title; click → popover with the last 20 outcomes) │ DEMO badge │ `Ctrl+K` hint.
+- **Loading:** skeleton rows in grids, spinner inside buttons, indeterminate progress bar under the project header.
+- **Empty (one line + one action):** "Open a folder to start", "Set up environments", "Bind this project to a
+  service", "No keys for ‘orders’ in dev", "No differences", "Nothing to push", "Nothing to pull".
+
+### 2.10 Keyboard
+Never bind browser-reserved combinations (`Ctrl+W/T/N/Tab`, `Ctrl+Shift+T/N/W`, `F5`, `Ctrl+R`, `Ctrl+L`, `Alt+F4`) — G31.
+
+| Keys | Command id | Action |
+| --- | --- | --- |
+| `Ctrl+K`, `Ctrl+Shift+P` | `workbench.palette` | Command palette (`>` commands, `#` projects, `@` keys, `env:` environments) |
+| `Ctrl+P` | `workbench.quickOpen` | Go to project / key |
+| `Ctrl+B` / `Alt+I` | `workbench.toggleSidebar` / `workbench.toggleInspector` | Toggle panes |
+| `Alt+W` / `Alt+PageDown` / `Alt+PageUp` | `workbench.closeTab` / `workbench.nextTab` / `workbench.prevTab` | Tabs |
+| `Alt+1` / `Alt+2` / `Alt+3` | `project.mode.browse` / `.compare` / `.sync` | Modes (Linux browsers that keep `Alt+1…8` for tab switching: use the mode switch or the palette) |
+| `Alt+R` | `project.refresh` | Reload the current mode |
+| `Ctrl+F` | `browse.find` | Focus search |
+| `F2` / `Del` / `Alt+N` | `browse.edit` / `browse.delete` / `browse.addKey` | Edit selected / delete / add key |
+| `Ctrl+S` | `draft.review` | Review pending edits (Sync › Pending edits) |
+| `Ctrl+Enter` | `sync.apply` | Open the apply dialog / pull selected |
+| `Shift+Alt+F` | `editor.format` | Format JSON in Monaco |
+| `Esc` | — | Close overlay / clear search |
+
+### 2.11 Responsive (desktop-first)
+≥ 1280 px: full layout. 1024–1279: inspector becomes an overlay drawer (`Alt+I`). 768–1023: sidebar hidden by
+default (activity bar + `Ctrl+B` overlay), JSON diff in inline mode. < 768: best effort — single column, tab strip
+scrolls, header wraps. Never a horizontal page scroll.
+
+### 2.12 Visual language
+Fluent v5 dark theme + brand colour `#5B9DFF` (`IThemeService`); Fluent design tokens for everything Fluent styles.
+Own tokens only where Fluent has none (`wwwroot/css/app.css`, names fixed):
+```css
+:root {
+  --az-env-dev: #3fb68b; --az-env-stage: #e5a43b; --az-env-prod: #f0605d; --az-env-custom: #a78bfa;
+  --az-diff-added: #3fb68b; --az-diff-modified: #e5a43b; --az-diff-deleted: #f0605d;
+  --az-diff-conflict: #f472b6; --az-diff-remote: #5aa9e6; --az-draft: #5b9dff;
+  --az-font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+  --az-row-h: 28px; --az-header-h: 36px; --az-tab-h: 32px; --az-statusbar-h: 24px;
+  --az-activitybar-w: 48px; --az-sidebar-w: 280px; --az-inspector-w: 340px;
+}
+```
+| State | Visual |
 | --- | --- |
-| `ISetupService.DiscoverEnvironmentsAsync` / `SaveProfileAsync` | Майстер середовищ (кандидати з тегу/суфікса, `IsProtected`) |
-| `IUserStateStore.LoadProfileAsync` + `IEnvironmentResolver.Resolve` | Список середовищ (`null` профіль → майстер) |
-| `IProjectService.ResolveAsync(repoPath)` → `ProjectResolution(Candidates, IsConfident, TargetOptions, Existing)` | Майстер прив'язки. **Є binding → `Existing`, а `Candidates`/`TargetOptions` порожні** (G20) |
-| `IProjectService.BindAsync(repoPath, service, values, secrets)` | Збереження binding; небезпечна ціль секретів → `InvalidOperationException`; **скидає** `VaultByEnvironment`/`ActiveEnvironment`/`Ignore` (G5) |
-| `ISyncService.DiffAsync` → `ConfigDiff(Items: DiffItem(Key, Kind, Base, Local, Remote))` | Дерево зі статусами, Changes. `StateItem.Value` — `Plain(Value)` або `Secret(SecretUri?, Fingerprint)` |
-| `ISyncService.PlanPushAsync(binding, env, PushSource)` → `SyncPlan(Changes, Conflicts, RequiresVaultChoice, TouchesGlobal)` + `Warnings` | `LocalFiles(Delete = false)` — base = знімок, upsert (локальні видалення → `SyncWarning(DeleteSkipped)`), ігноровані ключі не потрапляють; `EditedJson` — base = **поточний remote** (G15) |
-| `ISyncService.ApplyAsync(plan, ApplyOptions(ConfirmedEnvironment, ConfirmGlobal))` | Кидає до будь-якого запису: конфлікти, `RequiresVaultChoice`, protected без назви (ignore case), global без підтвердження. Спершу KV, потім App Config. Без `Failed` — знімок оновлюється **лише для ключів плану** |
-| `ISyncService.PullAsync(binding, env, progress, force)` → `PullResult(Env, ValuesWritten, SecretsWritten, Blocked, LocalChanges)` + `Warnings`, `Ignored` | Повний перезапис цілей (ігноровані ключі зберігають локальне значення). Блокує лише при локальних змінах відносно знімка **активного** середовища; **без `ActiveEnvironment` не перевіряє нічого** (G21). Ставить `ActiveEnvironment = env` |
-| `ISyncService.ExportJsonAsync` | Edit JSON середовища (секрети як `{"@kv": name}`, global під `@global`) |
-| `JsonProjection.ToEditJson` / `FromEditJson(json, fingerprinter, knownSecrets)` / `ToNestedJson` | JSON view, валідація без мережі, серіалізація локальних файлів |
-| `KeyMapper.ToStoreKey(scope, service, path)`, `ToKeyVaultSecretName`, `ScopeMerger.Merge` | Імена секретів, remote-only перегляд |
-| `ConfigEnvironment.IsProtectedByName` | Пропозиція захисту в майстрі |
-| `SecretString` (`Reveal()`, `ToString()`=`***`, JSON=`"***"`), `ISecretFingerprinter`, `LocalValue` (редагований `ToString`) | Політика секретів |
-| Порти `IConfigStore`, `ISecretStore`, `IResourceDiscovery`, `ILocalTarget`, `IProjectDetector`, `IUserStateStore` | UI, як і CLI, використовує їх напряму для композиції |
+| LocalAdded / LocalModified / LocalDeleted | `A`/`M`/`D` in `--az-diff-added/modified/deleted` |
+| RemoteAdded / RemoteModified / RemoteDeleted | ⇣ in `--az-diff-remote` |
+| Conflict | `!` in `--az-diff-conflict`; always first in Sync |
+| Pending draft edit | dot in `--az-draft` |
+| Secret | key icon + `••••••` + eye (Reveal) |
+| Global scope / label | badge `global` (informative) / neutral label badge |
+| Connection | green Connected, amber Checking, red AuthRequired/Forbidden/Unreachable |
+| Environment kind | pill colour `--az-env-dev/stage/prod/custom`; protected adds a lock |
 
-`ILocalTarget` для binding вибирається як у Core: `targets.First(t => t.Kind == binding.X.Kind)`.
-`ThreeWayDiff.SecretName` — `internal`; UI не додає `InternalsVisibleTo`, а розбирає URI сам (G25).
-
-### 2.3 Infrastructure
-- `AppConfigStore(TokenCredential)` — `global:*` + `<service>:*`; `env.Label == null` → усі labels, інакше без label +
-  label середовища; `ConfigEntry.Label` переноситься; запис рівно з `entry.Label`; ETag-запис, 412 → `ApplyResult.Failed`;
-  `ListLabelsAsync` для майстра.
-- `KeyVaultSecretStore` — `GetAsync(secretUri)`, `SetAsync(vault, name, value)`, кеш `SecretClient` на vault.
-- `ResourceGraphDiscovery(ArmClient)` — stores і vault-и. `CsprojDetector` — `*.csproj`, пропускає лише `bin/obj`.
-- `AppSettingsLocalTarget`, `UserSecretsTarget` (база `JsonFileTarget`: читання через `ConfigurationBuilder.AddJsonFile`,
-  запис `ToNestedJson`, повний перезапис).
-- `JsonUserStateStore(root)`: `DefaultRoot` = `%APPDATA%/azcfg`; `profile.json`, `projects.json` (ключ — `Path.GetFullPath`,
-  ignore case на Windows), `snapshots/<sha256>/<env>.json`, `fingerprint.key`; атомарний запис; **без блокування** (G12).
-- `DefaultAzureCredential` створюється тричі (G11). Тексти помилок — у `AzCfg.Cli/CliErrors.Describe` (G10).
-
-### 2.4 CLI-композиція, яку відтворює Application-шар UI
-- Середовище: `--env` → `binding.ActiveEnvironment` → `"dev"`; порівняння назв — `OrdinalIgnoreCase`.
-- Прив'язка: впевнений кандидат → авто; інакше вибір; секрети — лише в безпечну ціль.
-- Push: конфлікти → відмова; `RequiresVaultChoice` → вибір із `FindKeyVaultsAsync` → зберегти `VaultByEnvironment[env]`
-  → перепланувати; protected → ввести назву; `TouchesGlobal` → окреме підтвердження.
-- `use <env>` = `PullAsync(force: false)` → `Blocked` → показати ключі → за згодою `force: true`.
-- Середовища: `IEnvironmentResolver` у DI — `ProfileEnvironmentResolver` (store- або label-режим за `profile.Mode`).
-- `PullResult.Warnings` / `SyncPlan.Warnings` (`DuplicateLabels`, `LabelOverride`, `DeleteSkipped`) показуються
-  користувачу (CLI — жовтим). Push видаляє remote-ключі лише з `--delete` (`LocalFiles(Delete: true)`).
-
-### 2.5 ADR 0008 для UI
-- Режим середовищ, labels і ігнор — дані профілю/binding; UI не змінює їх поведінку, лише відображає
-  (режим у Environments, label ключа в інспекторі, бейдж «ignored» у дереві з `IgnoreRules`/`binding.Ignore`).
-- Попередження з `Warnings` — обов'язково видимі в PlanReview і PullPreview.
-- `BindAsync` скидає й `Ignore` разом з `VaultByEnvironment`/`ActiveEnvironment` — G5 зберігає всі три.
-- ADR 0009 (0.3.0): `LocalValue.Scope` з позначки `//@global` — UI зберігає позначки при записі локальних файлів
-  (`JsonProjection.ToNestedJsonText`, `ReadGlobalMarkers`), `FromNestedJson` (G8) має повертати той самий scope;
-  `ProjectInfo.IsLibrary` — бібліотеки/тест-проєкти без цілей; `GitIgnoreLocalFiles` робить файл проєкту безпечним
-  для секретів через `ILocalTarget.EnsureGitIgnoredAsync` під час bind/pull.
+Icons: Fluent UI System Icons (`Microsoft.FluentUI.AspNetCore.Components.Icons`), Regular Size16 in content, Size20
+in the activity bar.
 
 ---
 
-## 3. Прогалини та рішення
+## 3. Code baseline (facts the UI relies on)
 
-| # | Прогалина | Рішення | Задача |
+### 3.1 Layers
+```
+AzCfg.Core            BCL + ILogger. Model, Mapping, Environments, Sync, Abstractions (ports), UseCases. Never prompts/prints.
+AzCfg.Infrastructure  Azure SDK, file system, user state; DI services.AddAzCfg() — all singletons.
+AzCfg.Cli             Spectre.Console.Cli; composition of scenarios and prompts (the reference for UI Application).
+```
+
+### 3.2 Core API reused by the UI
+| API | Facts |
+| --- | --- |
+| `ISyncService.PullAsync(binding, env, progress, force)` | Ensures gitignore (profile mode), checks the secrets target is safe, then: blocked (nothing written, `LocalChanges`) when local files differ from the snapshot of the **active** env; **no check at all when `ActiveEnvironment == null`** (G20). Rewrites targets fully (ignored keys keep local values), saves the snapshot, sets `ActiveEnvironment = env`. `Warnings`, `Ignored`. |
+| `ISyncService.ExportJsonAsync` | Edit JSON (`ToEditJson`): secrets `{"@kv": name}`, global under `@global`. |
+| `ISyncService.ExportPromoteJsonAsync` | Promote JSON (not used by the MVP UI). |
+| `ISyncService.PlanPushAsync(binding, env, source)` | `LocalFiles(Delete=false)`: base = snapshot, upsert (local deletes → `DeleteSkipped`), ignored keys skipped. `EditedJson`: base = **current remote** (G14). New secret without a known vault → `CreateSecret` with `After == null`, `RequiresVaultChoice`. |
+| `ISyncService.DiffAsync` | `ConfigDiff(Items: DiffItem(Key, Kind, Base, Local, Remote))`, ignored keys removed. **Resolves every remote secret sequentially** to fingerprint it (G13). Local values are always `StateValue.Plain` — secret-ness comes from the remote/base side or the target (AD-6). |
+| `ISyncService.ApplyAsync(plan, ApplyOptions)` | Throws before any write on conflicts, `RequiresVaultChoice`, protected without typed name (ignore case), global without confirmation. KV first, then App Config. Without failures the snapshot is updated **only for the plan's keys**. |
+| `IProjectService.ResolveAsync(repoPath)` | With a binding → `Existing`, empty `Candidates`/`TargetOptions` (G19). Candidates = prefixes of the `dev` store matched to project names. |
+| `IProjectService.BindAsync(repoPath, service, values, secrets)` | Unsafe secrets target → `InvalidOperationException`; **resets** `VaultByEnvironment`, `ActiveEnvironment`, `Ignore` (G5). |
+| `IProjectService.AddIgnoreAsync/RemoveIgnoreAsync` | Edit `binding.Ignore` only. |
+| `ISetupService.DiscoverEnvironmentsAsync / SaveProfileAsync / ListLabelsAsync` | Environment wizard. |
+| `IUserSettingsService` | `mode`, `defaultLabel`, `gitignoreLocalFiles`, `env.<name>.endpoint/label/protected`. |
+| `IEnvironmentResolver.Resolve(profile)` | `ProfileEnvironmentResolver`. **Resolved** envs differ from profile envs (store mode: `Label = null`, `WriteLabel = env.Label ?? DefaultLabel`) — never save resolved envs back (G26). |
+| `JsonProjection` | `ToNestedJson`, `ToNestedJsonText` (`//@global` markers), `ReadGlobalMarkers`, `ToEditJson`, `FromEditJson(json, fingerprinter, knownSecrets)` (`{"@kv": n}` unknown → `Secret(null, "")`; with `"value"` → `NewSecrets`). |
+| `KeyMapper` | `ToStoreKey`, `TryParseStoreKey`, `ToKeyVaultSecretName` (`:` → `--`), `ToLocalJsonPath`, `FromLocalJsonPath`. |
+| `LabelSelector.Select`, `ScopeMerger.Merge`, `IgnoreRules.IsIgnored/Normalize` | Label rules (ADR 0008), service overrides global, ignore patterns. |
+| `SecretString` (`Reveal()`, `ToString()` = `***`, JSON `"***"`), `LocalValue` (redacted), `ISecretFingerprinter` | Secret policy. |
+| `ConfigEnvironment.IsProtectedByName` | Protected suggestion. |
+
+`ILocalTarget` for a binding is chosen as in Core: `targets.First(t => t.Kind == binding.X.Kind)`.
+
+### 3.3 Infrastructure
+- `AppConfigStore`, `KeyVaultSecretStore` (client per vault), `ResourceGraphDiscovery`, each with its **own**
+  `DefaultAzureCredential` (G10).
+- `CsprojDetector`: recursive, skips only `bin`/`obj` (G2); sets `IsLibrary` (ADR 0009).
+- `AppSettingsLocalTarget`, `UserSecretsTarget` (base `JsonFileTarget`: read via `ConfigurationBuilder`, write
+  `ToNestedJsonText`, full rewrite; `EnsureGitIgnoredAsync`).
+- `JsonUserStateStore(root)`: `DefaultRoot = %APPDATA%/azcfg`; `profile.json`, `projects.json` (key
+  `Path.GetFullPath`, ignore case on Windows), `snapshots/<sha256>/<env>.json`, `fingerprint.key`; atomic writes;
+  **no locking** (G11).
+- Error texts live in `AzCfg.Cli/CliErrors.Describe` (G9).
+- Realistic in-memory port fakes exist in `tests/AzCfg.Cli.Tests/Scenario` (`InMemoryAppConfig` with labels and ETags,
+  `InMemorySecretStore`, `InMemoryUserStateStore`, `InMemoryLocalTarget`, `FixedProjectDetector`,
+  `FixedResourceDiscovery`, `RemoteSetting`) — moved to Infrastructure by T1.
+
+### 3.4 CLI composition the UI reproduces
+- Environment: `--env` → `binding.ActiveEnvironment` → `"dev"`; names compare `OrdinalIgnoreCase`.
+- Bind: confident candidate → automatic; otherwise a choice; secrets only into a safe target.
+- Push: conflicts → refuse; `RequiresVaultChoice` → pick from `FindKeyVaultsAsync` → save `VaultByEnvironment[env]` →
+  re-plan; protected → typed name; `TouchesGlobal` → separate confirmation; `Warnings` shown.
+- `use <env>` = `PullAsync(force: false)` → `Blocked` → show keys → `force: true` on consent.
+
+---
+
+## 4. Gaps and decisions
+
+| # | Gap | Decision | Task |
 | --- | --- | --- | --- |
-| G1 | Немає розбору `.sln`/`.slnx` і пошуку конфіг-файлів | Порт `IWorkspaceScanner` (Core) + `WorkspaceScanner` (Infra, `Microsoft.VisualStudio.SolutionPersistence`) | F1, B2 |
-| G2 | `CsprojDetector` обходить `.git`, `node_modules` | Пропускати `.git`, `.vs`, `.idea`, `node_modules`, `bin`, `obj`, теки з `.` | B2 |
-| G3 | Немає списку воркспейсів | `<state-root>/ui/workspaces.json` | S1 |
-| G4 | Binding один на `RepoPath`, у воркспейсі кілька проєктів | Новий binding: `RepoPath` = тека `.csproj`. Пошук: тека `.csproj`, далі предки до кореня воркспейсу; binding предка приймається, лише якщо `ValuesTarget.ProjectPath` або `SecretsTarget.ProjectPath` == цей `.csproj`. **Прийнятий binding використовується як є** (його `RepoPath` — ключ знімків, спільний із CLI) | S1 |
-| G5 | `BindAsync` скидає `VaultByEnvironment`/`ActiveEnvironment`/`Ignore` | `WorkspaceService.BindAsync`: після Core `BindAsync` — `SaveBindingAsync(binding with { старі поля })` | S1 |
-| G6 | Pull лише «все або нічого» | `ISyncService.PullSelectedAsync` (Core, TDD) | B1 |
-| G7 | Вибір окремих змін push | Без Core: `plan with { Changes = subset }` — `ApplyAsync` оновлює знімок лише для ключів плану | S2 |
-| G8 | Немає зворотного до `ToNestedJson` | `JsonProjection.FromNestedJson` (паритет із `JsonFileTarget.ReadAsync`) | B1 |
-| G9 | `PushSource.EditedJson/Promote.ToString()` друкує JSON із можливим `"value"` секрету | `PrintMembers` → `Json = ***` | B1 |
-| G10 | Тексти помилок Azure у CLI | `AzureErrors.Describe/Classify` в Infra, `CliErrors` делегує | F1 |
-| G11 | Три `DefaultAzureCredential`, немає перевірки логіну | Один `TokenCredential` singleton; `AzureStatusService` пробує токен | B2, S1 |
-| G12 | `SaveBindingAsync` — read-modify-write без блокування | `SemaphoreSlim(1,1)` у `JsonUserStateStore` (міжпроцесна гонка — R6) | B2 |
-| G13 | `SyncProgress` не репортиться | Невизначений прогрес | — |
-| G14 | `DiffAsync`/`PlanPushAsync` резолвлять секрети послідовно | Кеш `ConfigurationView` + явний Refresh; заміри в Q2 (R3) | S2, Q2 |
-| G15 | `EditedJson` бере поточний remote як base → давно відкритий редактор мовчки перетре чужі зміни | Stale-детектор: повторний export ≠ export на момент відкриття → діалог | S2, U3 |
-| G16 | Знімки/active/vault прив'язані до назви середовища | Перейменування заборонене (видалити + додати) | U1 |
-| G17 | Ранжування vault-ів не реалізоване | Список із пошуком (паритет із CLI) | U3 |
-| G18 | `LocalSettingsTarget` не реалізований | `local.settings.json` — лише виявлений файл (read-only), не ціль | B2, U1 |
-| G19 | Вибір середовища за замовчуванням живе в CLI | `EnvironmentRules.SelectDefault` (те саме правило) | S1 |
-| G20 | `ResolveAsync` для прив'язаного проєкту не дає кандидатів і `TargetOptions` → зміна прив'язки неможлива | `WorkspaceService.ProposeSetupAsync`: якщо `Existing` — `TargetOptions` будує сам (`ILocalTarget.CanHandle` + `InspectAsync`, формат: `LocalSettings` → `FlatDictionary`, інакше `NestedJson`), `Candidates` = `ListServicePrefixesAsync(SelectDefault-середовище)` з поточним сервісом першим, `IsConfident = false`, `Existing` зберігається | S1 |
-| G21 | Перший pull (`ActiveEnvironment == null`) мовчки перезаписує наявні локальні файли | `ISyncWorkflowService.UnmanagedLocalKeysAsync` → якщо не порожньо, діалог «N локальних ключів буде перезаписано» перед pull | S2, U1 |
-| G22 | ASP.NET Core логує URL запиту з `?token=` | `Logging:LogLevel:Microsoft.AspNetCore = Warning` у `appsettings.json`; токен ніде не логиться власним кодом | F1, P2 |
-| G23 | Випадковий порт відомий лише після старту | URL з `IServerAddressesFeature` в `ApplicationStarted`, потім `InstanceLock` і `BrowserLauncher` | P2 |
-| G24 | Статичні реєстри вкладок/sidebar — глобальний стан, ламають паралельні тести | Реєстрації через DI-записи (`TabRegistration`, …), без `static` | F1 |
-| G25 | `ThreeWayDiff.SecretName` internal | `SecretUris.NameOf/VaultOf` у Application (розбір сегмента після `secrets/`) | S2 |
-| G26 | «Keep local» не визначений для видаленого локально ключа і global-ключа | Локальні значення завжди scope `Service`; немає локально → `Remove(Service)`; є → `SetPlain`/`SetSecret` у `Service` | S2 |
-| G27 | `/feature` робить `git switch dev`, що падає у worktree | Бриф 0.2: гілка від `origin/dev` | — |
-| G28 | `WorkspaceState` не тримав список середовищ; зміни профілю не поширювались | `WorkspaceState.Environments` + перечитування після `SaveAsync` | F1, U1 |
-| G29 | Події singleton-сервісів (`IOperationRunner`, `IAzureStatusService`) приходять не з потоку рендера й з інших circuit-ів | Правило: обробники → `InvokeAsync(StateHasChanged)`, відписка в `Dispose` (розділ 9) | усі UI |
-| G30 | Видалене середовище лишається в `binding.ActiveEnvironment` | `SelectDefault` ігнорує відсутнє; Environments-вкладка попереджає при видаленні активного у відкритих проєктах | S1, U1 |
+| G1 | No `.sln`/`.slnx` parsing, no config-file discovery | Port `IWorkspaceScanner` (Core) + `WorkspaceScanner` (`SolutionPersistence`) | F1, I1 |
+| G2 | `CsprojDetector` descends into `.git`, `node_modules`, … | Skip `.git`, `.vs`, `.idea`, `node_modules`, `bin`, `obj`, dot-folders | I1 |
+| G3 | No list of opened folders | `<state-root>/ui/workspaces.json` | S1 |
+| G4 | Binding keyed by `RepoPath`; a workspace has many projects | New binding: `RepoPath` = folder of the `.csproj`. Lookup: that folder, then ancestors up to the workspace root; an ancestor binding is accepted only if its `ValuesTarget.ProjectPath` or `SecretsTarget.ProjectPath` equals this `.csproj`; an accepted binding is used as is (its `RepoPath` keys the snapshots shared with the CLI) | S1 |
+| G5 | `BindAsync` resets vaults/active/ignore | `WorkspaceService.BindAsync` re-saves the old `VaultByEnvironment`, `ActiveEnvironment`, `Ignore` | S1 |
+| G6 | Pull is all-or-nothing | Core `ISyncService.PullSelectedAsync` | C2 |
+| G7 | Selecting part of a push plan | Core `PlanSelection.Select` | C1 |
+| G8 | `PushSource.EditedJson/Promote.ToString()` prints JSON that may hold secret values | `PrintMembers` → `Json = ***` | C2 |
+| G9 | Azure error texts live in the CLI | `AzureErrors.Describe/Classify` in Infrastructure; `CliErrors` delegates | F1 |
+| G10 | Three `DefaultAzureCredential`s; no sign-in check | One `TokenCredential` singleton; `AzureStatusService` probes a token | I1, S1 |
+| G11 | `SaveBindingAsync` read-modify-write without a lock | `SemaphoreSlim(1,1)` in `JsonUserStateStore` (cross-process — R7) | I1 |
+| G12 | `SyncProgress` never reported | Indeterminate progress | — |
+| G13 | `DiffAsync` resolves secrets sequentially | View caches per project session + explicit Refresh; measure in Q2 (R3) | S2, Q2 |
+| G14 | `EditedJson` uses the current remote as base → a long-open edit silently reverts others' changes | `EditedJson.BaseJson`: 3-way against the export the edit started from; drafts always carry it | C2, S3 |
+| G15 | Snapshots/active/vault keyed by environment name | Rename not offered (remove + add) | U1 |
+| G16 | Vault ranking not implemented | Searchable list (parity with the CLI) | U4 |
+| G17 | `LocalSettingsTarget` not implemented | `local.settings.json` listed read-only | I1, U1 |
+| G18 | Default-environment rule lives in the CLI | `EnvironmentRules.SelectDefault` (same rule) | S1 |
+| G19 | `ResolveAsync` of a bound project gives no candidates/targets → re-bind impossible | `ProposeSetupAsync` builds `TargetOptions` (`CanHandle` + `InspectAsync`, format `LocalSettings` → `FlatDictionary`, else `NestedJson`) and `Candidates` (`ListServicePrefixesAsync` of the default env, current service first), `IsConfident = false`, keeps `Existing` | S1 |
+| G20 | First pull (no active env) silently overwrites existing local files | `UnmanagedLocalKeysAsync` → confirm before pull | S3, U4 |
+| G21 | ASP.NET Core logs request URLs (with `?t=`) | `Logging:LogLevel:Microsoft.AspNetCore = Warning`; own code never logs the token | F1, P2 |
+| G22 | Dynamic port known only after start | URL from `IServerAddressesFeature` on `ApplicationStarted` | P2 |
+| G23 | Static registries = global state, break parallel tests | DI registrations (`TabRegistration`, …) | F1 |
+| G24 | `ThreeWayDiff.SecretName` is internal | `KeyMapper.SecretNameOf` public | C1 |
+| G25 | No Core operation to resolve a local-files conflict | `ISyncService.ResolveConflictAsync` | C2 |
+| G26 | Saving resolved environments back would corrupt the profile | `IEnvironmentService` works on `UserProfile` | S1 |
+| G27 | Remote-only browse and env ↔ env compare need entries without resolving secrets | `ISyncService.ReadRemoteConfigAsync` + `EnvironmentComparer` | C1, C2 |
+| G28 | A UI apply gate would duplicate Core rules | `ApplyGuard` used by `ApplyAsync` and the UI | C2 |
+| G29 | Singleton events arrive off the render thread and from other circuits | Rule: handlers → `InvokeAsync(StateHasChanged)`, unsubscribe in `Dispose` (§9) | all UI |
+| G30 | A deleted environment may remain `binding.ActiveEnvironment` | `SelectDefault` ignores it; Settings warns when deleting an env active in open projects | S1, U1 |
+| G31 | `Ctrl+W`, `F5`, … are browser-reserved | Keymap §2.10 | P1 |
+| G32 | `dev` is 35 commits behind `master` | F0 fast-forward | F0 |
+| G33 | `/feature` runs `git switch dev`, failing inside a worktree | Brief 0.3 branches from `origin/dev` | — |
+| G34 | ADR numbers 0008/0009 are taken | UI ADRs are 0010/0011 | D1 |
+| G35 | Agents' knowledge of Fluent UI v5 is unreliable (GA 2026-09-28) | P1 writes `docs/ui-components.md` from the package XML docs; features copy its patterns | P1 |
+| G36 | The UI cannot be seen without Azure | In-memory adapters in Infrastructure + `--demo` | T1, DH |
 
-**Що не змінюємо:** модель, порти й сервіси Core. Зміни Core лише додаткові (G1 типи, G6, G8, G9), з TDD.
-CLI-поведінка не змінюється (CLI-тести не правляться, крім стабів `ISyncService` у B1).
-
----
-
-## 4. Функціональні вимоги
-
-**[MVP]** — входить у DoD; **[S]** — stretch.
-
-### 4.1 Project Explorer
-- FR-P1 [MVP] «Open Folder»: серверний браузер тек (AD-8), поле шляху з автодоповненням, список останніх.
-- FR-P2 [MVP] Пошук `.sln`, `.slnx`, `.csproj` (G2).
-- FR-P3 [MVP] Дерево Workspace → Solution → Project → конфіг-файли; проєкти поза solution — група «Projects»;
-  проєкт у кількох solution — під кожним.
-- FR-P4 [MVP] Конфіг-файли: `appsettings.json`, `appsettings.{Env}.json`, `appsettings.local.json`, `local.settings.json`
-  (read-only, «not supported yet»), user-secrets. Бейдж «values»/«secrets» на цілях прив'язки.
-- FR-P5 [MVP] Воркспейси: відкрити, закрити, прибрати зі списку (binding не видаляється), pin.
-- FR-P6 [MVP] Статус проєкту: Unbound / Bound (сервіс, активне середовище).
-- FR-P7 [MVP] Майстер прив'язки: сервіс (кандидати, впевнений збіг виділено, ручне введення), ціль значень, ціль секретів
-  (лише `IsSafeForSecrets`, з поясненням), зміна прив'язки зі збереженням vault-ів і активного середовища (G5, G20).
-
-### 4.2 Environments
-- FR-E1 [MVP] Немає `profile.json` → майстер: discovery, назва, `IsProtected`, ручний endpoint.
-- FR-E2 [MVP] Список: додати, видалити, змінити endpoint, `IsProtected`. Перейменування — ні (G16).
-- FR-E3 [MVP] Тип для відображення (Development/Staging/Production/Custom) — похідний (`EnvironmentRules.KindOf`).
-- FR-E4 [MVP] Перемикач середовища проєкту; активне позначене. «Make active» = `use` (2.4) з G21-попередженням.
-- FR-E5 [MVP] Vault для нових секретів на середовище (`VaultByEnvironment`).
-- FR-E6 [MVP] Статус підключення: Connected / Auth required / Forbidden / Unreachable.
-
-### 4.3 Configuration Explorer
-- FR-C1 [MVP] Дерево ключів (сегменти за `:`), агреговані лічильники змін/конфліктів на гілках.
-- FR-C2 [MVP] Колонки/інспектор: local, remote, scope, тип (plain / KV ref з vault host і назвою), джерело local, `DiffKind`.
-- FR-C3 [MVP] Пошук (ключ + plain-значення; секрети не шукаються за значенням), фільтри: змінені, конфлікти, секрети, scope.
-- FR-C4 [MVP] Tree ↔ JSON view (read-only Monaco: local / remote, секрети як `{"@kv": "<name>"}`).
-- FR-C5 [MVP] Неактивне середовище (або немає активного) — remote-only режим.
-- FR-C6 [S] Індикатор «service override перекриває global».
-
-### 4.4 JSON Editor
-- FR-J1 [MVP] Monaco: JSON, синтаксична валідація, форматування, тема `azcfg-dark`.
-- FR-J2 [MVP] «Remote JSON» (`ExportJsonAsync`): семантична валідація (`FromEditJson`, маркери), schema, «Review changes».
-- FR-J3 [MVP] «Local file» для цілей прив'язки: відкрити, валідація (`FromNestedJson`), зберегти (`WriteAsync`).
-  Ціль секретів — лише після «Reveal & edit».
-- FR-J4 [MVP] Dirty-крапка, підтвердження закриття, `Ctrl+S`, `Ctrl+Shift+F`.
-- FR-J5 [MVP] Stale-детектор Remote JSON (G15).
-
-### 4.5 Azure
-- FR-A1 [MVP] Лише `DefaultAzureCredential`; акаунт у status bar; при помилці — `az login` + Retry.
-- FR-A2 [MVP] Редагувати plain, додати, видалити ключ (scope service; global — явним перемикачем + підтвердження) — через
-  конвеєр edit JSON (AD-7).
-- FR-A3 [MVP] KV ref: vault/секрет, Reveal (автоприховування 30 с), «Set new value» (`{"@kv": name, "value": v}`).
-- FR-A4 [MVP] «Move to Key Vault» для plain (ім'я з `KeyMapper`, вибір vault за потреби).
-- FR-A5 [MVP] 401/403/404/412/мережа — повідомлення з `AzureErrors.Describe` (ролі RBAC).
-
-### 4.6 Synchronization
-- FR-S1 [MVP] Local → Azure (`PushSource.LocalFiles`) лише в **активне** середовище; за замовчуванням upsert,
-  видалення — явним перемикачем (`Delete: true`).
-- FR-S2 [MVP] Azure → Local: preview (лише активне), pull усього або вибраних ключів.
-- FR-S3 [MVP] Diff viewer: список змін + Monaco diff (секрети — `***`/статус fingerprint).
-- FR-S4 [MVP] Чекбокси окремих змін в обох напрямках.
-- FR-S5 [MVP] Конфлікти: base/local/remote; «Keep remote» = pull ключа; «Keep local» = edit JSON (G26). Поки є конфлікти
-  в плані — apply заблокований.
-- FR-S6 [MVP] Перед apply: зведення; protected → ввести назву; `TouchesGlobal` → чекбокс; `RequiresVaultChoice` → вибір vault;
-  результат із `Failed` (412) → «Re-plan».
-- FR-S7 [MVP] Захист Production — AD-9.
-
-### 4.7 General UX
-- FR-U1 [MVP] Єдина темна тема. FR-U2 [MVP] Вкладки з keep-alive редакторів. FR-U3 [MVP] Статуси: акаунт, підключення,
-  операції. FR-U4 [MVP] Command palette `Ctrl+K`/`Ctrl+Shift+P`. FR-U5 [MVP] Loading/empty/error стани, toast-и.
+**Unchanged:** Core model, ports and existing services — Core changes are additive only (C1, C2, scanner types) and
+TDD. CLI behaviour does not change (CLI tests are only touched for `ISyncService` stubs and the moved fakes).
 
 ---
 
-## 5. Архітектура UI
+## 5. Architecture
 
-### 5.1 Схема
+### 5.1 Diagram
 ```mermaid
 graph TD
-  Browser["Browser (127.0.0.1)"] -- "SignalR + access cookie" --> Host
+  Browser["Browser (127.0.0.1)"] -- "SignalR + auth cookie" --> UI
   subgraph Host["AzCfg.Ui (Blazor Web App, Interactive Server)"]
-    Components["Components / Features"] --> State["Scoped state"]
-    Components --> Runner["IOperationRunner (singleton)"]
-    Runner --> App["Application services"]
+    UI["Components / Features (Fluent UI v5, Monaco)"] --> State["Scoped state (AzCfg.Ui.Application.State)"]
+    UI --> Runner["IOperationRunner (singleton)"]
+    Runner --> App["AzCfg.Ui.Application services"]
   end
-  App --> Core["AzCfg.Core use cases + static helpers"]
-  App --> Ports["Порти: IConfigStore, ISecretStore, IResourceDiscovery, ILocalTarget, IUserStateStore, IWorkspaceScanner"]
-  Core --> Infra["AzCfg.Infrastructure (AddAzCfg)"]
+  App --> Core["AzCfg.Core use cases + pure rules"]
+  App --> Ports["Ports: IConfigStore, ISecretStore, IResourceDiscovery, ILocalTarget, IUserStateStore, IWorkspaceScanner"]
+  Core --> Infra["AzCfg.Infrastructure (AddAzCfg) / InMemory (tests, --demo)"]
   Ports --> Infra
 ```
 
-### 5.2 Шари `AzCfg.Ui`
-- **Components / Features** — відображення й взаємодія. Інжектять лише Application-інтерфейси (7.3), state (7.4),
-  `IOperationRunner`, `IDialogService`, `IToastService`. Усі IO-виклики — через `IOperationRunner.RunAsync`.
-- **Application** — композиція сценаріїв поверх Core (аналог CLI `*CommandBase`): view-моделі, маскування, UI-правила
-  безпеки. Чисті класи без Razor і без `IOperationRunner`; тестуються xunit на реальних Core-сервісах + fakes портів.
-- **State** — scoped (на circuit) контейнери з `event Action? Changed`.
-- **Hosting** — Kestrel, токен доступу, single instance, запуск браузера.
+### 5.2 Projects and layer rules
+```
+src/AzCfg.Ui.Application   classlib → Core, Infrastructure; pkg Microsoft.Extensions.Hosting.Abstractions.
+                           NO Microsoft.AspNetCore.*, Microsoft.JSInterop, Fluent UI (architecture test, F1).
+src/AzCfg.Ui               Microsoft.NET.Sdk.Web → Ui.Application; pkgs Fluent UI, Fluent Icons, BlazorMonaco.
+tests/AzCfg.Ui.Tests       Microsoft.NET.Sdk.Razor → AzCfg.Ui; xunit, bunit, Mvc.Testing, TimeProvider.Testing.
+```
+- **Components/Features** render and interact. They inject only Application interfaces, State, `IOperationRunner`,
+  `ICommandRegistry`, Fluent `IDialogService`/`INotificationService`/`IKeyCodeService`/`IThemeService` and the
+  cross-feature flows (§7.5). Every IO call goes through `IOperationRunner.RunAsync`.
+- **Application** orchestrates Core use cases and ports (the counterpart of CLI `*CommandBase`): view models, masking,
+  UI safety rules (AD-6…AD-8). Plain classes, tested with xunit on **real** Core services + in-memory adapters.
+  Exceptions: `ArgumentException` (bad input), `InvalidOperationException` (forbidden state); messages name keys,
+  never values.
+- **Application never re-implements a Core rule.** Anything that decides sync/apply semantics lives in Core (C1/C2).
+- **State** — scoped (per circuit) observable containers with `event Action? Changed`.
+- Core/Infrastructure rules of `CLAUDE.md` are unchanged.
 
-### 5.3 Рішення
-| ID | Тема | Рішення |
+### 5.3 Decisions
+| ID | Topic | Decision |
 | --- | --- | --- |
-| AD-1 | State | [нове] Scoped observable state (`WorkspaceState`, `EditorTabsState`, `ExplorerState`, `ProtectedUnlockState`), без Fluxor. Кеш `ConfigurationView` у `ExplorerState`, інвалідується після pull/apply/save/зміни профілю. Кілька вкладок браузера = незалежні circuit-и. |
-| AD-2 | Persistence | [є] `profile.json`, `projects.json`, `snapshots/` через `IUserStateStore`, формат без змін. [нове] `<state-root>/ui/workspaces.json`, `ui/instance.json`. Binding — G4. |
-| AD-3 | Hosting | [нове] Blazor Web App, глобальний `InteractiveServer` з `prerender: false`. Kestrel лише `127.0.0.1:<--port або 0>`; `AllowedHosts=localhost;127.0.0.1`. Токен доступу (32 байти, base64url) на запуск: `/?token=` → cookie `azcfg_ui` (HttpOnly, SameSite=Strict, Path=/) → 302 на `/`; без валідного cookie → 401 для всього, включно з `/_blazor` і статикою (крім `/favicon.ico`). CSP: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*; frame-ancestors 'none'` + `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. `HubOptions.MaximumReceiveMessageSize = 2 MB`. `DetailedErrors=false`. Логи `Microsoft.AspNetCore` ≥ Warning (G22). Single instance через `ui/instance.json` (pid, port, token): живий pid + порт відповідає → відкрити браузер на наявний інстанс і вийти. Реальний URL — з `IServerAddressesFeature` в `ApplicationStarted` (G23). Запуск: `dotnet run --project src/AzCfg.Ui [-- --no-browser] [--port N]`. |
-| AD-4 | Auth | [є] Лише `DefaultAzureCredential`. [нове] Один `TokenCredential` singleton (G11); `AzureStatusService` бере токен `https://management.azure.com/.default`, акаунт — з claim-ів JWT payload (`upn`/`unique_name`/`preferred_username`, `tid`; base64url-декод без валідації, лише для показу). Інтерактивного логіну немає: `az login` + Retry. Перша перевірка — у фоні після старту. |
-| AD-5 | Секрети | [є] `SecretString`, fingerprint-и, план/знімок без значень. [нове] (1) значення секрету не рендериться до Reveal; (2) Reveal remote — `ISecretStore.GetAsync`, значення лише в полі компонента, приховування через 30 с, при зміні вкладки й у `Dispose`; (3) local маскується, якщо ключ — секрет за diff (`StateValue.Secret`) **або** походить із `SecretsTarget`, коли той ≠ `ValuesTarget`; (4) файл цілі секретів у Monaco — лише після «Reveal & edit»; (5) пошук і палітра не індексують значення секретів; (6) логи — лише ключі/назви операцій; (7) введене значення секрету — одразу в `SecretString`, у Core потрапляє лише через `"value"` edit JSON, у state після apply/cancel не зберігається. |
-| AD-6 | Monaco | [нове] Пакет `BlazorMonaco` (асети локально, без CDN; standalone + diff). Ізольований обгортками `CodeEditor`/`DiffEditor` — заміна на власний interop торкнеться лише їх (R7). Тема `azcfg-dark` з токенів 8.2. Schema `wwwroot/schemas/edit-json.schema.json`. Keep-alive: неактивні вкладки ховаються CSS; ліміт 12 завантажених вкладок (найстаріша неактивна не-dirty вивантажується). Ліміт документа 1 MB. |
-| AD-7 | UI ↔ Core | [нове] Компоненти → `IOperationRunner` → Application → Core/порти. Є дія в Core — викликаємо її, не відтворюємо. Усі remote-редагування (дерево, інспектор, JSON) — **один конвеєр**: export → `EditJsonPatcher`/Monaco → `PlanRequest(EditedJson, ExportedAtOpen)` → вкладка PlanReview → `ApplyAsync`. Локальні редагування → `ILocalDocumentService.SaveAsync` → далі звичайний push `LocalFiles`. |
-| AD-8 | Вибір теки | [нове] Серверний `IDirectoryBrowser` (корені: home + диски / `/`), список тек, автодоповнення, позначка тек із `.sln/.slnx/.csproj`. |
-| AD-9 | Production | [є] `IsProtected`, `ConfirmedEnvironment`, `ConfirmGlobal` у Core. [нове] Protected-середовище: 2px рамка `--az-env-prod`, бейдж PROTECTED, замок; **read-only за замовчуванням** — дії редагування неактивні до «Unlock editing» (на circuit і середовище, `ProtectedUnlockState`); apply — `TypedConfirmAsync` (кнопка неактивна до збігу, ignore case, без Enter-за-замовчуванням); pull із protected — окреме попередження «секрети production буде записано локально». Для **всіх** середовищ: `LocalFiles` push лише в активне (`InvalidOperationException` в Application). UI-перевірки — додатковий шар, остаточна — у Core. |
-| AD-10 | Довгі операції | [нове] `IOperationRunner` (singleton): `Running`, `Recent` (останні 20), мапінг винятків через `AzureErrors`. **Read** скасовуються токеном компонента. **Write** (apply, pull, save, bind, save profile) ігнорують токен UI і виконуються з `ApplicationStopping` — частковий apply через закриття вкладки неможливий; кнопки дії заблоковані, поки операція триває; результат лишається в `Recent` (status bar), навіть якщо circuit зник. |
-| AD-11 | Розширюваність | [нове] Реєстрації через DI-записи (G24): `TabRegistration`, `SidebarRegistration`, `StatusBarItemRegistration`, `ICommandContributor`. Кожна фіча реєструє своє у `Features/<X>/<X>Feature.cs` (регіони `// services` — S-задачі, `// ui` — U-задачі). Workbench рендерить через `DynamicComponent`. |
+| AD-1 | Hosting | [new] Blazor Web App, global `InteractiveServer` with `prerender: false`. Kestrel only on `127.0.0.1:<--port or 0>`; `AllowedHosts=localhost;127.0.0.1`. Per run a 32-byte base64url token; the console prints `http://127.0.0.1:<port>/login?t=<token>` and the browser is opened with it. `GET /login?t=` validates with `CryptographicOperations.FixedTimeEquals`, signs in with ASP.NET Core **cookie authentication** (cookie `azcfg_ui`, HttpOnly, SameSite=Strict, session, Path=/) and redirects to `/`. A **fallback authorization policy** requires an authenticated user for every endpoint incl. `/_blazor`; static assets are anonymous; unauthenticated → 401 (no redirect). Headers: CSP `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` (relaxations needed by Monaco/Fluent are documented in ADR 0010). `HubOptions.MaximumReceiveMessageSize = 2 MB`, `DetailedErrors = false`, `Microsoft.AspNetCore` logs ≥ Warning (G21). Real URL from `IServerAddressesFeature` (G22). Options `--port N`, `--no-browser`, `--demo[=empty]`, `--state-root <dir>`. Pattern of the .NET Aspire dashboard. |
+| AD-2 | Projects | [new] §5.2. `AzCfgUiApp.Build(args, overrides)` composes the app; `Program.cs` is one line, tests use `WebApplicationFactory<Program>`. |
+| AD-3 | Components | [new] Fluent UI Blazor **v5** + Fluent icons. Custom components only where Fluent has no equivalent: workbench shell, tab strip, `KeyTreeGrid`, command palette, `EnvPill`/`EnvironmentSwitcher`, `SecretValue`, Monaco wrappers. No other UI library, no own JS except what BlazorMonaco needs. |
+| AD-4 | State | [new] Scoped observable state (`WorkspaceState`, `TabsState`, `ProjectSessions`/`ProjectSession`, `ProtectedUnlockState`), no Fluxor. `ProjectSession` caches the Browse view, the comparison and the drafts of one project tab; caches are invalidated after pull/apply/local edit/profile change; drafts survive invalidation. Several browser tabs = independent circuits. |
+| AD-5 | Edit model | [new] **Azure edits** (tree, inspector, JSON) → `RemoteDraft` per (project, env): `BaseJson` = export when the draft started, `Json` = edited edit JSON without secret values, `Secrets` = typed secret values (`SecretString`). Review = `PlanPushAsync(EditedJson(Json + injected secrets, BaseJson))` — Core does a 3-way merge, so concurrent Azure changes of untouched keys are never reverted and same-key edits become conflicts (G14). **Local edits** (inspector) are immediate writes through `ILocalTarget` (`ILocalValuesService`), then normal Push. |
+| AD-6 | Secrets | [exists] `SecretString`, fingerprints, plans/snapshots without values. [new] (1) a secret value is never rendered before Reveal; (2) Reveal remote = `ISecretStore.GetAsync`, value only in a `SecretValue` component field, hidden after 30 s, on tab change and on `Dispose`; (3) a key is secret when its remote/base side is a secret **or** its local value comes from `SecretsTarget` while that differs from `ValuesTarget` (`SecretPolicy.IsSecret`) — local values from Core are plain strings, so this rule is mandatory everywhere a local value is shown; (4) search, palette and filters never index secret values; (5) logs contain only keys and operation titles; (6) a typed secret value goes straight into `SecretString`, reaches Core only via `"value"` of edit JSON built in `DraftService.ToPushSource`, and is dropped after apply/discard; (7) JSON shown in Monaco never contains secret values (`{"@kv": name}` or `***`). |
+| AD-7 | Protected env | [exists] `IsProtected`, `ConfirmedEnvironment`, `ConfirmGlobal` in Core. [new] red frame + PROTECTED badge + lock; **read-only by default** — edit actions disabled until "Unlock editing" (`ProtectedUnlockState`, per circuit and env); apply → typed confirmation (button disabled until a case-insensitive match, no default Enter); pull from a protected env → separate warning. UI checks are an extra layer; Core makes the final check. |
+| AD-8 | Active env | [new] Push of local files and Pull preview only for the **active** env (`InvalidOperationException` in Application otherwise); Browse of a non-active env is remote-only; Make active = the `use` flow (FR-S6). Drafts and Compare work for any env. |
+| AD-9 | Long operations | [new] `IOperationRunner` (singleton): `Running`, `Recent` (last 20), exceptions mapped via `AzureErrors`. **Read** is cancelled by the component's token. **Write** (apply, pull, local edit, bind, save profile) ignores the UI token and runs with `ApplicationStopping` — closing a tab cannot cause a partial apply; action buttons are disabled while it runs; the outcome stays in `Recent` even if the circuit is gone. |
+| AD-10 | Extensibility | [new] Feature modules register themselves via DI records (G23): `TabRegistration`, `ProjectModeRegistration`, `SidebarSectionRegistration`, `StatusBarItemRegistration`, `ICommandContributor`. Each feature has `Features/<X>/<X>Feature.cs`. Cross-feature calls go through small interfaces (`IActivationFlow`, `IBindingFlow`) with no-op defaults (`TryAdd`) replaced by the owning feature. Workbench renders via `DynamicComponent`. |
+| AD-11 | Monaco | [new] `BlazorMonaco` (assets from the package, no CDN) wrapped by `CodeEditor`/`DiffEditor` — a switch to own interop touches only them (R5). Theme `azcfg-dark` matches §2.12. Schema `wwwroot/schemas/edit-json.schema.json`. Document limit 1 MB. |
+| AD-12 | Demo and test seams | [new] In-memory adapters live in `AzCfg.Infrastructure.InMemory` (T1) with `AddAzCfgInMemory(world)`; `--demo` seeds a temp sample workspace and an in-memory Azure (DH); `UiHostOptions.StateRoot` keeps UI files out of the real state in demo/tests. |
+| AD-13 | Errors | [new] `AzureErrors.Classify/Describe` (Infrastructure) → `OperationErrorKind` + message (Application) → message bar/toast (UI). Auth errors raise the workbench "sign in" bar. |
+
+### 5.4 Alternatives considered
+| Topic | Chosen | Rejected (why) |
+| --- | --- | --- |
+| Hosting | Blazor Server on loopback (one .NET stack, secrets stay server-side, runs anywhere, Aspire precedent) | MAUI Blazor Hybrid (no Linux, workload install); Photino.Blazor (small community — can wrap the same components later); Avalonia (full rewrite, no Monaco); SPA + API (two stacks, secrets cross an API) |
+| Components | Fluent UI Blazor v5 (Microsoft, VS Code/Azure look, dialogs/toasts/grid/splitters/icons/keys/theme) | Hand-made kit (previous revision: ~25 components to build and test); MudBlazor (Material look, less IDE-like); Radzen (heavier, not the target look) |
+| State | Scoped observable containers | Fluxor (boilerplate for a single-user local app) |
+| Editor | BlazorMonaco | Own Monaco interop (fallback only); CodeMirror (no equivalent diff editor) |
+| Stale edits | Core 3-way with `BaseJson` | UI re-export comparison (previous revision: detects but cannot merge) |
+| Tests | xunit + bUnit + `WebApplicationFactory` + demo world | Playwright (browser install, slow — next iteration, cheap thanks to `--demo`) |
 
 ---
 
-## 6. Структура і власність файлів
+## 6. Libraries
 
-```
-src/AzCfg.Ui/                                    Microsoft.NET.Sdk.Web; refs Core, Infrastructure; BlazorMonaco
-  AzCfg.Ui.csproj, Program.cs, appsettings.json  F1 (Program.cs фінальний, далі не змінюється)
-  Hosting/HostingExtensions.cs                   F1 мінімум → P2
-  Hosting/{AccessTokenGate,SecurityHeaders,InstanceLock,BrowserLauncher}.cs   P2
-  Application/
-    Contracts/**                                 F1 — усі типи 7.3 (один тип на файл)
-    PlatformServices.cs                          F1 (порожній AddUiPlatform) → P1, S1 (по рядку)
-    Workspace/  WorkspaceRegistry, WorkspaceService, DirectoryBrowser              S1
-    Environments/ EnvironmentService, EnvironmentRules                             S1
-    Azure/      AzureStatusService                                                 S1
-    Operations/ OperationRunner                                                    S1
-    Explorer/   ConfigurationExplorerService, ConfigTreeBuilder, SecretRevealService   S2
-    Sync/       SyncWorkflowService, EditJsonPatcher, SecretUris                   S2
-    Documents/  LocalDocumentService, RemoteDocumentService                        S2
-    Commands/   CommandRegistry                                                    P1
-  State/**                                       F1 (усі state-класи й реєстрації — робочі)
-  Components/
-    App.razor, Routes.razor, _Imports.razor      F1 (усі <link>/<script> одразу, див. F1)
-    DesignSystem/**                              P1 (+ ToastService, DialogService, DialogHost)
-    Layout/**                                    P1 (Workbench, ActivityBar, SidebarHost, TabStrip, TabHost,
-                                                    StatusBar, OperationsIndicator, ReconnectModal, WelcomeTab)
-    Editors/**                                   P2 (CodeEditor, DiffEditor, MonacoTheme)
-  Features/
-    FeatureRegistrations.cs                      F1
-    Projects/      ProjectsFeature.cs (F1 → S1 services → U1 ui), ProjectsSidebar, OpenFolderDialog,
-                   ProjectSetupWizard, ProjectSettingsTab                          U1
-    Environments/  EnvironmentsFeature.cs, EnvironmentsTab, ProfileWizard, EnvironmentSwitcher, AccountStatus  U1
-    Explorer/      ExplorerFeature.cs, ExplorerTab, Tree/**, Inspector/**          U2
-    Documents/     DocumentsFeature.cs, RemoteJsonTab, LocalFileTab                U3
-    Sync/          SyncFeature.cs, ChangesSidebar, PlanReviewTab, PullPreviewTab, ConflictView, ApplyDialog, VaultPicker  U3
-    CommandPalette/ CommandPaletteFeature.cs, CommandPalette, PlatformCommands     P1
-  wwwroot/css/{tokens,base}.css                  F1 порожні → P1
-  wwwroot/js/shortcuts.js                        F1 порожній → P1
-  wwwroot/schemas/edit-json.schema.json          P2
-  wwwroot/lib/lucide/LICENSE                     P1
+| Package | Version | Project | Why |
+| --- | --- | --- | --- |
+| `Microsoft.FluentUI.AspNetCore.Components` | 5.1.0 (GA 5.0.0 on 2026-09-28) | AzCfg.Ui | Component library, theme, dialogs, toasts, keys |
+| `Microsoft.FluentUI.AspNetCore.Components.Icons` | 5.1.0 | AzCfg.Ui | Fluent UI System Icons |
+| `BlazorMonaco` | 3.5.0 (has `net10.0`) | AzCfg.Ui | Monaco editor + diff editor, local assets |
+| `Microsoft.VisualStudio.SolutionPersistence` | 1.0.52 | AzCfg.Infrastructure | Official `.sln`/`.slnx` parser (used by the dotnet CLI) |
+| `Microsoft.Extensions.Hosting.Abstractions` | 10.0.10 | AzCfg.Ui.Application | `IHostApplicationLifetime` for `OperationRunner` |
+| `bunit` | 2.15.2 | AzCfg.Ui.Tests | Component tests |
+| `Microsoft.AspNetCore.Mvc.Testing` | 10.0.10 | AzCfg.Ui.Tests | `WebApplicationFactory<Program>` host tests |
+| `Microsoft.Extensions.TimeProvider.Testing` | 10.10.0 | AzCfg.Ui.Tests | `FakeTimeProvider` (30 s auto-hide, cache ages) |
 
-src/AzCfg.Core/  (лише додавання)
-  Abstractions/IWorkspaceScanner.cs, Model/{SolutionFormat,SolutionInfo,ConfigFileKind,ConfigFileInfo,WorkspaceProject,WorkspaceScan}.cs   F1
-  Mapping/JsonProjection.cs (+FromNestedJson), Sync/PushSource.cs, UseCases/{ISyncService,SyncService}.cs   B1
-
-src/AzCfg.Infrastructure/
-  Azure/{AzureErrors,AzureErrorKind}.cs          F1
-  DependencyInjection.cs, State/JsonUserStateStore.cs, Local/{WorkspaceScanner,CsprojDetector}.cs, AzCfg.Infrastructure.csproj   B2
-src/AzCfg.Cli/CliErrors.cs                       F1 (делегує AzureErrors)
-
-tests/AzCfg.Ui.Tests/                            F1: Microsoft.NET.Sdk.Razor; xunit + bunit; лінк Core.Tests/Fakes
-  Fakes/**                                       S1 (FakeWorkspaceScanner, FakeTokenCredential); U-задачі — fakes лише
-                                                 у своїй теці тестів (Features/<X>/Fakes), щоб не конфліктувати
-  Application/<Area>/**, Components/**, Hosting/**, State/**, Features/<X>/**, Integration/**, Security/**
-```
-
-### Пакети (додає лише F1, версії — у `Directory.Packages.props`)
-| Пакет | Проєкт | Навіщо |
-| --- | --- | --- |
-| `BlazorMonaco` (остання стабільна 3.x) | AzCfg.Ui | Monaco + diff editor, асети в `_content/` |
-| `Microsoft.VisualStudio.SolutionPersistence` (остання стабільна 1.x) | AzCfg.Infrastructure (PackageReference додає B2) | Офіційний парсер `.sln`/`.slnx` |
-| `bunit` (остання стабільна 2.x) | AzCfg.Ui.Tests | Тести компонентів |
-
-Lucide — без пакета: SVG-шляхи в компоненті `Icon` + `LICENSE` (ISC). Шрифти — системні стеки.
+**Fluent UI v5 facts verified in the 5.1.0 package XML docs** (P1 extends them in `docs/ui-components.md`):
+- Setup: `builder.Services.AddFluentUIComponents()`; `<FluentProviders />` in the layout; stylesheet
+  `_content/Microsoft.FluentUI.AspNetCore.Components/Microsoft.FluentUI.AspNetCore.Components.bundle.scp.css`; the
+  package's `*.lib.module.js` loads automatically as a Blazor JS initializer; `@using Microsoft.FluentUI.AspNetCore.Components`
+  and `@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons` in `_Imports.razor`.
+- Services: `IDialogService` (`ShowConfirmationAsync`, `ShowDialogAsync<TDialog>(Action<DialogOptions>)`,
+  `ShowDrawerAsync<T>`, `ShowMessageBoxAsync`, `CloseAsync(IDialogInstance, DialogResult)`); `INotificationService`
+  (`ShowToastAsync(Action<ToastOptions>)`, `CloseAllToastsAsync`); `IKeyCodeService`
+  (`RegisterListener(Func<FluentKeyCodeEventArgs, Task>)`, needs `FluentKeyCodeProvider`); `IThemeService`
+  (`SetThemeAsync(ThemeMode.Dark)`, `SetThemeAsync(ThemeSettings{ Color, Mode })`).
+- Components used: `FluentLayout`, `FluentMultiSplitter`(+`Pane`), `FluentAppBar`/`FluentAppBarItem` (activity bar),
+  `FluentTabs`/`FluentTab`, `FluentTreeView`/`FluentTreeItem` (workspace tree, `LazyLoadItems`), `FluentDataGrid<T>`
+  (`Virtualize`, `ItemSize`, `RowSize`, `OnRowClick`, `ItemKey`), `FluentMenu`/`FluentMenuButton`/`FluentMenuItem`,
+  `FluentMessageBar`, `FluentToast`, `FluentDialog`/`FluentDialogBody`, `FluentWizard`/`FluentWizardStep`, `FluentButton`,
+  `FluentSplitButton`, `FluentToggleButton`, `FluentTextInput`, `FluentCombobox`/`FluentSelect`/`FluentAutocomplete`,
+  `FluentCheckbox`, `FluentSwitch`, `FluentBadge`/`FluentCounterBadge`, `FluentTooltip`, `FluentSpinner`,
+  `FluentProgressBar`, `FluentSkeleton`, `FluentHighlighter`, `FluentStack`, `FluentText`, `FluentIcon<T>`,
+  `FluentErrorBoundary`, `FluentPopover`, `FluentOverlay`.
+- **Do not** use v4 names from memory (`FluentDesignTheme`, `IToastService`, `FluentDesignSystemProvider`, …).
 
 ---
 
-## 7. Контракти
+## 7. Contracts
 
-Обов'язкові 1:1 (зміна — лише за 0.5). XML `<summary>` у коді переносить коментарі з цих блоків.
+Binding 1:1 (change only via 0.6). XML `<summary>` in code carries the comments of these blocks. One type per file.
 
-### 7.1 Core (додавання)
+### 7.1 Core (additive)
 ```csharp
-// Abstractions/IWorkspaceScanner.cs — F1 (тип), B2 (реалізація)
+// ---- F1: AzCfg.Core.Abstractions / AzCfg.Core.Model (types only; implementation I1) ----
 public interface IWorkspaceScanner
 {
-    /// Solutions (only .csproj entries, absolute paths), projects (via IProjectDetector) and well-known config
-    /// files in each project folder. A broken solution file is skipped with a warning, never fails the scan.
+    /// Solutions (only .csproj entries, absolute paths), projects (via IProjectDetector) and well-known config files in
+    /// each project folder. A broken solution file is skipped with a logged warning and never fails the scan.
     Task<WorkspaceScan> ScanAsync(string rootPath, CancellationToken ct);
 }
-// Model/* — F1, один тип на файл
 public enum SolutionFormat { Sln, Slnx }
 public sealed record SolutionInfo(string Path, string Name, SolutionFormat Format, IReadOnlyList<string> ProjectPaths);
 public enum ConfigFileKind { AppSettings, AppSettingsEnvironment, AppSettingsLocal, LocalSettings, UserSecrets }
-/// EnvironmentName — для AppSettingsEnvironment (appsettings.{Env}.json); UserSecrets: Exists=false, якщо файлу ще немає.
+/// EnvironmentName only for AppSettingsEnvironment (appsettings.{Env}.json); UserSecrets: Exists = false when the file does not exist yet.
 public sealed record ConfigFileInfo(string Path, ConfigFileKind Kind, string? EnvironmentName, bool Exists);
 public sealed record WorkspaceProject(ProjectInfo Project, IReadOnlyList<ConfigFileInfo> ConfigFiles);
 public sealed record WorkspaceScan(string RootPath, IReadOnlyList<SolutionInfo> Solutions, IReadOnlyList<WorkspaceProject> Projects);
 
-// Mapping/JsonProjection.cs — B1
-/// Inverse of ToNestedJson. Yields the same set as JsonFileTarget.ReadAsync for the same content (arrays → index
-/// segments, scalars → strings, same case-insensitive duplicate rule, same handling of null/empty objects).
-/// JsonException for invalid JSON; ArgumentException for a non-object root or duplicate keys; messages name keys, never values.
-public static IReadOnlyList<LocalValue> FromNestedJson(string json);
+// ---- C1: AzCfg.Core.Mapping ----
+// KeyMapper — add:
+/// Secret name of a Key Vault secret URI: the segment after "secrets/" (a version segment is ignored).
+/// ArgumentException when the URI has no "secrets/<name>" segment. ThreeWayDiff.SecretName(Uri) delegates to it.
+public static string SecretNameOf(Uri secretUri);
 
-// Sync/PushSource.cs — B1: EditedJson і Promote друкують "Json = ***" (PrintMembers), FromEnvironment — як є.
+public sealed record ScopedKey(ConfigScope Scope, string Key);
 
-// UseCases/ISyncService.cs — B1
+/// Pure edits of edit-JSON text (format of JsonProjection.ToEditJson: nesting by ':', Global under "@global"; an object
+/// with "@kv" is a leaf). Returns indented JSON (2 spaces); existing properties keep their order, new ones are appended.
+/// Invalid JSON → JsonException; a path through a leaf, or a leaf where an object is (and vice versa) → ArgumentException
+/// naming the key. Messages never contain values.
+public static class EditJsonPatch
+{
+    public static string SetPlain(string editJson, ScopedKey key, string value);
+    public static string SetSecretReference(string editJson, ScopedKey key, string secretName);          // {"@kv": name}
+    /// {"@kv": name, "value": value}. The result contains the secret: pass it straight to Core; never store, log or render it.
+    public static string SetSecretValue(string editJson, ScopedKey key, string secretName, SecretString value);
+    /// No-op when missing; removes parents that become empty and an empty "@global".
+    public static string Remove(string editJson, ScopedKey key);
+    /// `target` with the node of `key` taken from `source` (removed from target when `source` has none).
+    public static string CopyKey(string source, string target, ScopedKey key);
+    /// Deep clone of the node of `key`, or null.
+    public static JsonNode? Get(string editJson, ScopedKey key);
+    /// Leaves that differ between two texts (added, removed or changed; a secret reference compares as its JSON),
+    /// ordered by scope (Global first) then key, ordinal.
+    public static IReadOnlyList<ScopedKey> ChangedKeys(string before, string after);
+}
+
+// ---- C1: AzCfg.Core.Sync ----
+public static class PlanSelection
+{
+    /// Restricts `plan` to `keys` (ordinal): Changes whose (After ?? Before).Key is in keys, Conflicts and Warnings whose
+    /// Key is in keys. A CreateSecret with Before == null and After == null (awaiting a vault, its key is unknown) is kept
+    /// regardless of keys. Recomputes TouchesGlobal (a selected change other than Delete whose After or Before has Scope
+    /// Global) and RequiresVaultChoice (a selected CreateSecret with After == null). Binding, Environment unchanged.
+    /// Applying the result updates the snapshot only for the selected keys (existing ApplyAsync rule).
+    public static SyncPlan Select(SyncPlan plan, IReadOnlySet<string> keys);
+}
+public enum ComparisonKind { Same, Different, OnlyLeft, OnlyRight }
+/// One key of two effective configurations (after ScopeMerger). Secret values are never involved.
+public sealed record ComparisonItem(string Key, ComparisonKind Kind, ConfigEntry? Left, ConfigEntry? Right);
+public static class EnvironmentComparer
+{
+    /// Matches by Key (ordinal), ordered by Key. Plain↔Plain: ordinal value equality. KeyVaultRef↔KeyVaultRef (or
+    /// ResolvedSecret, value ignored): equal KeyMapper.SecretNameOf (vault hosts may differ). Plain↔reference: Different.
+    /// Scope and label do not affect Kind. A duplicate key within one side → ArgumentException naming the key.
+    public static IReadOnlyList<ComparisonItem> Compare(IReadOnlyList<ConfigEntry> left, IReadOnlyList<ConfigEntry> right);
+}
+
+// ---- C2: AzCfg.Core.Sync ----
+// PushSource — change:
+/// Push from developer-edited JSON (azcfg edit, UI drafts). BaseJson = the edit JSON the edit started from. With BaseJson,
+/// PlanPushAsync uses it (parsed with FromEditJson and the known secrets) as the 3-way base instead of the current remote:
+/// Azure changes made after the export are not reverted, keys changed on both sides become Conflicts. Without BaseJson
+/// the behaviour is unchanged (base = current remote).
+public sealed record EditedJson(string Json, string? BaseJson = null) : PushSource;
+// EditedJson and Promote get PrintMembers: "Json = ***" (+ "BaseJson = ***" or "BaseJson = null"; Promote keeps
+// "FromEnvironment = <name>").
+
+/// Effective remote configuration of a service in one environment, without secret values: Entries = after LabelSelector
+/// (ADR 0008) and ScopeMerger (one entry per key, service overrides global), labels and ETags kept; Shadowed = global
+/// entries hidden by a service override.
+public sealed record RemoteConfig(ConfigEnvironment Environment, IReadOnlyList<ConfigEntry> Entries, IReadOnlyList<ConfigEntry> Shadowed)
+{
+    public IReadOnlyList<SyncWarning> Warnings { get; init; } = [];
+}
+public enum ConflictResolution { KeepLocal, KeepRemote }
+public enum ApplyBlocker { Conflicts, VaultChoiceRequired, EnvironmentNotConfirmed, GlobalNotConfirmed }
+public static class ApplyGuard
+{
+    /// Every reason ApplyAsync refuses `plan` with `options`, in this order; empty → ApplyAsync proceeds.
+    /// SyncService.ApplyAsync calls it and throws InvalidOperationException with today's message of the first blocker.
+    public static IReadOnlyList<ApplyBlocker> Check(SyncPlan plan, ApplyOptions options);
+}
+
+// ---- C2: AzCfg.Core.UseCases.ISyncService — add (CLI test stubs: => throw new NotSupportedException()) ----
+/// Reads the remote configuration of binding.Service in env. Never calls ISecretStore.
+Task<RemoteConfig> ReadRemoteConfigAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct);
 /// Pulls only `keys` of `env`, keeping every other local value. `env` must equal binding.ActiveEnvironment
-/// (OrdinalIgnoreCase), else InvalidOperationException (also when there is no active environment).
-/// Selected keys are overwritten unconditionally; a key missing remotely is removed locally; a KV reference goes to
-/// SecretsTarget, a plain value to ValuesTarget, and is removed from the other target. Same secrets-target safety check
-/// as PullAsync, before any write. The snapshot is updated only for `keys` (secrets as fingerprint).
-/// Returns written counts; Blocked = false, LocalChanges = [].
+/// (OrdinalIgnoreCase), else InvalidOperationException (also when there is no active environment). Before any write: the
+/// same gitignore and secrets-target safety steps as PullAsync. A selected key: remote plain → ValuesTarget (removed from
+/// SecretsTarget); KV reference → secret value to SecretsTarget (removed from ValuesTarget); missing remotely → removed
+/// locally; the scope marker follows the remote entry. Ignored keys are skipped (listed in Ignored). The snapshot is
+/// updated only for `keys` (secrets as fingerprint). Returns counts; Blocked = false, LocalChanges = [].
 Task<PullResult> PullSelectedAsync(ProjectBinding binding, ConfigEnvironment env, IReadOnlyCollection<string> keys, CancellationToken ct);
+/// Resolves a local-files conflict of `key` (active env only, same rule as PullSelectedAsync).
+/// KeepRemote = PullSelectedAsync([key]). KeepLocal = the snapshot item of `key` becomes the current remote item (removed
+/// when missing remotely); local files are untouched, so the next PlanPushAsync(LocalFiles) plans the local value
+/// (Add/Update; a local deletion is a Delete only with LocalFiles.Delete, else DeleteSkipped).
+Task ResolveConflictAsync(ProjectBinding binding, ConfigEnvironment env, string key, ConflictResolution resolution, CancellationToken ct);
 ```
 
 ### 7.2 Infrastructure
 ```csharp
-// Azure/AzureErrorKind.cs, Azure/AzureErrors.cs — F1
+// ---- F1: AzCfg.Infrastructure.Azure ----
 public enum AzureErrorKind { Auth, Forbidden, NotFound, PreconditionFailed, Network, Validation, Other }
 public static class AzureErrors
 {
-    public static string Describe(Exception ex);         // тексти CliErrors.Describe без змін + 404/412/мережа
+    /// Today's CliErrors.Describe texts unchanged, plus 404, 412 and network texts.
+    public static string Describe(Exception ex);
     /// AuthenticationFailedException, CredentialUnavailableException, 401 → Auth; 403 → Forbidden; 404 → NotFound;
-    /// 412 → PreconditionFailed; HttpRequestException, TaskCanceledException без скасування токена, RequestFailedException{Status:0} → Network;
-    /// ArgumentException, JsonException, InvalidOperationException → Validation; інше → Other.
+    /// 412 → PreconditionFailed; HttpRequestException, TaskCanceledException not caused by the token,
+    /// RequestFailedException{Status: 0} → Network; ArgumentException, JsonException, InvalidOperationException → Validation;
+    /// anything else → Other.
     public static AzureErrorKind Classify(Exception ex);
 }
-// DependencyInjection.AddAzCfg — B2: services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
-// AppConfigStore, SecretClient-фабрика KeyVaultSecretStore, ArmClient беруть його з IServiceProvider.
+// CliErrors.Describe(ex) => AzureErrors.Describe(ex).
+
+// ---- I1 ----
+// DependencyInjection.AddAzCfg: services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
+// AppConfigStore, the SecretClient factory of KeyVaultSecretStore and ArmClient take it from the IServiceProvider;
+// services.AddSingleton<IWorkspaceScanner, WorkspaceScanner>().
+// JsonUserStateStore: private SemaphoreSlim(1,1) around every write and the read-modify-write of SaveBindingAsync.
+
+// ---- T1: AzCfg.Infrastructure.InMemory (moved from tests/AzCfg.Cli.Tests/Scenario, behaviour unchanged, public) ----
+// InMemoryAppConfig, RemoteSetting, InMemorySecretStore, InMemoryUserStateStore, InMemoryLocalTarget (Kind = UserSecrets;
+// its xunit Assert helpers become LINQ Single(...) / InvalidOperationException), FixedProjectDetector, FixedResourceDiscovery.
+/// Unsigned JWT access token with "upn"/"preferred_username" and "tid" claims, valid for 1 hour; for tests and --demo.
+public sealed class StaticTokenCredential(string account = "demo@azcfg.local", string tenantId = "00000000-0000-0000-0000-000000000000") : TokenCredential;
+/// The in-memory Azure + user state of one test or demo session.
+public sealed class InMemoryWorld
+{
+    public InMemoryAppConfig AppConfig { get; } = new();
+    public InMemorySecretStore Secrets { get; } = new();
+    public InMemoryUserStateStore State { get; } = new();
+    public InMemoryLocalTarget UserSecrets { get; } = new();
+    public FixedResourceDiscovery Discovery { get; } = new();
+    public StaticTokenCredential Credential { get; init; } = new();
+    /// null keeps the real CsprojDetector (scans real folders).
+    public FixedProjectDetector? Detector { get; init; }
+}
+public static class InMemoryServiceCollectionExtensions
+{
+    /// Call after AddAzCfg(): replaces IConfigStore, ISecretStore, IUserStateStore, IResourceDiscovery and TokenCredential
+    /// with the world's instances, IProjectDetector when world.Detector is set, and the UserSecretsTarget registration of
+    /// ILocalTarget with world.UserSecrets (AppSettingsLocalTarget stays real).
+    public static IServiceCollection AddAzCfgInMemory(this IServiceCollection services, InMemoryWorld world);
+}
 ```
 
-### 7.3 Application (`AzCfg.Ui.Application.Contracts`, F1)
+### 7.3 Application (`AzCfg.Ui.Application`, F1; one type per file, folder = namespace suffix)
 ```csharp
-// --- Workspace ---------------------------------------------------------------
-public sealed record WorkspaceEntry(string RootPath, string DisplayName, DateTimeOffset LastOpened, bool Pinned);
-public interface IWorkspaceRegistry                                   // ui/workspaces.json; порядок: pinned, потім LastOpened desc
+// ---- Operations ----
+public enum OperationKind { Read, Write }
+public enum OperationErrorKind { Auth, Forbidden, NotFound, PreconditionFailed, Network, Validation, Other }
+public sealed record OperationInfo(Guid Id, string Title, OperationKind Kind, DateTimeOffset StartedAt);
+public sealed record OperationOutcome(OperationInfo Info, bool Succeeded, string? Message, DateTimeOffset FinishedAt);
+public abstract record OperationResult<T>
 {
-    Task<IReadOnlyList<WorkspaceEntry>> ListAsync(CancellationToken ct);
+    public sealed record Success(T Value) : OperationResult<T>;
+    public sealed record Failed(string Message, OperationErrorKind Kind) : OperationResult<T>;
+    public sealed record Cancelled : OperationResult<T>;
+}
+public interface IOperationRunner                                          // singleton
+{
+    IReadOnlyList<OperationInfo> Running { get; }
+    IReadOnlyList<OperationOutcome> Recent { get; }                        // last 20, newest first
+    event Action? Changed;
+    /// Read: cancelled by uiToken. Write: ignores uiToken, runs with ApplicationStopping (AD-9). Never throws.
+    Task<OperationResult<T>> RunAsync<T>(string title, OperationKind kind, Func<CancellationToken, Task<T>> work, CancellationToken uiToken);
+    Task<OperationResult<bool>> RunAsync(string title, OperationKind kind, Func<CancellationToken, Task> work, CancellationToken uiToken);
+}
+
+// ---- Security ----
+public static class SecretPolicy                                           // implemented by F1
+{
+    public const string Mask = "••••••";
+    /// AD-6 (3): true when the diff's Remote/Base value is StateValue.Secret, or `remote` is a KeyVaultRef/ResolvedSecret,
+    /// or `localSource` == binding.SecretsTarget while binding.SecretsTarget != binding.ValuesTarget.
+    public static bool IsSecret(DiffItem? diff, ConfigEntry? remote, LocalTargetBinding? localSource, ProjectBinding binding);
+}
+
+// ---- Workspace ----
+/// Root of the UI's own files. AzCfgUiApp registers new UiStatePaths(UiHostOptions.StateRoot); --demo re-registers it
+/// with the demo folder (last registration wins).
+public sealed record UiStatePaths(string Root);
+public sealed record WorkspaceEntry(string RootPath, string DisplayName, DateTimeOffset LastOpened, bool Pinned);
+public interface IWorkspaceRegistry                                        // <UiStatePaths.Root>/ui/workspaces.json
+{
+    Task<IReadOnlyList<WorkspaceEntry>> ListAsync(CancellationToken ct);  // pinned first, then LastOpened desc
     Task AddOrTouchAsync(string rootPath, CancellationToken ct);
-    Task RemoveAsync(string rootPath, CancellationToken ct);           // projects.json не чіпає
+    Task RemoveAsync(string rootPath, CancellationToken ct);              // never touches projects.json
     Task SetPinnedAsync(string rootPath, bool pinned, CancellationToken ct);
 }
 public sealed record ProjectNode(WorkspaceProject Project, ProjectBinding? Binding) { public string Id => Project.Project.CsprojPath; }
@@ -466,87 +856,110 @@ public sealed record WorkspaceTree(string RootPath, IReadOnlyList<SolutionNode> 
 public sealed record ProjectSetupProposal(ProjectInfo Project, ProjectResolution Resolution);
 public interface IWorkspaceService
 {
-    Task<WorkspaceTree> OpenAsync(string rootPath, CancellationToken ct);              // scan + binding lookup (G4) + registry touch
-    Task<ProjectSetupProposal> ProposeSetupAsync(ProjectInfo project, CancellationToken ct); // ResolveAsync(тека .csproj) + G20
-    /// New binding: RepoPath = тека .csproj. Existing: its RepoPath, VaultByEnvironment and ActiveEnvironment are kept (G5).
-    Task<ProjectBinding> BindAsync(ProjectInfo project, string service, LocalTargetBinding values, LocalTargetBinding secrets, CancellationToken ct);
-    Task<ProjectBinding> SetVaultAsync(ProjectBinding binding, string environment, Uri? vault, CancellationToken ct); // null → прибрати
+    /// Scan + binding lookup (G4) + registry touch.
+    Task<WorkspaceTree> OpenAsync(string rootPath, CancellationToken ct);
+    /// IProjectService.ResolveAsync(folder of the .csproj) + G19 for a bound project.
+    Task<ProjectSetupProposal> ProposeSetupAsync(ProjectNode project, CancellationToken ct);
+    /// New binding: RepoPath = folder of the .csproj. Existing (project.Binding): its RepoPath; VaultByEnvironment,
+    /// ActiveEnvironment and Ignore are kept (G5).
+    Task<ProjectBinding> BindAsync(ProjectNode project, string service, LocalTargetBinding values, LocalTargetBinding secrets, CancellationToken ct);
+    Task<ProjectBinding> SetVaultAsync(ProjectBinding binding, string environment, Uri? vault, CancellationToken ct); // null removes
+    Task<ProjectBinding> AddIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct);              // IProjectService
+    Task<ProjectBinding> RemoveIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct);
 }
 public sealed record DirectoryItem(string Name, string FullPath, bool HasDotNetProjects);
-public sealed record DirectoryListing(string? Path, string? Parent, IReadOnlyList<DirectoryItem> Items); // Path = null → корені
+public sealed record DirectoryListing(string? Path, string? Parent, IReadOnlyList<DirectoryItem> Items); // Path null → roots
 public interface IDirectoryBrowser
 {
-    Task<DirectoryListing> ListAsync(string? path, CancellationToken ct);   // лише теки, без прихованих; немає доступу → порожньо
+    Task<DirectoryListing> ListAsync(string? path, CancellationToken ct); // folders only, no hidden; no access → empty
     IReadOnlyList<string> Complete(string partialPath, int max = 20);
 }
 
-// --- Environments & Azure ----------------------------------------------------
+// ---- Environments ----
 public enum EnvironmentKind { Development, Staging, Production, Custom }
-public static class EnvironmentRules                                       // чисті функції (S1)
-{
-    public static bool IsActive(ProjectBinding binding, ConfigEnvironment env);   // ActiveEnvironment == Name, OrdinalIgnoreCase
-    /// Active (якщо є в списку) → "dev" → перше → null (G19, G30).
-    public static ConfigEnvironment? SelectDefault(IReadOnlyList<ConfigEnvironment> environments, ProjectBinding? binding);
-    /// IsProtected → Production; dev|development → Development; stage|stg|staging|test|qa → Staging; інакше Custom.
-    public static EnvironmentKind KindOf(ConfigEnvironment env);
-}
+// EnvironmentRules — static class created by S1 (not F1):
+//   bool IsActive(ProjectBinding binding, ConfigEnvironment env)              ActiveEnvironment == Name, OrdinalIgnoreCase
+//   ConfigEnvironment? SelectDefault(IReadOnlyList<ConfigEnvironment> envs, ProjectBinding? binding)   active (if listed) → "dev" → first → null
+//   EnvironmentKind KindOf(ConfigEnvironment env)     IsProtected → Production; dev|development → Development;
+//                                                     stage|stg|staging|test|qa|uat → Staging; else Custom
+/// Profile as saved plus the environments resolved for operations; Environments is empty when Profile is null.
+public sealed record EnvironmentsSnapshot(UserProfile? Profile, IReadOnlyList<ConfigEnvironment> Environments);
 public interface IEnvironmentService
 {
-    Task<IReadOnlyList<ConfigEnvironment>?> ListAsync(CancellationToken ct);       // null → профілю немає
+    Task<EnvironmentsSnapshot> LoadAsync(CancellationToken ct);
     Task<IReadOnlyList<EnvironmentCandidate>> DiscoverAsync(CancellationToken ct);
-    /// ArgumentException: порожня/дубльована назва (OrdinalIgnoreCase), endpoint не абсолютний https.
-    Task SaveAsync(IReadOnlyList<ConfigEnvironment> environments, CancellationToken ct);
+    Task<IReadOnlyList<string>> ListLabelsAsync(Uri store, CancellationToken ct);
+    /// Saves the whole profile as given (Mode, DefaultLabel, GitIgnoreLocalFiles included) and returns the new snapshot.
+    /// ArgumentException: empty or duplicate name (OrdinalIgnoreCase), endpoint not an absolute https URI.
+    Task<EnvironmentsSnapshot> SaveAsync(UserProfile profile, CancellationToken ct);
 }
 public enum ConnectionState { Unknown, Checking, Connected, AuthRequired, Forbidden, Unreachable }
 public sealed record AzureAccountStatus(ConnectionState State, string? Account, string? TenantId, string? Message);
 public sealed record EnvironmentHealth(string Environment, ConnectionState State, string? Message, DateTimeOffset CheckedAt);
-public interface IAzureStatusService                                       // singleton; кеш 5 хв
+public interface IAzureStatusService                                       // singleton; results cached 5 min
 {
     AzureAccountStatus Account { get; }
+    IReadOnlyDictionary<string, EnvironmentHealth> Environments { get; }  // by name, OrdinalIgnoreCase
     event Action? Changed;
+    /// Token for https://management.azure.com/.default; account/tenant from JWT claims (upn | unique_name |
+    /// preferred_username, tid; base64url decode without validation, display only). Token never stored or logged.
     Task<AzureAccountStatus> CheckAccountAsync(CancellationToken ct);
-    /// Проба: перший елемент IConfigStore.ReadAsync(env, service) (або ListServicePrefixesAsync, коли service = null).
+    /// Probe: first item of IConfigStore.ReadAsync(env, service), or of ListServicePrefixesAsync when service is null.
     Task<EnvironmentHealth> CheckEnvironmentAsync(ConfigEnvironment env, string? service, CancellationToken ct);
 }
 
-// --- Operations --------------------------------------------------------------
-public enum OperationKind { Read, Write }
-public sealed record OperationInfo(Guid Id, string Title, OperationKind Kind, DateTimeOffset StartedAt);
-public sealed record OperationOutcome(OperationInfo Info, bool Succeeded, string? Message, DateTimeOffset FinishedAt);
-public abstract record OperationResult<T>
-{
-    public sealed record Success(T Value) : OperationResult<T>;
-    public sealed record Failed(string Message, AzureErrorKind Kind) : OperationResult<T>;
-    public sealed record Cancelled : OperationResult<T>;
-}
-public interface IOperationRunner                                          // singleton
-{
-    IReadOnlyList<OperationInfo> Running { get; }
-    IReadOnlyList<OperationOutcome> Recent { get; }                        // останні 20
-    event Action? Changed;
-    /// Read: скасовується uiToken. Write: ігнорує uiToken, працює з ApplicationStopping (AD-10). Винятки не кидає.
-    Task<OperationResult<T>> RunAsync<T>(string title, OperationKind kind, Func<CancellationToken, Task<T>> work, CancellationToken uiToken);
-}
-
-// --- Explorer ----------------------------------------------------------------
-public enum ConfigValueKind { Plain, KeyVaultReference }
-public sealed record ConfigKeyView(
-    string Key, DiffKind? Status,                   // Status = null у remote-only
-    ConfigScope? Scope, ConfigValueKind Kind, bool IsSecret,
-    string? LocalValue, bool LocalMasked,           // LocalValue = null, якщо відсутнє або замасковане
-    string? RemoteValue,                            // лише plain
-    Uri? SecretUri, string? SecretName, string? VaultHost, LocalTargetKind? LocalSource);
-public sealed record ConfigTreeNode(string Segment, string Path, ConfigKeyView? Leaf, IReadOnlyList<ConfigTreeNode> Children, int ChangedCount, int ConflictCount);
-public sealed record ConfigurationView(ProjectBinding Binding, ConfigEnvironment Environment, bool IsRemoteOnly,
-    IReadOnlyList<ConfigKeyView> Keys, ConfigTreeNode Root, DateTimeOffset LoadedAt);
-public sealed record ConfigFilter(string? Text = null, bool ChangedOnly = false, bool ConflictsOnly = false, bool SecretsOnly = false, ConfigScope? Scope = null);
+// ---- Configuration (Browse, Compare, local values, reveal) ----
 public enum ConfigSide { Local, Remote }
-public interface IConfigurationExplorerService
+/// Value is null when Masked.
+public sealed record LocalCell(string? Value, bool Masked, LocalTargetBinding Source, ConfigScope Scope);
+/// Value and ShadowedGlobalValue only for plain values.
+public sealed record RemoteCell(string? Value, bool IsSecret, Uri? SecretUri, string? SecretName, string? VaultHost,
+    ConfigScope Scope, string? Label, string? ShadowedGlobalValue);
+/// Status null in remote-only views and for ignored keys.
+public sealed record ConfigRow(string Key, DiffKind? Status, bool IsSecret, bool IsIgnored, LocalCell? Local, RemoteCell? Remote);
+public sealed record ConfigurationView(ProjectBinding Binding, ConfigEnvironment Environment, bool IsRemoteOnly,
+    IReadOnlyList<ConfigRow> Rows, IReadOnlyList<SyncWarning> Warnings, DateTimeOffset LoadedAt);
+public sealed record ConfigFilter(string? Text = null, bool ChangedOnly = false, bool SecretsOnly = false, bool IgnoredOnly = false, ConfigScope? Scope = null);
+// ConfigFilters — static class created by S2: IReadOnlyList<ConfigRow> Apply(IReadOnlyList<ConfigRow> rows, ConfigFilter filter)
+//   text matches the key (ignore case) and plain unmasked values; never secret values.
+public interface IConfigurationService
 {
-    /// Активне: DiffAsync + ReadAsync обох цілей (джерело). Неактивне/немає активного: IConfigStore.ReadAsync + ScopeMerger.Merge, без резолву секретів.
+    /// Active env: DiffAsync + ReadRemoteConfigAsync + ReadAsync of each target (Source, Scope, ignored keys). Other env:
+    /// ReadRemoteConfigAsync only — IsRemoteOnly, no ISecretStore call. Masking per SecretPolicy. Ignored keys are rows
+    /// with IsIgnored = true and Status = null. Rows ordered by key (ordinal).
     Task<ConfigurationView> LoadAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct);
-    ConfigTreeNode Filter(ConfigurationView view, ConfigFilter filter);   // чиста; текст — ключ і plain-значення
-    string ToJson(ConfigurationView view, ConfigSide side);               // секрети як {"@kv": name}
+    /// Remote: ToEditJson of the remote entries ({"@kv": name}, "@global"). Local: nested JSON of local values with
+    /// secret values replaced by "***".
+    string ToJson(ConfigurationView view, ConfigSide side);
+}
+public abstract record CompareSide
+{
+    public sealed record Local : CompareSide;
+    public sealed record Remote(ConfigEnvironment Environment) : CompareSide;
+}
+public enum CompareResult { Same, Different, OnlyLeft, OnlyRight }
+/// Value only for plain values.
+public sealed record CompareCell(string? Value, bool IsSecret, string? SecretName, ConfigScope Scope, string? Label);
+public sealed record CompareRow(string Key, CompareResult Result, CompareCell? Left, CompareCell? Right);
+public sealed record ComparisonView(ProjectBinding Binding, CompareSide Left, CompareSide Right, IReadOnlyList<CompareRow> Rows,
+    int IgnoredCount, string LeftJson, string RightJson, DateTimeOffset LoadedAt);
+public interface ICompareService
+{
+    /// Remote↔Remote: two ReadRemoteConfigAsync + EnvironmentComparer (secrets by name). Local↔Remote (either order):
+    /// DiffAsync(binding, env), Local vs Remote ignoring Base; a local secret equals a remote one when
+    /// ISecretFingerprinter.Fingerprint(local) == remote fingerprint; ignored keys excluded (IgnoredCount).
+    /// Local↔Local → ArgumentException. JSON per IConfigurationService.ToJson rules.
+    Task<ComparisonView> CompareAsync(ProjectBinding binding, CompareSide left, CompareSide right, CancellationToken ct);
+}
+public interface ILocalValuesService
+{
+    /// Writes through ILocalTarget.ReadAsync/WriteAsync (full rewrite, ADR 0009 formatting) and keeps the key's scope
+    /// marker. Plain → ValuesTarget (removed from SecretsTarget); secret → SecretsTarget (removed from ValuesTarget).
+    /// Writing a secret re-checks InspectAsync(SecretsTarget).IsSafeForSecrets → InvalidOperationException, nothing written.
+    Task SetPlainAsync(ProjectBinding binding, string key, string value, CancellationToken ct);
+    Task SetSecretAsync(ProjectBinding binding, string key, SecretString value, CancellationToken ct);
+    Task RemoveAsync(ProjectBinding binding, string key, CancellationToken ct);              // no-op when missing
+    Task SetScopeAsync(ProjectBinding binding, string key, ConfigScope scope, CancellationToken ct); // //@global marker
 }
 public interface ISecretRevealService
 {
@@ -554,684 +967,905 @@ public interface ISecretRevealService
     Task<SecretString?> RevealLocalAsync(ProjectBinding binding, string key, CancellationToken ct);
 }
 
-// --- Sync --------------------------------------------------------------------
-/// ExportedAtOpen — export JSON на момент відкриття редактора (G15). PrintMembers не друкує Source і ExportedAtOpen.
-public sealed record PlanRequest(ProjectBinding Binding, ConfigEnvironment Environment, PushSource Source, string Title, string? ExportedAtOpen = null);
-/// Index — позиція в SyncPlan.Changes; Before/After — лише plain, інакше null.
-public sealed record ChangeRow(int Index, ChangeKind Kind, string Key, ConfigScope Scope, bool IsSecret, string? Before, string? After, string? SecretName);
-public sealed record PlanReview(PlanRequest Request, SyncPlan Plan, IReadOnlyList<ChangeRow> Rows, bool IsStale);
-public sealed record ApplyGate(bool CanApply, IReadOnlyList<string> BlockingReasons, bool RequiresTypedConfirmation, bool RequiresGlobalConfirmation, bool RequiresVaultChoice);
+// ---- Sync (push/pull previews, drafts) ----
+public enum ConflictChoice { KeepLocal, KeepRemote }
+public enum PushOrigin { LocalFiles, Draft }
+/// Key = (After ?? Before)?.Key, or the SecretName for a CreateSecret awaiting a vault (AwaitsVault). Before/After only plain.
+public sealed record ChangeRow(string Key, ChangeKind Kind, ConfigScope Scope, bool IsSecret, string? Before, string? After, string? SecretName, bool AwaitsVault);
+/// Base/Local/Remote only plain, else null.
+public sealed record ConflictRow(string Key, ConfigScope Scope, bool IsSecret, string? Base, string? Local, string? Remote);
+public sealed record PushPreview(ProjectBinding Binding, ConfigEnvironment Environment, PushOrigin Origin, SyncPlan Plan,
+    IReadOnlyList<ChangeRow> Changes, IReadOnlyList<ConflictRow> Conflicts, IReadOnlyList<SyncWarning> Warnings);
+/// Local/Remote only plain, else null.
+public sealed record PullRow(string Key, DiffKind Kind, bool IsSecret, string? Local, string? Remote);
+/// Incoming = Remote{Added,Modified,Deleted}; Conflicts = Conflict; LocalChanges = keys Local{Added,Modified,Deleted}.
+public sealed record PullPreview(ProjectBinding Binding, ConfigEnvironment Environment, IReadOnlyList<PullRow> Incoming,
+    IReadOnlyList<PullRow> Conflicts, IReadOnlyList<string> LocalChanges);
 public sealed record ApplyConfirmation(string? TypedEnvironmentName, bool GlobalConfirmed);
-public sealed record PullPreviewRow(string Key, DiffKind Kind, bool IsSecret, string? Local, string? Remote);  // Remote*/Conflict; секрети — null
-public sealed record PullPreview(ProjectBinding Binding, ConfigEnvironment Environment, IReadOnlyList<PullPreviewRow> Rows, IReadOnlyList<string> LocalChanges);
+public enum ApplyBlock { NothingSelected, Conflicts, VaultChoiceRequired, EnvironmentNotConfirmed, GlobalNotConfirmed }
 public interface ISyncWorkflowService
 {
-    /// LocalFiles для неактивного середовища → InvalidOperationException (AD-9).
-    Task<PlanReview> PlanAsync(PlanRequest request, CancellationToken ct);
-    Task<IReadOnlyList<AzureResource>> ListVaultsAsync(CancellationToken ct);          // за назвою
-    Task<PlanReview> ChooseVaultAsync(PlanRequest request, Uri vault, CancellationToken ct); // SetVaultAsync + PlanAsync
-    SyncPlan Select(SyncPlan plan, IReadOnlySet<int> changeIndexes);                   // чиста; TouchesGlobal перераховується
-    ApplyGate Evaluate(SyncPlan selected);                                             // чиста
-    Task<ApplyResult> ApplyAsync(SyncPlan selected, ApplyConfirmation confirmation, CancellationToken ct);
-    Task<PullPreview> PreviewPullAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct); // лише активне
-    /// Ключі локальних цілей, коли ActiveEnvironment = null (перший pull їх перезапише, G21); інакше [].
+    /// Active env only (AD-8), else InvalidOperationException. PlanPushAsync(LocalFiles(includeDeletes)).
+    Task<PushPreview> PreviewPushAsync(ProjectBinding binding, ConfigEnvironment env, bool includeDeletes, CancellationToken ct);
+    /// PlanPushAsync(IDraftService.ToPushSource(draft)); any env.
+    Task<PushPreview> PreviewDraftAsync(RemoteDraft draft, CancellationToken ct);
+    /// Core PlanSelection.Select; rows filtered accordingly.
+    PushPreview Select(PushPreview preview, IReadOnlySet<string> keys);
+    /// NothingSelected (no changes) + Core ApplyGuard mapped 1:1.
+    IReadOnlyList<ApplyBlock> Check(PushPreview selected, ApplyConfirmation confirmation);
+    Task<ApplyResult> ApplyAsync(PushPreview selected, ApplyConfirmation confirmation, CancellationToken ct);
+    Task<IReadOnlyList<AzureResource>> ListVaultsAsync(CancellationToken ct);              // ordered by name
+    /// Active env only. From DiffAsync.
+    Task<PullPreview> PreviewPullAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct);
+    /// Keys of the local targets when binding.ActiveEnvironment is null (a first pull replaces them, G20); else [].
     Task<IReadOnlyList<string>> UnmanagedLocalKeysAsync(ProjectBinding binding, CancellationToken ct);
     Task<PullResult> PullAsync(ProjectBinding binding, ConfigEnvironment env, bool force, CancellationToken ct);
     Task<PullResult> PullSelectedAsync(ProjectBinding binding, ConfigEnvironment env, IReadOnlyCollection<string> keys, CancellationToken ct);
-    /// «Keep local» (G26): export → патч локальним значенням ключа у scope Service → PlanRequest(EditedJson, ExportedAtOpen).
-    Task<PlanRequest> KeepLocalAsync(ProjectBinding binding, ConfigEnvironment env, string key, CancellationToken ct);
+    Task ResolveConflictAsync(ProjectBinding binding, ConfigEnvironment env, string key, ConflictChoice choice, CancellationToken ct);
 }
-public static class EditJsonPatcher   // чиста; текст edit JSON (формат ToEditJson); Global → під "@global"
-{
-    /// Створює проміжні об'єкти; лист на місці об'єкта або навпаки → ArgumentException (з ключем).
-    public static string SetPlain(string editJson, ConfigScope scope, string key, string value);
-    public static string SetSecret(string editJson, ConfigScope scope, string key, string secretName, SecretString value);
-    public static string Remove(string editJson, ConfigScope scope, string key);       // прибирає порожніх батьків
-}
-
-// --- Documents ---------------------------------------------------------------
+public sealed record DraftKey(ConfigScope Scope, string Key);
+public sealed record DraftSecret(string SecretName, SecretString Value);
+/// Pending Azure edits of one environment (AD-5). Json/BaseJson never contain secret values. PrintMembers prints only
+/// the environment name and counts.
+public sealed record RemoteDraft(ProjectBinding Binding, ConfigEnvironment Environment, string BaseJson, string Json,
+    IReadOnlyDictionary<DraftKey, DraftSecret> Secrets);
 public sealed record JsonDiagnostic(string Message, string? Key, int? Line, int? Column);
-public sealed record LocalDocument(LocalTargetBinding Target, string Json, bool IsSecretsTarget);
-public interface ILocalDocumentService
+public interface IDraftService
 {
-    Task<LocalDocument> OpenAsync(ProjectBinding binding, LocalTargetBinding target, CancellationToken ct); // ToNestedJson(ReadAsync), indented
-    IReadOnlyList<JsonDiagnostic> Validate(string json);                                // FromNestedJson
-    /// Невалідний JSON → ArgumentException; ціль секретів → повторний InspectAsync, небезпечна → InvalidOperationException.
-    Task SaveAsync(ProjectBinding binding, LocalTargetBinding target, string json, CancellationToken ct);
-}
-public sealed record RemoteDocument(ProjectBinding Binding, ConfigEnvironment Environment, string ExportedJson);
-public interface IRemoteDocumentService
-{
-    Task<RemoteDocument> OpenAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct);  // ExportJsonAsync
-    IReadOnlyList<JsonDiagnostic> Validate(string json);                                // FromEditJson(json, fingerprinter, {}), без мережі
-    Task<bool> IsStaleAsync(RemoteDocument document, CancellationToken ct);             // повторний export ≠ ExportedJson
-}
-
-// --- Commands & UI services --------------------------------------------------
-public sealed record UiCommand(string Id, string Title, string Category, string? Shortcut, Func<Task> Execute, Func<bool>? IsEnabled = null);
-public interface ICommandContributor { IEnumerable<UiCommand> Commands { get; } }      // scoped; реєструє кожна фіча
-public interface ICommandRegistry                                                      // scoped (P1)
-{
-    IReadOnlyList<UiCommand> All { get; }                                              // contributors + динамічні
-    IDisposable Register(UiCommand command);
-    event Action? Changed;
-}
-public enum ToastLevel { Info, Success, Warning, Error }
-public interface IToastService { void Show(string message, ToastLevel level = ToastLevel.Info, string? details = null); }
-public sealed class DialogReference { public void Close(object? result = null); }      // каскадний параметр у вмісті діалогу
-public interface IDialogService                                                        // scoped (P1, DialogHost у Workbench)
-{
-    Task<bool> ConfirmAsync(string title, string message, string confirmText = "OK", bool danger = false);
-    Task<bool> TypedConfirmAsync(string title, string message, string expected);       // збіг ignore case, як у Core
-    Task<object?> ShowAsync(Type component, string title, IReadOnlyDictionary<string, object?>? parameters = null);
+    Task<RemoteDraft> StartAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct); // export; Base == Json
+    RemoteDraft SetValue(RemoteDraft draft, DraftKey key, string value);
+    /// Secret name: the existing reference's name (Json, else BaseJson), else
+    /// KeyMapper.ToKeyVaultSecretName(KeyMapper.ToStoreKey(scope, service, key)). Json gets {"@kv": name}.
+    RemoteDraft SetSecretValue(RemoteDraft draft, DraftKey key, SecretString value);
+    RemoteDraft MoveToKeyVault(RemoteDraft draft, DraftKey key);       // the plain value becomes the secret value
+    RemoteDraft Remove(RemoteDraft draft, DraftKey key);
+    RemoteDraft Revert(RemoteDraft draft, DraftKey key);               // CopyKey(Base → Json), drops its pending secret
+    /// Monaco edits; keeps Secrets whose key still holds {"@kv"} with the same name.
+    RemoteDraft ReplaceJson(RemoteDraft draft, string json);
+    /// FromEditJson on the injected text; no network; messages and keys only, never values.
+    IReadOnlyList<JsonDiagnostic> Validate(RemoteDraft draft);
+    /// EditJsonPatch.ChangedKeys(BaseJson, Json) ∪ Secrets keys.
+    IReadOnlyList<DraftKey> PendingKeys(RemoteDraft draft);
+    /// EditedJson(Json with secret values injected via EditJsonPatch.SetSecretValue, BaseJson).
+    PushSource ToPushSource(RemoteDraft draft);
+    /// Fresh export; KeepRemote: CopyKey(fresh → Json); KeepLocal: CopyKey(fresh → BaseJson).
+    Task<RemoteDraft> ResolveConflictAsync(RemoteDraft draft, string key, ConflictChoice choice, CancellationToken ct);
 }
 ```
 
-### 7.4 State і реєстрації (`AzCfg.Ui.State`, F1 — робоча реалізація)
+### 7.4 State (`AzCfg.Ui.Application.State`, F1 — working implementation, scoped)
 ```csharp
-public enum TabKind { Welcome, Explorer, RemoteJson, LocalFile, PlanReview, PullPreview, Environments, ProjectSettings }
-public sealed record TabDescriptor(TabKind Kind, string? ProjectId = null, string? Environment = null, string? Discriminator = null); // ключ дедуплікації
-public sealed record EditorTab(Guid Id, TabDescriptor Descriptor, string Title, bool IsDirty, bool IsProtected, object? Payload, bool IsLoaded);
-public sealed class EditorTabsState                    // scoped
-{
-    public const int MaxLoaded = 12;
-    public IReadOnlyList<EditorTab> Tabs { get; }
-    public Guid? ActiveId { get; }
-    public event Action? Changed;
-    public Guid Open(TabDescriptor descriptor, string title, object? payload = null, bool isProtected = false); // наявний → активувати, оновити payload/title
-    public bool RequestClose(Guid id);                 // false → dirty, потрібне підтвердження
-    public void ForceClose(Guid id);
-    public void SetDirty(Guid id, bool dirty);
-    public void Activate(Guid id);                     // вантажить вкладку; > MaxLoaded → вивантажити найстарішу неактивну не-dirty
-}
-public sealed class WorkspaceState                     // scoped
+public sealed class WorkspaceState
 {
     public WorkspaceTree? Tree { get; }
-    public IReadOnlyList<ConfigEnvironment>? Environments { get; }   // null → профілю немає (G28)
-    public ProjectNode? SelectedProject { get; }
-    public ConfigEnvironment? SelectedEnvironment { get; }
+    public EnvironmentsSnapshot? Environments { get; }          // null until loaded; Profile null → first run
+    public string? SelectedProjectId { get; }
     public event Action? Changed;
-    public void SetTree(WorkspaceTree? tree); public void SetEnvironments(IReadOnlyList<ConfigEnvironment>? environments);
-    public void Select(ProjectNode? project, ConfigEnvironment? environment);
-    public void UpdateBinding(string projectId, ProjectBinding binding);   // замінює ProjectNode у Tree і SelectedProject
+    public void SetTree(WorkspaceTree? tree);
+    public void SetEnvironments(EnvironmentsSnapshot? environments);
+    public void SelectProject(string? projectId);
     public ProjectNode? FindProject(string projectId);
+    public void UpdateBinding(string projectId, ProjectBinding binding);   // replaces the node in Tree
 }
-public sealed class ExplorerState                      // scoped
+public enum ProjectMode { Browse, Compare, Sync }
+public enum SyncView { Push, Pull, Draft }
+public sealed class ProjectSession                               // one per open project tab
 {
-    public ConfigurationView? View { get; } public ConfigFilter Filter { get; } public string? SelectedKey { get; }
+    public ProjectSession(string projectId);
+    public string ProjectId { get; }
+    public string? EnvironmentName { get; }                      // selected env
+    public ProjectMode Mode { get; }                             // default Browse
+    public SyncView SyncView { get; }                            // default Push
+    public ConfigFilter Filter { get; }
+    public string? SelectedKey { get; }
+    public bool JsonView { get; }
+    public ConfigurationView? View { get; }
+    public CompareSide? CompareLeft { get; }
+    public CompareSide? CompareRight { get; }
+    public ComparisonView? Comparison { get; }
+    public IReadOnlyDictionary<string, RemoteDraft> Drafts { get; } // by env name, OrdinalIgnoreCase
     public event Action? Changed;
-    public void SetView(ConfigurationView? view); public void SetFilter(ConfigFilter filter); public void Select(string? key);
-    public void Invalidate(string? projectId = null, string? environment = null);   // null → усе; View = null → вкладка перезавантажує
+    public void SetEnvironment(string name);                     // a different name clears View and Comparison
+    public void SetMode(ProjectMode mode);
+    public void SetSyncView(SyncView view);
+    public void SetFilter(ConfigFilter filter);
+    public void Select(string? key);
+    public void SetJsonView(bool on);
+    public void SetView(ConfigurationView? view);
+    public void SetComparison(CompareSide left, CompareSide right, ComparisonView? view);
+    public void SetDraft(string environment, RemoteDraft? draft, int pendingCount); // null removes
+    public RemoteDraft? DraftFor(string environment);
+    public int PendingCount(string environment);
+    public int TotalPending { get; }
+    public void Invalidate();                                    // View = Comparison = null; drafts kept
 }
-public sealed class ProtectedUnlockState               // scoped; ключ — назва середовища, OrdinalIgnoreCase
+public sealed class ProjectSessions
 {
-    public bool IsUnlocked(string environment); public void Unlock(string environment); public void Lock(string environment);
+    public ProjectSession GetOrCreate(string projectId);
+    public bool TryGet(string projectId, out ProjectSession session);
+    public void Close(string projectId);
+    public void InvalidateAll();
     public event Action? Changed;
 }
-public enum SidebarView { Projects, Changes, Environments }
+public sealed class ProtectedUnlockState                         // key: env name, OrdinalIgnoreCase
+{
+    public bool IsUnlocked(string environment);
+    public void Unlock(string environment);
+    public void Lock(string environment);
+    public event Action? Changed;
+}
+public enum TabKind { Welcome, Project, Settings }
+public sealed record TabDescriptor(TabKind Kind, string? ProjectId = null);   // dedupe key
+public sealed record WorkbenchTab(Guid Id, TabDescriptor Descriptor, string Title, bool IsDirty, bool IsLoaded);
+public sealed class TabsState
+{
+    public const int MaxLoaded = 8;
+    public IReadOnlyList<WorkbenchTab> Tabs { get; }
+    public Guid? ActiveId { get; }
+    public event Action? Changed;
+    public Guid Open(TabDescriptor descriptor, string title);    // existing → activate (title updated)
+    public bool RequestClose(Guid id);                           // false → dirty, needs confirmation
+    public void ForceClose(Guid id);
+    public void SetDirty(Guid id, bool dirty);
+    public void Activate(Guid id);                               // loads it; > MaxLoaded → unload the oldest inactive non-dirty
+}
+public sealed class WorkbenchNavigator(TabsState tabs, ProjectSessions sessions, WorkspaceState workspace)
+{
+    /// Opens/activates the project tab and applies the optional env, mode and selected key to its session.
+    public void OpenProject(string projectId, string? environment = null, ProjectMode? mode = null, string? key = null);
+    public void OpenSettings();
+    public void OpenWelcome();
+}
+```
+
+### 7.5 UI shared contracts (`AzCfg.Ui.Shared`, F1)
+```csharp
+public sealed record TabRegistration(TabKind Kind, Type Component);               // [Parameter, EditorRequired] WorkbenchTab Tab
+public sealed record ProjectModeRegistration(ProjectMode Mode, Type Component);   // [Parameter, EditorRequired] ProjectSession Session
+public sealed record SidebarSectionRegistration(string Id, string Title, Type Component, int Order);
 public enum StatusBarAlignment { Left, Right }
-public sealed record TabRegistration(TabKind Kind, Type Component);           // компонент має [Parameter] EditorTab Tab
-public sealed record SidebarRegistration(SidebarView View, Type Component, string Icon, string Title, int Order);
 public sealed record StatusBarItemRegistration(Type Component, StatusBarAlignment Alignment, int Order);
-public static class UiRegistrationExtensions
+public static class UiRegistrationExtensions                                       // duplicate Kind/Mode/Id → InvalidOperationException at registration
 {
-    public static IServiceCollection AddTab(this IServiceCollection s, TabKind kind, Type component);
-    public static IServiceCollection AddSidebar(this IServiceCollection s, SidebarView view, Type component, string icon, string title, int order);
-    public static IServiceCollection AddStatusBarItem(this IServiceCollection s, Type component, StatusBarAlignment alignment, int order);
+    public static IServiceCollection AddTab(this IServiceCollection services, TabKind kind, Type component);
+    public static IServiceCollection AddProjectMode(this IServiceCollection services, ProjectMode mode, Type component);
+    public static IServiceCollection AddSidebarSection(this IServiceCollection services, string id, string title, Type component, int order);
+    public static IServiceCollection AddStatusBarItem(this IServiceCollection services, Type component, StatusBarAlignment alignment, int order);
+    public static IServiceCollection AddCommands<TContributor>(this IServiceCollection services) where TContributor : class, ICommandContributor; // scoped
 }
-```
-
-**Вкладки** (дедуплікація за `TabDescriptor`):
-| TabKind | ProjectId | Environment | Discriminator | Payload | Власник |
-| --- | --- | --- | --- | --- | --- |
-| Welcome | — | — | — | — | P1 |
-| Explorer | так | так | — | — | U2 |
-| RemoteJson | так | так | — | — | U3 |
-| LocalFile | так | — | `"values"` / `"secrets"` | — | U3 |
-| PlanReview | так | так | — | `PlanRequest` (нова заміщує стару) | U3 |
-| PullPreview | так | так | — | — | U3 |
-| Environments | — | — | — | — | U1 |
-| ProjectSettings | так | — | — | — | U1 |
-
----
-
-## 8. Дизайн-система і UX
-
-### 8.1 Принципи «AzCfg Dark»
-Workbench як у VS Code (activity bar → sidebar → вкладки → status bar); тиха естетика редактора, контраст шарами
-фону, моноширинні ключі/значення; дерево + таблиця + інспектор; кольорова «таблетка» середовища всюди, де є його
-контекст; клавіатура першочергово (`Ctrl+K`); безпека видима (секрет — `key-round` + маска, protected — червоний замок).
-
-### 8.2 Токени (`wwwroot/css/tokens.css`, назви фіксовані)
-```css
-:root {
-  --az-bg-0: #0d0f13; --az-bg-1: #13161b; --az-bg-2: #191d23; --az-bg-3: #20252d; --az-bg-4: #2a303a;
-  --az-border: #262b33; --az-border-strong: #353c47;
-  --az-fg-1: #e6e8eb; --az-fg-2: #a4abb6; --az-fg-3: #6c7480; --az-fg-on-accent: #0d0f13;
-  --az-accent: #5b9dff; --az-accent-muted: rgba(91,157,255,.16);
-  --az-success: #3fb68b; --az-warning: #e5a43b; --az-danger: #f0605d; --az-info: #5aa9e6;
-  --az-env-dev: #3fb68b; --az-env-stage: #e5a43b; --az-env-prod: #f0605d; --az-env-custom: #a78bfa;
-  --az-diff-added: #3fb68b; --az-diff-modified: #e5a43b; --az-diff-deleted: #f0605d; --az-diff-conflict: #f472b6; --az-diff-remote: #5aa9e6;
-  --az-font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --az-font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace;
-  --az-text-xs: 11px; --az-text-sm: 12px; --az-text-md: 13px; --az-text-lg: 15px; --az-text-xl: 18px;
-  --az-space-1: 4px; --az-space-2: 8px; --az-space-3: 12px; --az-space-4: 16px; --az-space-6: 24px;
-  --az-radius-sm: 4px; --az-radius-md: 6px; --az-radius-lg: 10px; --az-row-h: 28px; --az-control-h: 30px;
-  --az-shadow-overlay: 0 12px 32px rgba(0,0,0,.45); --az-focus-ring: 0 0 0 2px var(--az-accent);
+public sealed record UiCommand(string Id, string Title, string Category, string? Shortcut, Func<Task> Execute, Func<bool>? IsEnabled = null);
+public interface ICommandContributor { IEnumerable<UiCommand> Commands { get; } }
+public interface ICommandRegistry                                                 // scoped; implemented by P1
+{
+    IReadOnlyList<UiCommand> All { get; }                                         // contributors + dynamic
+    IDisposable Register(UiCommand command);
+    Task<bool> ExecuteAsync(string id);                                           // false: unknown or disabled
+    event Action? Changed;
 }
+public static class CommandIds { /* every id of §2.10 + workspace.openFolder, workspace.refresh, project.bind,
+    project.settings, env.setup, env.manage, env.makeActive, project.unlock, project.lock, draft.discard,
+    sync.pullSelected — const string each */ }
+/// Make `environment` active for the project (FR-S6). Implemented by U4; default (F1) shows "not available yet".
+public interface IActivationFlow { Task<bool> MakeActiveAsync(string projectId, ConfigEnvironment environment); }
+/// Bind / re-bind wizard (FR-W5). Implemented by U1; default (F1) shows "not available yet".
+public interface IBindingFlow { Task<bool> BindAsync(string projectId); }
 ```
-`bg-0` — застосунок/activity bar, `bg-1` — sidebar/панелі, `bg-2` — editor/картки, `bg-3` — hover/input, `bg-4` — selected.
-Monaco-тема `azcfg-dark` — з тих самих значень.
-
-### 8.3 Layout
-```
-┌──┬────────────────┬──────────────────────────────────────────────┬───────────────┐
-│AB│ Sidebar        │ [Explorer · api · dev] [Remote JSON · prod ●] │               │
-│  │ (Projects /    ├──────────────────────────────────────────────┤  Inspector    │
-│  │  Changes /     │ env pills: (dev●) (stage) (PROD🔒)  [search]  │  (у вкладці   │
-│  │  Environments) │ tree / JSON view                              │   Explorer)   │
-├──┴────────────────┴──────────────────────────────────────────────┴───────────────┤
-│ Status: 👤 user@tenant · ● dev connected · api-service · ⟳ 1 operation · Ctrl+K   │
-└───────────────────────────────────────────────────────────────────────────────────┘
-```
-Activity bar 48px; sidebar 280px (splitter 200–480); status bar 24px; inspector 360px.
-Protected у вкладці: 2px верхня рамка `--az-env-prod`, бейдж `PROTECTED`, замок на вкладці.
-
-### 8.4 Компоненти (P1)
-`Icon`, `Button` (primary/secondary/ghost/danger; loading), `IconButton` (tooltip), `Badge` (neutral/success/warning/danger/info),
-`EnvPill` (колір за `EnvironmentKind`, замок, крапка «active»), `TextInput`, `PasswordInput` (значення лише в `SecretString`),
-`SearchBox` (debounce 150 мс, `Esc` очищає), `Select`, `Checkbox` (tri-state), `Dialog` (focus trap, `Esc`), `ConfirmDialog`,
-`TypedConfirmDialog` (кнопка активна лише при збігу ignore case; без autofocus на кнопці), `Toolbar`, `Tooltip`, `Spinner`,
-`Skeleton`, `EmptyState` (іконка, заголовок, текст, дія), `Banner` (info/warning/danger, Retry, «Copy details»),
-`ToastHost` + `ToastService`, `DialogHost` + `DialogService`, `Splitter`, `TreeView<T>` (`Virtualize` > 500 вузлів, ↑↓←→ Enter).
-
-Lucide: `folder`, `folder-open`, `file-json`, `file-cog`, `file-lock`, `key-round`, `lock`, `lock-open`, `shield-alert`, `cloud`,
-`cloud-upload`, `cloud-download`, `git-compare`, `search`, `command`, `settings`, `refresh-cw`, `plus`, `trash-2`, `pencil`, `eye`,
-`eye-off`, `check`, `x`, `triangle-alert`, `info`, `loader-circle`, `chevron-right`, `chevron-down`, `layers`, `server`, `globe`,
-`circle-user`, `copy`, `undo-2`, `save`, `filter`, `list-tree`, `braces`, `link`. Невідома назва → `ArgumentException`.
-
-### 8.5 Візуальні коди
-| Стан | Візуал |
-| --- | --- |
-| `LocalAdded/Modified/Deleted` | крапка `--az-diff-added/modified/deleted` + літера A/M/D |
-| `RemoteAdded/Modified/Deleted` | `cloud-download` кольору `--az-diff-remote` |
-| `Conflict` | `--az-diff-conflict`, `git-compare`, завжди нагорі в Changes |
-| Секрет | `key-round` + `••••••` + `eye` (Reveal) |
-| Global scope | бейдж `global` (info) |
-| Підключення | ● зелена Connected, ● жовта Checking, ● червона AuthRequired/Forbidden/Unreachable |
-
-### 8.6 UX-стани і шорткати
-- Loading: skeleton-рядки; спінер у кнопці; операції — у status bar.
-- Empty: «Open a folder», «Set up environments», «Bind this project», «No keys for this service in <env>»,
-  «<env> is not active — showing remote only. Make active».
-- Помилки: inline `Banner` з `OperationResult.Failed.Message` + Retry; transient — toast; «Copy details» — тип винятку
-  і повідомлення (Core не кладе значення в повідомлення). Auth required — banner на весь workbench з `az login` + Retry.
-- Шорткати: `Ctrl+K`/`Ctrl+Shift+P` палітра, `Ctrl+S` зберегти/Review, `Ctrl+Shift+F` формат, `Ctrl+W` закрити вкладку,
-  `Ctrl+Shift+E` Projects, `Ctrl+Shift+G` Changes, `F5` Refresh.
 
 ---
 
-## 9. Кодстайл і правила реалізації
-
-Загальне (як у наявному коді Core/Infrastructure):
-- C# latest: file-scoped namespaces, primary constructors, collection expressions (`[]`, `[.. x]`), expression-bodied члени,
-  pattern matching (`is { } x`, `switch`-вирази), `var`. Компактно: короткий метод — один вираз; без порожніх рядків-розпірок
-  всередині коротких методів.
-- Один тип на файл (вкладені record-варіанти, як `ConfigValue.Plain`, — дозволені). Моделі — `sealed record`, immutable.
-- Коментарі — лише XML `<summary>` на публічних контрактах/сервісах із поведінкою і правилами помилок; без коментарів,
-  що переказують код.
-- Async: `CancellationToken ct` останнім параметром, без `Async`-методів без токена; `ConfigureAwait` не використовується.
-- Винятки Application: `ArgumentException` (невалідний ввід), `InvalidOperationException` (заборонений стан); повідомлення
-  називають ключ, ніколи значення.
-- Без нових абстракцій поза розділом 7; без `static` змінного стану; без mock-бібліотек; без нових пакетів.
-- Логи: `ILogger<T>`, лише ключі/назви операцій/типи винятків. Ніколи — значення, `PlanRequest`, `PushSource`, `SyncPlan`, токени.
-
-Razor:
-- `.razor` з коротким `@code`; `.razor.cs` (partial) — коли код > ~80 рядків. Стилі — `.razor.css`, лише через токени 8.2.
-- Параметри `[Parameter, EditorRequired]` де обов'язкові; події — `EventCallback<T>`.
-- Компоненти не містять бізнес-логіки: виклик Application через `IOperationRunner.RunAsync`, результат —
-  `switch` по `Success/Failed/Cancelled`.
-- Підписка на події state/singleton: в `OnInitialized`, обробник `() => InvokeAsync(StateHasChanged)`, відписка в `Dispose` (G29).
-- Read-операції компонента — з `CancellationTokenSource`, що скасовується в `Dispose`.
-- Значення секрету в компоненті — лише поле `SecretString?`, `Reveal()` — безпосередньо в розмітці Reveal-блоку; очищення при Hide/`Dispose`.
-
-Тести:
-- xunit, назви `Method_Condition_Result` (як у `tests/AzCfg.Core.Tests`). Fakes — ручні; Core-fakes лінкуються з
-  `tests/AzCfg.Core.Tests/Fakes`. Application тестується на **реальних** `SyncService`/`ProjectService`/`SetupService` + fakes портів.
-- bUnit 2.x: `BunitContext`, `Render<T>`, `JSInterop.Mode = JSRuntimeMode.Loose` для Monaco.
-- Кожен пункт «Приймання» задачі — щонайменше один тест (крім явно позначених «вручну»).
+## 8. Solution layout and file ownership
+```
+src/AzCfg.Core/                                  (additive only)
+  Abstractions/IWorkspaceScanner.cs, Model/{SolutionFormat,SolutionInfo,ConfigFileKind,ConfigFileInfo,WorkspaceProject,WorkspaceScan}.cs  F1
+  Mapping/{KeyMapper.cs (+SecretNameOf), ScopedKey.cs, EditJsonPatch.cs}, Sync/{ThreeWayDiff.cs (delegate only), PlanSelection.cs,
+    EnvironmentComparer.cs, ComparisonItem.cs, ComparisonKind.cs}                                                       C1
+  Sync/{PushSource.cs, RemoteConfig.cs, ConflictResolution.cs, ApplyGuard.cs, ApplyBlocker.cs}, UseCases/{ISyncService.cs, SyncService.cs}  C2
+src/AzCfg.Infrastructure/
+  Azure/{AzureErrors,AzureErrorKind}.cs                                                                                 F1
+  InMemory/**                                                                                                           T1
+  DependencyInjection.cs, AzCfg.Infrastructure.csproj, State/JsonUserStateStore.cs, Local/{WorkspaceScanner,CsprojDetector}.cs  I1
+src/AzCfg.Cli/CliErrors.cs                                                                                              F1
+src/AzCfg.Ui.Application/
+  AzCfg.Ui.Application.csproj, ApplicationServices.cs (AddAzCfgUiApplication → area Add*Services + scoped state)         F1
+  Operations/  contracts F1; OperationRunner, OperationErrors, OperationServices.cs (F1 empty → S1)                     S1
+  Security/SecretPolicy.cs                                                                                              F1
+  Workspace/   contracts F1; WorkspaceRegistry, WorkspaceService, BindingLocator, DirectoryBrowser, WorkspaceServices.cs S1
+  Environments/ contracts F1; EnvironmentRules, EnvironmentService, AzureStatusService, JwtClaims, EnvironmentServices.cs S1
+  Configuration/ contracts F1; ConfigurationService, ConfigFilters, CompareService, LocalValuesService,
+                 SecretRevealService, ConfigurationServices.cs                                                          S2
+  Sync/        contracts F1; SyncWorkflowService, DraftService, PlanRows, SyncServices.cs                               S3
+  State/**                                                                                                              F1
+src/AzCfg.Ui/
+  AzCfg.Ui.csproj, Program.cs, appsettings.json, Properties/launchSettings.json                                         F1
+  Hosting/{AzCfgUiApp.cs, UiHostOptions.cs}                                                                             F1
+  Hosting/HostSecurityExtensions.cs (F1 empty UseAzCfgHostSecurity/MapAzCfgEndpoints → P2), Hosting/{AccessToken,
+    SecurityHeadersMiddleware,BrowserLauncher}.cs                                                                       P2
+  Demo/DemoServiceCollectionExtensions.cs (F1 no-op → DH), Demo/**                                                     DH
+  Shared/** (§7.5, no-op flows)                                                                                         F1
+  Components/{App.razor, Routes.razor, _Imports.razor}                                                                  F1
+  Components/Pages/Home.razor, Components/Layout/MainLayout.razor (F1 placeholders → P1), Components/Spike/** (F1, P1 deletes)
+  Components/Layout/** (Workbench, ActivityBar, SidebarHost, TabStrip, TabHost, StatusBar, OperationsIndicator,
+    WelcomeTab, CommandPalette, AuthBar)                                                                                P1
+  Components/Common/** (EnvPill, EnvironmentSwitcher, StatusDot, DiffBadge, SecretValue, InspectorPane, ErrorBar,
+    EmptyState, TypedConfirmDialog, DialogServiceExtensions)                                                            P1
+  Components/KeyTree/** (KeyTreeModel, KeyTreeRow, KeyTreeGrid)                                                        P1
+  Components/Editors/** (CodeEditor, DiffEditor, MonacoSetup)                                                          P2
+  Features/FeatureRegistrations.cs                                                                                     F1
+  Features/Platform/** (PlatformFeature.cs F1 empty → P1; CommandRegistry, FuzzyMatcher, KeyBindings, PlatformCommands, LayoutState)  P1
+  Features/Workspace/**, Features/Environments/**   (each <X>Feature.cs F1 empty)                                       U1
+  Features/Project/**, Features/Browse/**                                                                               U2
+  Features/Compare/**                                                                                                   U3
+  Features/Sync/**                                                                                                      U4
+  wwwroot/css/app.css (F1 empty → P1), wwwroot/schemas/edit-json.schema.json (P2)
+tests/AzCfg.Ui.Tests/
+  AzCfg.Ui.Tests.csproj, Support/UiTestContext.cs (bUnit context with Fluent + Loose JS), State/**, Composition/**, Architecture/**  F1
+  Application/{Operations,Workspace,Environments}/**  S1;  Application/Configuration/**  S2;  Application/Sync/**  S3
+  Components/{Layout,Common,KeyTree}/**, Features/Platform/**  P1;  Components/Editors/**, Hosting/**  P2;  Demo/**  DH
+  Features/{Workspace,Environments}/** U1;  Features/{Project,Browse}/** U2;  Features/Compare/** U3;  Features/Sync/** U4
+  Integration/**, Security/**  Q1
+docs/adr/0010-*.md, docs/adr/0011-*.md  D1;   docs/ui-components.md  P1
+```
+Test fakes of Application interfaces live in the test folder of the task that needs them (`…/<Area>/Fakes`), never shared.
 
 ---
 
-## 10. Задачі
+## 9. Coding rules
 
-Спільне для всіх: build без warnings, test зелений, `dotnet format` чистий; TDD для Core; розділ 9 обов'язковий.
-Поле «Файли» — повний перелік дозволених змін (плюс відмітка `[x]` своєї задачі тут).
+General (as in the existing Core/Infrastructure code):
+- C# latest: file-scoped namespaces, primary constructors, collection expressions, expression-bodied members,
+  pattern matching, `var`. Short methods are one expression; no blank lines inside short methods.
+- One type per file (nested record variants such as `ConfigValue.Plain` allowed). Models are immutable `sealed record`s.
+- Comments only as XML `<summary>` on public contracts/services with behaviour and error rules.
+- Async: `CancellationToken ct` last; no `ConfigureAwait`.
+- No abstractions beyond §7; no `static` mutable state; no mock libraries; no packages beyond §6.
+- Logs: `ILogger<T>`, only keys, operation titles, exception types. Never values, `PushSource`, `SyncPlan`,
+  `RemoteDraft`, tokens.
 
-- [ ] **F1 — Каркас UI, контракти, `AzureErrors`**
-  - **Мета:** компільований `AzCfg.Ui` + `AzCfg.Ui.Tests`, усі контракти розділу 7 (крім B1-частини), робочі state і
-    реєстрації, спільні тексти помилок — щоб W2 ішла паралельно без спільних файлів.
-  - **Читати:** 2, 3 (G1, G10, G22, G24, G28), 5, 6, 7.1 (сканер), 7.2, 7.3, 7.4.
+Application (`AzCfg.Ui.Application`):
+- No reference to ASP.NET Core, JSInterop or Fluent (architecture test).
+- Calls Core use cases and pure rules; never re-implements them (§5.2). Masks with `SecretPolicy` wherever a local value
+  becomes a view model.
+- Registrations only in its own area file `<Area>/<Area>Services.cs`.
+
+Razor (`AzCfg.Ui`):
+- `.razor` with a short `@code`; `.razor.cs` partial when code > ~80 lines; styles in `.razor.css`, colours/spacing only
+  via Fluent tokens or `--az-*` (§2.12). Fluent components per `docs/ui-components.md`; `Size` small where available.
+- `[Parameter, EditorRequired]` for required parameters; events `EventCallback<T>`.
+- No business logic: IO via `IOperationRunner.RunAsync`, then `switch` on `Success` / `Failed` / `Cancelled`
+  (`Failed` → message bar for view-blocking errors, toast otherwise, §2.9).
+- Subscribe to state/singleton events in `OnInitialized`, handler `() => InvokeAsync(StateHasChanged)`, unsubscribe in
+  `Dispose` (G29). Read operations use a `CancellationTokenSource` cancelled in `Dispose`.
+- Secrets: a component keeps only `SecretString?`; `Reveal()` only inside `SecretValue`'s markup; cleared on hide,
+  tab change, 30 s (`TimeProvider`) and `Dispose`. A secret typed into a password input lives in a string field only
+  while the input is open; on submit it is wrapped into `SecretString` and the field is cleared.
+- Commands, tabs, modes, sidebar sections, status items — only via registrations in the feature's `<X>Feature.cs`.
+
+Tests:
+- xunit, names `Method_Condition_Result`. Application: real `SyncService`/`ProjectService`/`SetupService`/
+  `UserSettingsService` via `AddAzCfg().AddAzCfgInMemory(world)` + temp folders. Components: bUnit 2
+  (`BunitContext`, `Render<T>`), `Services.AddFluentUIComponents()`, `JSInterop.Mode = JSRuntimeMode.Loose`,
+  `FakeTimeProvider` for timers. Host: `WebApplicationFactory<Program>`.
+- Every "Acceptance" item has at least one test, except items marked *manual*.
+- Secret sentinel for leak tests: `AZCFG-TEST-SECRET-7f3a`.
+
+---
+
+## 10. Tasks
+
+Common to all: build without warnings, tests green, `dotnet format` clean; TDD for Core; §9 is binding. "Files" is the
+complete list of allowed changes (plus the task's `[x]` line here).
+
+- [ ] **F0 — Sync `dev` with `master`, package versions** — orchestrator, see 0.1.
+
+- [ ] **D1 — ADR 0010 and 0011**
+  - **Goal:** decisions recorded as contracts before code (G34).
+  - **Read:** §2.1, §4, §5, §7.1, `docs/adr/0008-environment-modes-labels-ignore.md` (format).
+  - **Scope:** `docs/adr/0010-ui-architecture-and-hosting.md` — AD-1…AD-4, AD-9…AD-13 and §5.4 (context, decision,
+    consequences). `docs/adr/0011-ui-editing-sync-and-secret-safety.md` — AD-5…AD-8 and the Core semantics of §7.1
+    (draft + `BaseJson` 3-way, `PlanSelection`, `ApplyGuard`, `ResolveConflictAsync`, `PullSelectedAsync`,
+    `ReadRemoteConfigAsync`, `EnvironmentComparer`). English, structure of ADR 0008 (Status / Context / Decision /
+    Consequences). `CLAUDE.md`: extend the ADR list with "0010 UI architecture and hosting, 0011 UI editing, sync and
+    secret safety".
+  - **Files:** the two ADRs, `CLAUDE.md` (ADR list line only).
+  - **Depends on:** F0.
+  - **Acceptance:** no decision beyond §5/§7; every AD id appears in exactly one ADR (manual review by the orchestrator).
+
+- [ ] **C1 — Core: pure helpers (patch, selection, comparer)**
+  - **Goal:** G7, G24, G27 (comparer) and edit-JSON patching — rules shared by CLI and UI.
+  - **Read:** §3.2, §4 (G7, G24, G27), §7.1 (C1 blocks), §9.
+  - **Scope:** `KeyMapper.SecretNameOf` (+ `ThreeWayDiff.SecretName(Uri)` delegates); `ScopedKey`; `EditJsonPatch` on
+    `System.Text.Json.Nodes`, segments via `KeyMapper.ToLocalJsonPath`/`FromLocalJsonPath`, `WriteIndented = true`;
+    `PlanSelection`; `ComparisonKind`, `ComparisonItem`, `EnvironmentComparer`.
+  - **Files:** `src/AzCfg.Core/Mapping/{KeyMapper,ScopedKey,EditJsonPatch}.cs`,
+    `src/AzCfg.Core/Sync/{ThreeWayDiff,PlanSelection,EnvironmentComparer,ComparisonItem,ComparisonKind}.cs`,
+    `tests/AzCfg.Core.Tests/Mapping/{KeyMapperSecretNameTests,EditJsonPatchTests}.cs`,
+    `tests/AzCfg.Core.Tests/Sync/{PlanSelectionTests,EnvironmentComparerTests}.cs`.
+  - **Depends on:** F0.
+  - **Acceptance:** (1) `SecretNameOf` with and without a version segment; no `secrets/` → `ArgumentException`;
+    existing `ThreeWayDiff` tests green. (2) `EditJsonPatch`: set into empty / nested / global; plain ↔ secret reference
+    replacement; `SetSecretValue` writes `value`; remove with empty-parent and empty-`@global` cleanup; leaf/object clash
+    → `ArgumentException` naming the key and not containing the value (sentinel); `CopyKey` both directions; `Get`;
+    `ChangedKeys` for add/remove/change/secret reference; `JsonProjection.FromEditJson` of a patched `ToEditJson` gives
+    the expected state. (3) `PlanSelection`: subset of changes, conflicts and warnings; `TouchesGlobal` and
+    `RequiresVaultChoice` recomputed; key-less `CreateSecret` kept; applying a selected plan with the real
+    `SyncService` (Core fakes) updates the snapshot only for the selected keys. (4) `EnvironmentComparer`: all four
+    kinds; secrets equal by name across vaults; plain vs reference = Different; ordinal order; duplicate key →
+    `ArgumentException`.
+  - **Tests:** one or more per item, Core fakes from `tests/AzCfg.Core.Tests/Fakes`.
+
+- [ ] **C2 — Core: sync use cases**
+  - **Goal:** G6, G8, G14, G25, G27 (`ReadRemoteConfigAsync`), G28.
+  - **Read:** §3.2, §4 (G6, G8, G14, G25, G27, G28), §7.1 (C2 blocks), §9.
+  - **Scope:** `PushSource.EditedJson(Json, BaseJson)` + `PrintMembers` for `EditedJson` and `Promote`;
+    `RemoteConfig`, `ConflictResolution`, `ApplyBlocker`, `ApplyGuard`; in `SyncService`: `ReadRemoteConfigAsync`
+    (reuse `ReadEntriesAsync` + `ScopeMerger`; `ExportJsonAsync` may reuse it), `PullSelectedAsync` (reuse
+    `ReadEntriesAsync`, `ReadTargetsAsync`, target routing of `PullAsync`), `ResolveConflictAsync`, `BaseJson` as
+    the 3-way base in `PlanPushAsync`, `ApplyAsync` calls `ApplyGuard` (messages unchanged). The 4 CLI `StubSync`
+    classes get the 3 new members as `=> throw new NotSupportedException();`.
+  - **Files:** `src/AzCfg.Core/Sync/{PushSource,RemoteConfig,ConflictResolution,ApplyGuard,ApplyBlocker}.cs`,
+    `src/AzCfg.Core/UseCases/{ISyncService,SyncService}.cs`,
+    `tests/AzCfg.Core.Tests/Sync/{PushSourceRedactionTests,ApplyGuardTests}.cs`,
+    `tests/AzCfg.Core.Tests/UseCases/{SyncServicePullSelectedTests,SyncServiceResolveConflictTests,SyncServiceReadRemoteConfigTests,SyncServiceEditedJsonBaseTests}.cs`,
+    `tests/AzCfg.Cli.Tests/{PullCommandTests,PlanPushCommandTests,EditCommandTests,PromoteCommandTests}.cs` (stubs only).
+  - **Depends on:** F0.
+  - **Acceptance:** (1) `ToString()` of `EditedJson`/`Promote` contains no JSON (sentinel), `BaseJson` redacted.
+    (2) `EditedJson` with `BaseJson`: an untouched key changed in Azure after the export → no change (the old behaviour
+    reverted it); a key edited locally and in Azure → `Conflict`; edited only locally → `Update`; removed in `Json` →
+    `Delete`; unchanged secret reference → no change; new secret with `value` → `CreateSecret`; without `BaseJson` all
+    existing tests unchanged. (3) `PullSelectedAsync`: unselected local values and local changes kept; selected remote
+    change written; remote deletion removes locally; plain ↔ secret moves between targets; ignored keys skipped;
+    env ≠ active or no active → `InvalidOperationException`; unsafe secrets target → nothing written; snapshot updated
+    only for the keys (secrets as fingerprint); a following `PullAsync(force: false)` is not blocked by them.
+    (4) `ResolveConflictAsync`: KeepRemote = the key pulled; KeepLocal → the next `PlanPushAsync(LocalFiles)` has an
+    `Update` with the local value and no conflict, local files untouched; non-active env → exception.
+    (5) `ReadRemoteConfigAsync`: label selection and merge equal to `ExportJsonAsync`'s entries; `Shadowed`;
+    `DuplicateLabels` warning; zero `ISecretStore.GetAsync` calls. (6) `ApplyGuard`: each blocker, order;
+    `ApplyAsync` messages unchanged. (7) All CLI tests green.
+  - **Tests:** files above; Core fakes.
+
+- [ ] **T1 — In-memory adapters → Infrastructure**
+  - **Goal:** G36 seam — one set of realistic fakes for CLI scenarios, UI tests and `--demo`.
+  - **Read:** §3.3, §5.3 (AD-12), §7.2 (T1 block), `tests/AzCfg.Cli.Tests/Scenario/*.cs`.
+  - **Scope:** `git mv` the 7 types of §7.2 to `src/AzCfg.Infrastructure/InMemory/`, namespace
+    `AzCfg.Infrastructure.InMemory`, `public`, behaviour unchanged (replace xunit `Assert` in `InMemoryLocalTarget`
+    helpers with LINQ `Single(...)` / `InvalidOperationException`); add `StaticTokenCredential`, `InMemoryWorld`,
+    `InMemoryServiceCollectionExtensions.AddAzCfgInMemory`. Scenario tests only get `using` updates.
+  - **Files:** `src/AzCfg.Infrastructure/InMemory/**`, `tests/AzCfg.Cli.Tests/Scenario/**` (moves + usings),
+    `tests/AzCfg.Infrastructure.Tests/InMemory/InMemoryCompositionTests.cs`.
+  - **Depends on:** F0.
+  - **Acceptance:** (1) all CLI scenario tests green; (2) `AddAzCfg().AddAzCfgInMemory(world)` resolves `ISyncService`;
+    `IConfigStore` is `world.AppConfig`; `ILocalTarget` set = { `AppSettingsLocalTarget`, `world.UserSecrets` };
+    `TokenCredential` is `world.Credential`; (3) `StaticTokenCredential` returns a JWT whose payload has `upn` and `tid`;
+    (4) Infrastructure does not reference xunit.
+  - **Tests:** `InMemoryCompositionTests`.
+
+- [ ] **F1 — UI scaffold, contracts, state, `AzureErrors`, spike**
+  - **Goal:** compiling UI projects with every contract of §7.1 (F1 block), §7.2 (F1 block), §7.3–§7.5, working state,
+    empty feature/area modules and a spike proving Fluent UI v5 + BlazorMonaco on net10 — so W2 runs in parallel
+    without shared files.
+  - **Read:** §3, §4 (G1, G9, G21, G23), §5, §6, §7.1 (F1 block), §7.2 (F1 block), §7.3, §7.4, §7.5, §8, §9.
   - **Scope:**
-    - `src/AzCfg.Ui` (`Microsoft.NET.Sdk.Web`, refs Core/Infrastructure, `BlazorMonaco`). `Program.cs` фінальний:
-      `builder.AddAzCfgHosting(); builder.Services.AddAzCfg().AddAzCfgUi(); builder.Services.AddRazorComponents().AddInteractiveServerComponents().AddHubOptions(o => o.MaximumReceiveMessageSize = 2 * 1024 * 1024);`
-      `app.UseAzCfgHostSecurity(); app.UseAntiforgery(); app.MapStaticAssets(); app.MapRazorComponents<App>().AddInteractiveServerRenderMode();`
-    - `Hosting/HostingExtensions.cs`: `AddAzCfgHosting` (Kestrel `127.0.0.1`, порт з `--port` або 0) і порожній `UseAzCfgHostSecurity` — наповнить P2.
-    - `appsettings.json`: `AllowedHosts=localhost;127.0.0.1`, `Logging:LogLevel:Default=Information`, `Microsoft.AspNetCore=Warning`, `DetailedErrors=false`.
-    - `Components/App.razor` (`<Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />`, те саме для `HeadOutlet`),
-      **усі** підключення одразу: `css/tokens.css`, `css/base.css`, `AzCfg.Ui.styles.css`, скрипти BlazorMonaco
-      (`_content/BlazorMonaco/jsInterop.js`, `lib/monaco-editor/min/vs/loader.js`, `editor.main.js` — за README пакета),
-      `js/shortcuts.js`; порожні `wwwroot/css/tokens.css`, `base.css`, `js/shortcuts.js`. `Routes.razor` — один маршрут `/`
-      на тимчасовий `Components/Layout/Workbench.razor` із текстом «AzCfg» (P1 замінює вміст), `_Imports.razor`.
-    - Core: `IWorkspaceScanner` + 6 типів моделі (7.1). Infra: `AzureErrorKind`, `AzureErrors` (7.2); `CliErrors.Describe` → `AzureErrors.Describe`.
-    - `Application/Contracts/**` — усі типи 7.3 (`DialogReference` — клас із подією `Closed`, яку слухає `DialogHost`).
-    - `State/**` — усі типи 7.4 з робочою реалізацією.
-    - `Features/FeatureRegistrations.cs`: `AddAzCfgUi()` = `AddUiPlatform()` + `AddProjectsFeature()` + `AddEnvironmentsFeature()` +
-      `AddExplorerFeature()` + `AddDocumentsFeature()` + `AddSyncFeature()` + `AddCommandPaletteFeature()` + scoped state.
-      Кожен `Add*Feature` — у `Features/<X>/<X>Feature.cs` з регіонами `// services` і `// ui`, тіло `=> services;`.
-      `Application/PlatformServices.cs` — `AddUiPlatform()` з порожнім тілом.
-    - `tests/AzCfg.Ui.Tests` (`Microsoft.NET.Sdk.Razor`, xunit, bunit, `<Using Include="Xunit" />`,
-      `<Compile Include="..\AzCfg.Core.Tests\Fakes\*.cs" Link="Fakes\Core\%(Filename)%(Extension)" />`).
-    - `Directory.Packages.props`: 3 пакети розділу 6. `AzCfg.slnx`: 2 проєкти.
-  - **Файли:** `src/AzCfg.Ui/**` (лише перелічене вище), `src/AzCfg.Core/Abstractions/IWorkspaceScanner.cs`,
+    - Projects (§5.2): `src/AzCfg.Ui.Application` (refs Core, Infrastructure; `Microsoft.Extensions.Hosting.Abstractions`,
+      `Microsoft.Extensions.Logging.Abstractions`), `src/AzCfg.Ui` (Web SDK; ref Ui.Application; Fluent, Icons,
+      BlazorMonaco), `tests/AzCfg.Ui.Tests` (Razor SDK; `IsPackable=false`; xunit, xunit.runner.visualstudio,
+      Microsoft.NET.Test.Sdk, coverlet.collector, bunit, Microsoft.AspNetCore.Mvc.Testing,
+      Microsoft.Extensions.TimeProvider.Testing; `<Using Include="Xunit" />`; ref AzCfg.Ui). Add the 3 to `AzCfg.slnx`.
+    - `Hosting/UiHostOptions` (`Port` = 0, `NoBrowser`, `Demo` (null / "full" / "empty"), `StateRoot` = 
+      `JsonUserStateStore.DefaultRoot`; bound from configuration keys `port`, `no-browser`, `demo`, `state-root`, so
+      `--port 5000` works; bare switches are normalised before binding: `--no-browser` → `--no-browser=true`,
+      `--demo` → `--demo=full`).
+      `Hosting/AzCfgUiApp.Build(string[] args, Action<IServiceCollection>? overrides = null)`: Kestrel `Listen(IPAddress.Loopback, Port)`;
+      services `AddAzCfg()`, `AddAzCfgUiApplication()`, `new UiStatePaths(StateRoot)`, `AddFluentUIComponents()`,
+      `TimeProvider.System`,
+      `AddRazorComponents().AddInteractiveServerComponents().AddHubOptions(o => o.MaximumReceiveMessageSize = 2 * 1024 * 1024)`,
+      `AddAzCfgUi()`, `AddAzCfgDemo(options)` when `Demo` is set, then `overrides`; pipeline `UseAzCfgHostSecurity()`,
+      `UseAntiforgery()`, `MapStaticAssets()`, `MapRazorComponents<App>().AddInteractiveServerRenderMode()`,
+      `MapAzCfgEndpoints()`. `Program.cs`: `await AzCfgUiApp.Build(args).RunAsync();` + `public partial class Program;`.
+      `Hosting/HostSecurityExtensions.cs` with empty `UseAzCfgHostSecurity`/`MapAzCfgEndpoints` (P2 fills);
+      `Demo/DemoServiceCollectionExtensions.AddAzCfgDemo` no-op (DH fills).
+    - `appsettings.json`: `AllowedHosts=localhost;127.0.0.1`, `Logging:LogLevel:Default=Information`,
+      `Microsoft.AspNetCore=Warning`, `DetailedErrors=false`. `launchSettings.json` profiles: `AzCfg.Ui`, `AzCfg.Ui (demo)`.
+    - `Components/App.razor` (Fluent stylesheet §6, `css/app.css`, `AzCfg.Ui.styles.css`, `HeadOutlet` and `Routes`
+      with `@rendermode="new InteractiveServerRenderMode(prerender: false)"`, `_framework/blazor.web.js`, BlazorMonaco
+      scripts per its README), `Routes.razor`, `_Imports.razor`, `Layout/MainLayout.razor` placeholder with
+      `<FluentProviders />` and `<FluentKeyCodeProvider />`; empty `wwwroot/css/app.css`.
+    - Spike `Components/Spike/SpikePage.razor`, rendered by `Components/Pages/Home.razor` (`@page "/"`; P1 replaces its
+      content with `<Workbench />`): dark theme via `IThemeService`, a button opening
+      `ShowConfirmationAsync`, a toast via `INotificationService`, `FluentDataGrid` with 2000 virtualised rows, a
+      BlazorMonaco editor with JSON. Record verified setup snippets in the PR description (P1 turns them into
+      `docs/ui-components.md`).
+    - Core scanner types (§7.1 F1), `AzureErrors` + `AzureErrorKind` (§7.2 F1), `CliErrors.Describe` delegates.
+    - Application: all §7.3 types in their area folders; `SecretPolicy` implemented; `ApplicationServices.AddAzCfgUiApplication()`
+      calls `AddOperationServices()`, `AddWorkspaceServices()`, `AddEnvironmentServices()`, `AddConfigurationServices()`,
+      `AddSyncServices()` (each `=> services;` in `<Area>/<Area>Services.cs`) and registers the §7.4 state (scoped).
+    - State (§7.4) fully implemented.
+    - Shared (§7.5): registrations, extension methods, `UiCommand`, `ICommandContributor`, `ICommandRegistry`,
+      `CommandIds`, `IActivationFlow`/`IBindingFlow` with no-op defaults registered via `TryAdd`.
+    - `Features/FeatureRegistrations.AddAzCfgUi()` = `AddPlatformFeature()`, `AddWorkspaceFeature()`,
+      `AddEnvironmentsFeature()`, `AddProjectFeature()`, `AddBrowseFeature()`, `AddCompareFeature()`, `AddSyncFeature()`
+      — each `=> services;` in `Features/<X>/<X>Feature.cs`.
+  - **Files:** `src/AzCfg.Ui.Application/**`, `src/AzCfg.Ui/**` (only the files above),
+    `src/AzCfg.Core/Abstractions/IWorkspaceScanner.cs`,
     `src/AzCfg.Core/Model/{SolutionFormat,SolutionInfo,ConfigFileKind,ConfigFileInfo,WorkspaceProject,WorkspaceScan}.cs`,
-    `src/AzCfg.Infrastructure/Azure/{AzureErrors,AzureErrorKind}.cs`, `src/AzCfg.Cli/CliErrors.cs`, `tests/AzCfg.Ui.Tests/**`,
-    `tests/AzCfg.Infrastructure.Tests/Azure/AzureErrorsTests.cs`, `AzCfg.slnx`, `Directory.Packages.props`.
-  - **Залежить від:** —
-  - **Приймання:** (1) `dotnet run --project src/AzCfg.Ui` показує сторінку на `127.0.0.1` (вручну); (2) DI: `AddAzCfg().AddAzCfgUi()`
-    будується з `ValidateOnBuild`; (3) CLI-тести без змін і зелені; (4) `AzureErrors.Classify` — кожен `AzureErrorKind`, `Describe`
-    — тексти CLI без змін; (5) `PlanRequest.ToString()` не містить JSON і `ExportedAtOpen`; (6) `EditorTabsState`: open/dedupe
-    (оновлює payload)/close/dirty/ліміт 12; (7) `ExplorerState.Invalidate`, `ProtectedUnlockState` (ignore case),
-    `WorkspaceState.UpdateBinding`; (8) `AddTab` для вже зареєстрованого `TabKind` → `InvalidOperationException` одразу;
-    (9) bUnit: `App` рендериться.
-  - **Тести:** `tests/AzCfg.Ui.Tests/{State,Composition}/**`, `AzureErrorsTests`.
+    `src/AzCfg.Infrastructure/Azure/{AzureErrors,AzureErrorKind}.cs`, `src/AzCfg.Cli/CliErrors.cs`,
+    `tests/AzCfg.Ui.Tests/**`, `tests/AzCfg.Infrastructure.Tests/Azure/AzureErrorsTests.cs`, `AzCfg.slnx`.
+  - **Depends on:** F0.
+  - **Acceptance:** (1) *manual:* `dotnet run --project src/AzCfg.Ui` serves the spike on `127.0.0.1` in dark theme;
+    dialog, toast, 2000-row scroll and Monaco JSON editing work; no CDN requests (DevTools → Network). Broken package →
+    blocker per 0.6. (2) The DI container of `AzCfgUiApp` builds with `ValidateOnBuild` and `ValidateScopes`.
+    (3) `AzureErrors.Classify` for every kind; `Describe` returns today's CLI texts; CLI tests green. (4) State:
+    `TabsState` open/dedupe/close/dirty/`MaxLoaded`; `ProjectSession` env change clears caches and keeps drafts, pending
+    counts; `ProjectSessions`; `ProtectedUnlockState` ignore case; `WorkspaceState.UpdateBinding`;
+    `WorkbenchNavigator.OpenProject` applies env/mode/key. (5) `SecretPolicy` rules; `RemoteDraft.ToString()` without
+    JSON or secret. (6) Duplicate tab/mode/sidebar registration → `InvalidOperationException`. (7) bUnit renders
+    `MainLayout` with Fluent services. (8) Architecture test: `AzCfg.Ui.Application` references no
+    `Microsoft.AspNetCore*`, `Microsoft.JSInterop`, `Microsoft.FluentUI*` assembly.
+  - **Tests:** `tests/AzCfg.Ui.Tests/{State,Composition,Architecture}/**`, `AzureErrorsTests`.
 
-- [ ] **B1 — Core: `FromNestedJson`, redaction `PushSource`, `PullSelectedAsync`**
-  - **Мета:** G6, G8, G9 — лише додаткові зміни Core, TDD.
-  - **Читати:** 2.2, 3 (G6, G8, G9), 7.1.
-  - **Scope:** `JsonProjection.FromNestedJson` за 7.1; `PushSource.EditedJson`/`Promote` — `PrintMembers` з `Json = ***`;
-    `ISyncService.PullSelectedAsync` + реалізація в `SyncService` (перевикористати `ReadRemoteAsync`, `ReadLocalAsync`,
-    розподіл значень/секретів як у `PullAsync`); 4 `StubSync` у CLI-тестах — `=> throw new NotSupportedException();`.
-    Паритетний тест: той самий JSON → `FromNestedJson` і `AppSettingsLocalTarget.ReadAsync` (temp-файл) дають однаковий набір
-    (вкладеність, масиви, числа, bool, null, порожні об'єкти/масиви, регістр і дублікати ключів).
-  - **Файли:** `src/AzCfg.Core/Mapping/JsonProjection.cs`, `src/AzCfg.Core/Sync/PushSource.cs`, `src/AzCfg.Core/UseCases/{ISyncService,SyncService}.cs`,
-    `tests/AzCfg.Core.Tests/Mapping/JsonProjectionFromNestedJsonTests.cs`, `tests/AzCfg.Core.Tests/Sync/PushSourceRedactionTests.cs`,
-    `tests/AzCfg.Core.Tests/UseCases/SyncServicePullSelectedTests.cs`, `tests/AzCfg.Infrastructure.Tests/Local/NestedJsonParityTests.cs`,
-    `tests/AzCfg.Cli.Tests/{PullCommandTests,PlanPushCommandTests,EditCommandTests,PromoteCommandTests}.cs` (лише стаби).
-  - **Залежить від:** —
-  - **Приймання:** (1) round-trip `ToNestedJson` ↔ `FromNestedJson`; паритет зелений на всіх кейсах; помилки без значень;
-    (2) `PushSource` `ToString()` без JSON; (3) `PullSelectedAsync`: невибрані локальні значення й зміни лишаються; видалений
-    remote → видалений локально; plain↔secret переїжджає між цілями; знімок оновлено лише для вибраних (наступний `PullAsync`
-    без `force` не блокується через них); env ≠ active або немає active → виняток; небезпечна ціль секретів → нічого не записано;
-    у знімку секрет — лише fingerprint.
-  - **Тести:** по одному на кожен пункт (fakes `FakeConfigStore`, `FakeSecretStore`, `FakeLocalTarget`, `FakeUserStateStore`).
-
-- [ ] **B2 — Infrastructure: єдиний credential, lock стану, `WorkspaceScanner`**
-  - **Мета:** G1, G2, G11, G12, G18.
-  - **Читати:** 2.3, 3 (G1, G2, G11, G12, G18), 7.1, 7.2.
-  - **Scope:** `AddAzCfg()`: singleton `TokenCredential`, усі клієнти беруть його з DI; реєстрація `IWorkspaceScanner`.
-    `JsonUserStateStore`: приватний `SemaphoreSlim(1,1)` навколо read-modify-write `SaveBindingAsync` і всіх записів.
-    `WorkspaceScanner` (`IProjectDetector` для проєктів; `*.sln`/`*.slnx` у дереві — через `SolutionPersistence`
-    (`SolutionSerializers.GetSerializerByMoniker`), лише `.csproj`, абсолютні шляхи; битий solution → warning у `ILogger`;
-    конфіг-файли в теці проєкту: `appsettings.json`, `appsettings.*.json` (`.local` → `AppSettingsLocal`, інше → `AppSettingsEnvironment`
-    з `EnvironmentName`), `local.settings.json`; `UserSecrets` — `PathHelper.GetSecretsPathFromSecretsId`, якщо є `UserSecretsId`).
-    `CsprojDetector`: пропуск `.git`, `.vs`, `.idea`, `node_modules`, `bin`, `obj`, тек на `.`. PackageReference `SolutionPersistence`.
-  - **Файли:** `src/AzCfg.Infrastructure/{DependencyInjection.cs,AzCfg.Infrastructure.csproj}`, `src/AzCfg.Infrastructure/State/JsonUserStateStore.cs`,
-    `src/AzCfg.Infrastructure/Local/{WorkspaceScanner,CsprojDetector}.cs`,
+- [ ] **I1 — Infrastructure: credential, state lock, scanner**
+  - **Goal:** G1, G2, G10, G11, G17.
+  - **Read:** §3.3, §4 (G1, G2, G10, G11, G17), §7.1 (F1 block), §7.2 (I1).
+  - **Scope:** `AddAzCfg()`: singleton `TokenCredential`, all clients take it from DI; `IWorkspaceScanner` registration.
+    `JsonUserStateStore`: private `SemaphoreSlim(1,1)`. `WorkspaceScanner`: projects via `IProjectDetector`; every
+    `*.sln`/`*.slnx` under the root (same skip list) via `SolutionSerializers.GetSerializerByMoniker(path)` →
+    `OpenAsync(path, ct)` → `SolutionModel.SolutionProjects` (only `.csproj`, absolute paths; verify against the package
+    XML docs); broken solution → `ILogger` warning, skipped; config files in each project folder: `appsettings.json`,
+    `appsettings.*.json` (`.local` → `AppSettingsLocal`, other → `AppSettingsEnvironment` with `EnvironmentName`),
+    `local.settings.json`; `UserSecrets` via `PathHelper.GetSecretsPathFromSecretsId` when `UserSecretsId` is set.
+    `CsprojDetector`: skip `.git`, `.vs`, `.idea`, `node_modules`, `bin`, `obj` and dot-folders.
+    `PackageReference Microsoft.VisualStudio.SolutionPersistence`.
+  - **Files:** `src/AzCfg.Infrastructure/{DependencyInjection.cs,AzCfg.Infrastructure.csproj}`,
+    `src/AzCfg.Infrastructure/State/JsonUserStateStore.cs`, `src/AzCfg.Infrastructure/Local/{WorkspaceScanner,CsprojDetector}.cs`,
     `tests/AzCfg.Infrastructure.Tests/{DependencyInjectionTests.cs,State/JsonUserStateStoreConcurrencyTests.cs,Local/WorkspaceScannerTests.cs,Local/CsprojDetectorTests.cs}`.
-  - **Залежить від:** F1.
-  - **Приймання:** (1) один екземпляр `TokenCredential` у DI; (2) 50 паралельних `SaveBindingAsync` різних repo → усі 50 у
-    `projects.json`; (3) temp-репо з `.sln` + `.slnx` + проєктом поза solution + `node_modules/x.csproj` + `.git/x.csproj` → коректна
-    структура, пропуски працюють; битий `.sln` не валить скан; (4) скасування через `ct`; (5) CLI-тести зелені.
-  - **Тести:** указані у «Файли»; фікстури `.sln`/`.slnx` генеруються в тесті.
+  - **Depends on:** F1.
+  - **Acceptance:** (1) one `TokenCredential` instance in DI; (2) 50 parallel `SaveBindingAsync` of different repos →
+    all 50 in `projects.json`; (3) temp repo with `.sln` + `.slnx` + a loose project + `node_modules/x.csproj` +
+    `.git/x.csproj` → correct structure, skips work; a broken `.sln` does not fail the scan; (4) cancellation via `ct`;
+    (5) CLI tests green.
+  - **Tests:** as in "Files"; `.sln`/`.slnx` fixtures generated in the test.
 
-- [ ] **P1 — UI-платформа: дизайн-система, workbench, діалоги, палітра**
-  - **Мета:** FR-U1–U5 (платформа), AD-11; усе, у що фічі лише додають вкладки/sidebar/команди.
-  - **Читати:** 5 (AD-1, AD-6 keep-alive, AD-10, AD-11), 6, 7.3 (Commands & UI services, Operations), 7.4, 8, 9.
+- [ ] **P1 — UI platform: theme, workbench, tree-grid, palette, guide**
+  - **Goal:** FR-U1…U5 platform part, AD-3, AD-10, G31, G35 — everything features only plug into.
+  - **Read:** §2 (all), §5 (AD-3, AD-4, AD-6, AD-9, AD-10), §6, §7.3 (Operations, Security), §7.4, §7.5, §8, §9.
   - **Scope:**
-    - Дизайн-система: `tokens.css` (точно 8.2), `base.css` (reset, типографіка, scrollbars, focus ring), компоненти 8.4
-      з `.razor.css`, `ToastService`/`ToastHost`, `DialogService`/`DialogHost` (`ShowAsync` рендерить компонент у `Dialog`,
-      каскадує `DialogReference`), `Icon` (SVG-словник), `wwwroot/lib/lucide/LICENSE`. Реєстрація в `AddUiPlatform()`.
-    - Shell: `Workbench` (замінює F1-заглушку), `ActivityBar` (з `IEnumerable<SidebarRegistration>`, `Order`), `SidebarHost`,
-      `TabStrip` (dirty-крапка, замок protected, `Ctrl+W`, контекстне закриття), `TabHost` (`DynamicComponent` за `TabRegistration`,
-      keep-alive за `EditorTab.IsLoaded`, `ErrorBoundary` на вкладку з Banner + «Reload tab»), `StatusBar` (з
-      `StatusBarItemRegistration`), `OperationsIndicator` (`IOperationRunner.Running`/`Recent`, через інтерфейс), `ReconnectModal`,
-      `WelcomeTab` (Open folder → команда `projects.openFolder`, recent — `IWorkspaceRegistry`); закриття dirty-вкладки → `ConfirmAsync`.
-    - `CommandRegistry` (scoped, `ICommandContributor` + динамічні), `wwwroot/js/shortcuts.js` (глобальні шорткати 8.6 → `[JSInvokable]`
-      → виконання команди за Id), `CommandPalette` (оверлей, fuzzy по `All`, префікси: `>` команди, `@` ключі `ExplorerState.View`
-      (лише ключі), `#` проєкти `WorkspaceState`, `env:` середовища; ↑↓ Enter Esc; шорткати справа), `PlatformCommands`
-      (Close tab, Next/Prev tab, Toggle sidebar, Open palette).
-  - **Файли:** `src/AzCfg.Ui/wwwroot/{css/**,js/shortcuts.js,lib/lucide/LICENSE}`, `src/AzCfg.Ui/Components/{DesignSystem,Layout}/**`,
-    `src/AzCfg.Ui/Application/Commands/**`, `src/AzCfg.Ui/Application/PlatformServices.cs`, `src/AzCfg.Ui/Features/CommandPalette/**`,
-    `tests/AzCfg.Ui.Tests/{Components/DesignSystem,Components/Layout,Application/Commands,Features/CommandPalette}/**`.
-  - **Залежить від:** F1.
-  - **Приймання:** (1) жодних кольорів/відступів поза токенами; (2) Dialog: focus trap, Esc; TypedConfirm — кнопка неактивна до
-    збігу (ignore case); TreeView — стрілки, віртуалізація; SearchBox debounce; (3) дедуплікація вкладок, dirty-close → confirm,
-    помилка у вкладці не валить workbench; (4) палітра: fuzzy-ранжування, префікси, `IsEnabled=false` не виконується, < 50 мс на
-    2000 ключів; значення не індексуються; (5) `Icon` з невідомою назвою → виняток.
-  - **Тести:** bUnit на тестових компонентах у реєстраціях; fake `IOperationRunner`/`IWorkspaceRegistry` — у теці тестів P1.
+    - `docs/ui-components.md`: for every Fluent component/service used, a verified minimal snippet (from the 5.1.0 XML
+      docs and the spike), sizes/appearances to use, do/don't (v4 names), how to register a tab/mode/section/status
+      item/command, how to test with bUnit.
+    - Theme: dark mode + brand `#5B9DFF` via `IThemeService` at first render; `app.css` tokens exactly §2.12 + layout CSS.
+    - Shell: `Workbench` (replaces the spike; CSS grid: `FluentAppBar` activity bar, `FluentMultiSplitter`
+      sidebar │ main, status bar), `ActivityBar`, `SidebarHost` (collapsible sections from `SidebarSectionRegistration`),
+      `TabStrip` (dirty dot, lock for protected, close, `Alt+W`, middle-click), `TabHost` (`DynamicComponent` by
+      `TabRegistration`, keep-alive via `IsLoaded`, `FluentErrorBoundary` per tab with message bar + "Reload tab"),
+      `StatusBar` (`StatusBarItemRegistration`), `OperationsIndicator` (`IOperationRunner`), `AuthBar` (workbench-level
+      sign-in bar driven by `IAzureStatusService`), `WelcomeTab` (checklist §2.8.1 via command ids, recent folders from
+      `IWorkspaceRegistry`), `LayoutState` (sidebar/inspector visibility and widths; breakpoints §2.11).
+    - Common: `EnvPill` (kind colour, lock, active dot, selected), `EnvironmentSwitcher` (pills, `OnSelect`),
+      `StatusDot`, `DiffBadge` (§2.12 table), `SecretValue` (mask, Reveal callback returning `SecretString`, 30 s
+      auto-hide via `TimeProvider`, clear on Dispose), `InspectorPane` (header, sections, toggle), `ErrorBar`
+      (`FluentMessageBar` + Retry + Copy details), `EmptyState` (one line + one action), `TypedConfirmDialog` +
+      `DialogServiceExtensions.ConfirmTypedAsync(this IDialogService, title, message, expected)` and `ConfirmAsync`.
+    - `KeyTree/KeyTreeModel` (pure: keys → tree by `:`, a key may be leaf and branch, ordinal order, expand/collapse,
+      flatten visible rows, aggregate counters from a row predicate) + `KeyTreeGrid<TRow>` (columns as
+      `RenderFragment<TRow>`, `Virtualize`, ↑↓←→ Enter keyboard, selection, highlight of search text).
+    - Commands: `CommandRegistry` (contributors + dynamic), `FuzzyMatcher` (pure), `CommandPalette` (prefixes `>`, `#`,
+      `@` keys of the active session's view — keys only, `env:`; ↑↓ Enter Esc; shortcut hints), quick open,
+      `KeyBindings` (table §2.10 → command ids, via `IKeyCodeService`), `PlatformCommands` (palette, quick open,
+      toggles, tabs). `PlatformFeature` registers the Welcome tab and platform commands.
+  - **Files:** `src/AzCfg.Ui/Components/{Layout,Common,KeyTree}/**` (incl. `MainLayout.razor`),
+    `src/AzCfg.Ui/Components/Pages/Home.razor`, `src/AzCfg.Ui/Components/Spike/**` (delete),
+    `src/AzCfg.Ui/Features/Platform/**`, `src/AzCfg.Ui/wwwroot/css/app.css`, `docs/ui-components.md`,
+    `tests/AzCfg.Ui.Tests/{Components/Layout,Components/Common,Components/KeyTree,Features/Platform}/**`.
+  - **Depends on:** F1.
+  - **Acceptance:** (1) no hex colours outside `app.css` (grep test over `*.razor*`); (2) Workbench renders test
+    registrations of sections/tabs/status items; (3) tab dedupe, dirty close → confirm, an exception in one tab does not
+    break the workbench; (4) palette: fuzzy ranking, prefixes, disabled commands not executed, secret values never
+    listed; `FuzzyMatcher` on 2000 items < 50 ms measured (test asserts < 200 ms); (5) `KeyBindings` covers §2.10 and
+    contains none of the reserved combinations; (6) `KeyTreeModel`: leaf + branch keys, counters, expand/collapse,
+    flatten 2000 keys < 20 ms measured; `KeyTreeGrid` keyboard and virtualisation; (7) `TypedConfirmDialog` button
+    disabled until a case-insensitive match; (8) `SecretValue`: mask by default, reveal, auto-hide after 30 s with
+    `FakeTimeProvider`, cleared on Dispose; (9) `docs/ui-components.md` covers every Fluent API used in `src/AzCfg.Ui`.
+  - **Tests:** bUnit with test components in registrations; fakes of `IOperationRunner`, `IWorkspaceRegistry`,
+    `IAzureStatusService` in the P1 test folders.
 
-- [ ] **P2 — Безпека хосту + Monaco**
-  - **Мета:** AD-3, AD-6, G22, G23.
-  - **Читати:** 3 (G22, G23), 5 (AD-3, AD-6), 7.3 (`JsonDiagnostic`), 8.2, 9.
+- [ ] **P2 — Host security + Monaco**
+  - **Goal:** AD-1, AD-11, G21, G22.
+  - **Read:** §4 (G21, G22), §5 (AD-1, AD-11), §6, §7.3 (`JsonDiagnostic`), §2.12, §9.
   - **Scope:**
-    - Hosting: `HostingExtensions` (CLI-аргументи `--port`, `--no-browser`), `AccessTokenGate` (7.3/AD-3), `SecurityHeaders` (CSP та ін.),
-      `InstanceLock` (`<DefaultRoot>/ui/instance.json` атомарно: pid, port, token; живий інстанс → відкрити браузер на нього й
-      завершити процес до старту Kestrel), `BrowserLauncher` (Windows `cmd /c start`/`Process.Start` з `UseShellExecute`, macOS `open`,
-      Linux `xdg-open`; `--no-browser` → URL у консоль). URL — після `ApplicationStarted` з `IServerAddressesFeature`.
-    - Editors: `CodeEditor` (`Value`, `ReadOnly`, `SchemaUri`, `OnChange(string)` debounce 250 мс, `OnDirtyChanged(bool)` проти
-      baseline, `GetValueAsync`, `SetValueAsync` (новий baseline), `FormatAsync`, `SetMarkersAsync(IReadOnlyList<JsonDiagnostic>)`,
-      `RevealKeyAsync(string key)`, `OnSave`/`OnFormat` з `Ctrl+S`/`Ctrl+Shift+F`), `DiffEditor(Original, Modified, ReadOnly)`,
-      `MonacoTheme` (`azcfg-dark` з 8.2), `Dispose` моделей; `wwwroot/schemas/edit-json.schema.json` (`@kv`: string,
-      `value`: string|null, `@global`: object; інші — рекурсивно object|string|number|boolean); ліміт документа 1 MB → повідомлення.
-  - **Файли:** `src/AzCfg.Ui/Hosting/**`, `src/AzCfg.Ui/Components/Editors/**`, `src/AzCfg.Ui/wwwroot/schemas/**`,
-    `tests/AzCfg.Ui.Tests/{Hosting,Components/Editors}/**`.
-  - **Залежить від:** F1.
-  - **Приймання:** (1) без cookie/з неправильним токеном → 401 (включно з `/_blazor`); правильний `?token=` → cookie + 302 на `/`;
-    `Host: evil.example` → 400; (2) токен не потрапляє в логи (перехоплювач `ILoggerProvider`); (3) друга копія не стартує сервер;
-    (4) редактор: dirty після undo до baseline = false; маркери прокидаються; (5) вручну: Monaco працює з CSP, без CDN-запитів,
-    1 MB JSON відкривається й зберігається.
-  - **Тести:** middleware на `DefaultHttpContext`; `InstanceLock` у temp-каталозі; bUnit Loose JSInterop для editor C#-логіки.
+    - Hosting: `AccessToken` (singleton, 32 random bytes base64url, `Matches(string)` with `FixedTimeEquals`);
+      `HostSecurityExtensions.UseAzCfgHostSecurity` (security headers middleware, authentication, authorization) and
+      `MapAzCfgEndpoints` (`GET /login?t=` → `SignInAsync` cookie → 302 `/`; wrong/missing → 401); cookie auth options
+      (§AD-1, `Events.OnRedirectToLogin`/`OnRedirectToAccessDenied` → 401); fallback policy `RequireAuthenticatedUser`;
+      static assets `AllowAnonymous`; `BrowserLauncher` (Windows `Process.Start` with `UseShellExecute`, macOS `open`,
+      Linux `xdg-open`) on `ApplicationStarted` with the URL from `IServerAddressesFeature`; `--no-browser` → URL only
+      in the console (`Console.WriteLine`, never `ILogger`).
+    - Editors: `CodeEditor` (`Value`, `ReadOnly`, `SchemaUri`, `OnChange(string)` debounced 250 ms, `OnDirtyChanged(bool)`
+      against a baseline, `GetValueAsync`, `SetValueAsync` (new baseline), `FormatAsync`,
+      `SetMarkersAsync(IReadOnlyList<JsonDiagnostic>)`, `RevealKeyAsync(string key)`, `Shift+Alt+F` format, 1 MB limit
+      → message instead of the editor), `DiffEditor(Original, Modified, Inline)`, `MonacoSetup` (theme `azcfg-dark`
+      from §2.12, schema registration, model disposal); `wwwroot/schemas/edit-json.schema.json` (`@kv`: string, `value`:
+      string|null, `@global`: object; other properties recursively object|string|number|boolean).
+  - **Files:** `src/AzCfg.Ui/Hosting/{HostSecurityExtensions,AccessToken,SecurityHeadersMiddleware,BrowserLauncher}.cs`,
+    `src/AzCfg.Ui/Components/Editors/**`, `src/AzCfg.Ui/wwwroot/schemas/**`, `src/AzCfg.Ui/Components/App.razor`
+    (BlazorMonaco script tags only), `tests/AzCfg.Ui.Tests/{Hosting,Components/Editors}/**`.
+  - **Depends on:** F1.
+  - **Acceptance:** (`WebApplicationFactory<Program>` with `no-browser`) (1) without cookie `GET /` → 401 and
+    `POST /_blazor/negotiate` → 401; wrong token → 401; right token → 302 to `/` with `azcfg_ui` cookie HttpOnly +
+    SameSite=Strict; then `GET /` → 200; (2) `Host: evil.example` → 400; (3) CSP, nosniff, no-referrer present;
+    (4) the token appears in no log message during a full login sequence (capturing `ILoggerProvider`); (5) browser
+    launcher not invoked with `no-browser`; (6) `CodeEditor`: dirty false after editing back to the baseline,
+    `SetValueAsync` resets the baseline, diagnostics → markers, > 1 MB → message (bUnit, Loose JS); (7) *manual:* Monaco
+    and diff editor work under the CSP, no CDN requests.
+  - **Tests:** as in "Files".
 
-- [ ] **S1 — Сервіси: workspace, середовища, Azure status, операції**
-  - **Мета:** backend для FR-P1, P5–P7, FR-E1–E6, FR-A1, AD-10; G3, G4, G5, G19, G20, G30.
-  - **Читати:** 2.2, 2.4, 3 (G3–G5, G19, G20, G30), 5 (AD-4, AD-10), 7.3 (Workspace, Environments & Azure, Operations), 9.
-  - **Scope:** `WorkspaceRegistry` (`<DefaultRoot>/ui/workspaces.json`, корінь — параметр конструктора, атомарний запис);
-    `WorkspaceService` (G4, G5, G20; `OpenAsync` групує проєкти за `SolutionInfo.ProjectPaths`, решта — `LooseProjects`;
-    порівняння шляхів — як у `JsonUserStateStore` (`GetFullPath`, ignore case на Windows)); `DirectoryBrowser` (корені:
-    home + `DriveInfo.GetDrives()` ready на Windows / `/` на Unix; `HasDotNetProjects` — `*.sln`, `*.slnx`, `*.csproj` на 1 рівні;
-    `UnauthorizedAccessException` → порожньо); `EnvironmentRules`, `EnvironmentService` (`ListAsync` через `LoadProfileAsync` +
-    `IEnvironmentResolver`; `SaveAsync` → `ISetupService.SaveProfileAsync`); `AzureStatusService` (AD-4, `AzureErrors.Classify` →
-    `ConnectionState`; токен не логиться й не зберігається); `OperationRunner` (AD-10; `IHostApplicationLifetime`; логує лише title
-    і тип винятку). Реєстрації — регіони `// services` у `ProjectsFeature.cs` і `EnvironmentsFeature.cs`; singleton-и
-    `OperationRunner` і `AzureStatusService` теж у `EnvironmentsFeature.cs` (не в `PlatformServices.cs`, який належить P1).
-  - **Файли:** `src/AzCfg.Ui/Application/{Workspace,Environments,Azure,Operations}/**`,
-    `src/AzCfg.Ui/Features/{Projects/ProjectsFeature.cs,Environments/EnvironmentsFeature.cs}` (лише `// services`),
-    `tests/AzCfg.Ui.Tests/Application/{Workspace,Environments,Azure,Operations}/**`, `tests/AzCfg.Ui.Tests/Fakes/{FakeWorkspaceScanner,FakeTokenCredential}.cs`.
-  - **Залежить від:** F1.
-  - **Приймання:** (1) CLI-binding на корені репо підхоплюється для проєкту, на який вказує, і **не** для інших; його `RepoPath`
-    не змінюється; (2) повторна прив'язка зберігає vault-и й активне середовище; `ProposeSetupAsync` для прив'язаного проєкту дає
-    `TargetOptions` і кандидатів; (3) прибрати воркспейс — `projects.json` без змін; порядок pinned → LastOpened;
-    (4) `SaveAsync` відхиляє дублікати (ignore case) і не-https endpoint; `SelectDefault` для видаленого активного → dev → перше;
-    `KindOf` за правилом; (5) `AuthenticationFailedException` → `AuthRequired`; акаунт і tenant з JWT; (6) `OperationRunner`: скасування
-    uiToken не перериває Write, перериває Read (`Cancelled`); виняток → `Failed` з `AzureErrors`; `Running`/`Recent`/`Changed`.
-  - **Тести:** реальний `ProjectService`/`SetupService` + `FakeUserStateStore`, `FakeProjectDetector`, `FakeConfigStore`,
-    `FakeLocalTarget`, `StubResourceDiscovery`; `FakeTokenCredential` (згенерований JWT); temp-каталоги.
+- [ ] **S1 — Application: workspace, environments, Azure status, operations**
+  - **Goal:** backend of FR-W1…W6, FR-E1…E6, AD-9, AD-13; G3, G4, G5, G18, G19, G26, G30.
+  - **Read:** §3.2, §3.4, §4 (G3–G5, G18, G19, G26, G30), §5 (AD-9, AD-13), §7.3 (Operations, Workspace,
+    Environments), §9.
+  - **Scope:** `OperationRunner` (AD-9; `IHostApplicationLifetime`; `AzureErrors` → `OperationErrorKind` + message;
+    logs only title and exception type), `WorkspaceRegistry` (`<UiHostOptions.StateRoot>/ui/workspaces.json`, root as a
+    constructor parameter, atomic write), `BindingLocator` (G4, path comparison like `JsonUserStateStore`:
+    `GetFullPath`, ignore case on Windows), `WorkspaceService` (G4, G5, G19; `OpenAsync` groups projects by
+    `SolutionInfo.ProjectPaths`, rest → `LooseProjects`), `DirectoryBrowser` (roots: home + ready drives on Windows /
+    `/` on Unix; `HasDotNetProjects` = `*.sln`/`*.slnx`/`*.csproj` one level deep; `UnauthorizedAccessException` →
+    empty), `EnvironmentRules`, `EnvironmentService` (`LoadProfileAsync` + `IEnvironmentResolver`; `SaveAsync` →
+    `ISetupService.SaveProfileAsync`; G26), `AzureStatusService` (`TokenCredential` from DI, `JwtClaims`,
+    `AzureErrors.Classify` → `ConnectionState`). `WorkspaceRegistry` gets its folder from the `UiStatePaths` singleton
+    (registered by `AzCfgUiApp`, overridden by the demo).
+  - **Files:** `src/AzCfg.Ui.Application/{Operations,Workspace,Environments}/**` (not the F1 contract files),
+    `tests/AzCfg.Ui.Tests/Application/{Operations,Workspace,Environments}/**`.
+  - **Depends on:** F1, T1.
+  - **Acceptance:** (1) a CLI binding at the repo root is adopted for the project it points to and **not** for others;
+    its `RepoPath` unchanged; (2) re-bind keeps vaults, active env and ignore; `ProposeSetupAsync` of a bound project has
+    `TargetOptions` and candidates (current service first); (3) removing a workspace leaves `projects.json` untouched;
+    order pinned → LastOpened; (4) `SaveAsync` rejects duplicates (ignore case) and non-https endpoints; a label-mode
+    profile round-trips unchanged (labels, mode, default label, gitignore — G26 regression); `SelectDefault` with a
+    deleted active env → dev → first; `KindOf` rule; (5) `StaticTokenCredential` → Connected with account and tenant;
+    `AuthenticationFailedException` → AuthRequired; 403 → Forbidden; (6) `OperationRunner`: cancelling the UI token
+    does not stop a Write, cancels a Read (`Cancelled`); exception → `Failed` with `AzureErrors` text;
+    `Running`/`Recent`/`Changed`; (7) `DirectoryBrowser` on a temp tree.
+  - **Tests:** real `ProjectService`/`SetupService` via `AddAzCfg().AddAzCfgInMemory(world)`; `FakeWorkspaceScanner` in
+    `tests/AzCfg.Ui.Tests/Application/Workspace/Fakes`; temp folders.
 
-- [ ] **S2 — Сервіси: explorer, sync workflow, документи**
-  - **Мета:** backend для FR-C1–C5, FR-J2–J5, FR-A2–A4, FR-S1–S6; AD-5, AD-7; G7, G14, G15, G21, G25, G26.
-  - **Читати:** 2.2, 2.4, 3 (G7, G14, G15, G21, G25, G26), 5 (AD-5, AD-7, AD-9), 7.3 (Explorer, Sync, Documents), 9.
-  - **Scope:**
-    - `ConfigurationExplorerService` (7.3; маскування AD-5; `KeyVaultRef` → `SecretUri`, `SecretName`, `VaultHost`; `LocalSource` —
-      з окремих `ReadAsync` цілей), `ConfigTreeBuilder` (дерево за `:`, лічильники, ordinal-сортування; ключ може бути і листом,
-      і гілкою), `Filter`, `ToJson` (local — `ToNestedJson` plain + `{"@kv": name}` для секретів; remote — `ToEditJson`),
-      `SecretRevealService`.
-    - `SecretUris` (`NameOf`, `VaultOf` — G25), `EditJsonPatcher` (`System.Text.Json.Nodes`), `SyncWorkflowService`: `PlanAsync`
-      (`PlanPushAsync` → `ChangeRow`; `IsStale` для `EditedJson` з `ExportedAtOpen`: повторний `ExportJsonAsync` ≠ `ExportedAtOpen`);
-      `ChangeRow.Scope = (After ?? Before)?.Scope ?? Service`;
-      `ListVaultsAsync`; `ChooseVaultAsync` (через `IWorkspaceService.SetVaultAsync`); `Select` (`plan with { Changes = subset,
-      TouchesGlobal = subset.Any(c => c.Kind != Delete && (c.After ?? c.Before)?.Scope == Global),
-      RequiresVaultChoice = subset.Any(c => c.Kind == CreateSecret && c.After is null) }`, `Conflicts` без змін); `Evaluate` (конфлікти, порожній вибір, `RequiresVaultChoice` → блок;
-      `IsProtected` → typed; `TouchesGlobal` → global); `ApplyAsync` → `ApplyOptions`; `PreviewPullAsync` (з `DiffAsync`);
-      `UnmanagedLocalKeysAsync`; `PullAsync`; `PullSelectedAsync`; `KeepLocalAsync` (G26; ім'я секрету — `SecretUris.NameOf` remote-URI,
-      інакше `KeyMapper.ToKeyVaultSecretName(KeyMapper.ToStoreKey(Service, service, key))`).
-    - `LocalDocumentService`, `RemoteDocumentService` (7.3; рядок/колонка з `JsonException.LineNumber/BytePositionInLine`).
-    - Реєстрації — регіони `// services` у `ExplorerFeature.cs`, `SyncFeature.cs`, `DocumentsFeature.cs`.
-  - **Файли:** `src/AzCfg.Ui/Application/{Explorer,Sync,Documents}/**`,
-    `src/AzCfg.Ui/Features/{Explorer/ExplorerFeature.cs,Sync/SyncFeature.cs,Documents/DocumentsFeature.cs}` (лише `// services`),
-    `tests/AzCfg.Ui.Tests/Application/{Explorer,Sync,Documents}/**`.
-  - **Залежить від:** F1, B1.
-  - **Приймання:** (1) секрет `S3cr3t!` (remote і local із `SecretsTarget`) відсутній у серіалізованому `ConfigurationView`,
-    `ChangeRow`, `PullPreview`, `ToJson`; (2) неактивне середовище → remote-only без `ISecretStore.GetAsync`; (3) subset apply
-    оновлює знімок лише для вибраних ключів (реальний `SyncService`); (4) stale-детектор спрацьовує після зміни remote;
-    (5) `Evaluate`: protected без typed → `CanApply=false`; жодного коду, що прибирає `Conflicts`; (6) `LocalFiles` у неактивне →
-    виняток; (7) `EditJsonPatcher`: scope, вкладеність, `@global`, секрет із `value`, видалення порожніх батьків, конфлікт лист/об'єкт;
-    (8) `KeepLocalAsync`: змінений, видалений, секретний ключ, ключ із global; (9) документи: save → open дає той самий набір;
-    `"value": null` → діагностика з ключем; ціль секретів небезпечна → виняток; повідомлення без значень;
-    (10) `UnmanagedLocalKeysAsync` — ключі лише без `ActiveEnvironment`.
-  - **Тести:** реальний `SyncService` + `FakeConfigStore`, `FakeSecretStore`, `FakeLocalTarget`, `FakeUserStateStore`;
-    fake `IWorkspaceService` — у теці тестів S2.
+- [ ] **S2 — Application: configuration, compare, local values, reveal**
+  - **Goal:** backend of FR-B1…B7, FR-C1…C4; AD-6; G13, G27.
+  - **Read:** §3.2, §4 (G13, G27), §5 (AD-5, AD-6, AD-8), §7.1 (C1, C2 blocks), §7.3 (Security, Configuration), §9.
+  - **Scope:** `ConfigurationService` (§7.3; rows = union of diff items, remote entries, ignored local keys; `Source`
+    from separate `ReadAsync` of each target; `SecretUri`, `SecretName` via `KeyMapper.SecretNameOf`, `VaultHost`;
+    `ShadowedGlobalValue` from `RemoteConfig.Shadowed`), `ConfigFilters`, `CompareService`, `LocalValuesService`,
+    `SecretRevealService`; registrations in `ConfigurationServices.cs`.
+  - **Files:** `src/AzCfg.Ui.Application/Configuration/**` (not the F1 contract files),
+    `tests/AzCfg.Ui.Tests/Application/Configuration/**`.
+  - **Depends on:** F1, T1, C1, C2.
+  - **Acceptance:** (1) the sentinel secret (remote KV value and a local value in `SecretsTarget`) is absent from the
+    serialized `ConfigurationView`, `ComparisonView` (incl. `LeftJson`/`RightJson`) and `ToJson` outputs; (2) non-active
+    env → `IsRemoteOnly`, zero `ISecretStore.GetAsync` calls (counting decorator in the test folder); (3) active env:
+    statuses equal `DiffAsync`; ignored keys present with `IsIgnored` and no status; shadowed global value; labels;
+    (4) filters: text over keys and plain values only; changed/secrets/ignored/scope; (5) compare: remote ↔ remote kinds
+    and secrets by name; local ↔ remote secret same/different by fingerprint without the value; reversed sides; local ↔
+    local → `ArgumentException`; `IgnoredCount`; (6) local values: plain → values target; secret → secrets target and
+    removed from the other; scope marker kept; `SetScopeAsync` toggles `//@global`; remove; unsafe secrets target →
+    `InvalidOperationException`, nothing written; (7) reveal remote/local.
+  - **Tests:** `AddAzCfg().AddAzCfgInMemory(world)` + a temp project folder for `AppSettingsLocalTarget`.
 
-- [ ] **U1 — UI: проєкти, прив'язка, середовища**
-  - **Мета:** FR-P1–P7, FR-E1–E6, FR-A1 (UI).
-  - **Читати:** 3 (G4, G16, G20, G21, G28, G30), 4.1, 4.2, 5 (AD-8, AD-9, AD-10), 7.3 (Workspace, Environments & Azure, Sync:
-    `PullAsync`, `UnmanagedLocalKeysAsync`), 7.4, 8, 9.
-  - **Scope:**
-    - `ProjectsSidebar` (Workspace → Solution → Project → файли; бейджі values/secrets; Unbound/Bound + активне середовище;
-      дії: Open explorer, Bind/Settings, Copy path; `local.settings.json` read-only з тултипом; Refresh скану; список воркспейсів
-      pin/remove), `OpenFolderDialog` (`IDirectoryBrowser`, автодоповнення, recent), `ProjectSetupWizard` (сервіс: кандидати,
-      впевнений виділено, ручне введення — непорожнє, без `:`, не `global`; ціль значень; ціль секретів — лише `IsSafeForSecrets`
-      з поясненням; немає профілю → спершу `ProfileWizard`; після Bind — `WorkspaceState.UpdateBinding`), `ProjectSettingsTab`
-      (сервіс, цілі — повторна прив'язка; vault на середовище: `ListVaultsAsync` + «не задано»).
-    - `ProfileWizard` (discovery → таблиця кандидатів: назва, `IsProtected` за `IsProtectedByName`, ручний endpoint; збереження →
-      `WorkspaceState.SetEnvironments`, `ExplorerState.Invalidate()`), `EnvironmentsTab` (додати/видалити/endpoint/protected, без
-      перейменування; попередження при видаленні середовища, активного у відкритих проєктах), `EnvironmentSwitcher` (status bar +
-      використовується U2 у тулбарі Explorer: `EnvPill`-и, активне позначене), «Make active»: `UnmanagedLocalKeysAsync` → якщо не
-      порожньо — confirm «N ключів буде перезаписано»; protected — попередження про секрети production; `PullAsync(force:false)` →
-      `Blocked` → діалог зі списком ключів: Push first (відкриває Changes) / Discard local changes (`force:true`) / Cancel;
-      успіх → `UpdateBinding` + `ExplorerState.Invalidate`. `AccountStatus` (status bar, `IAzureStatusService`, Retry),
-      workbench-банер «Auth required» (`az login`), статус підключення середовищ.
-    - Реєстрації (`// ui`): sidebar Projects (Order 0) і Environments (Order 2), вкладки `Environments`, `ProjectSettings`,
-      status-bar items, `ICommandContributor` (Open Folder `projects.openFolder`, Switch Workspace, Go to Project…, Bind project,
-      Manage environments, Make <env> active).
-  - **Файли:** `src/AzCfg.Ui/Features/{Projects,Environments}/**` (у `*Feature.cs` — лише `// ui`), `tests/AzCfg.Ui.Tests/Features/{Projects,Environments}/**`.
-  - **Залежить від:** P1, S1, S2.
-  - **Приймання:** (1) скан теки з 3 solution і 20 проєктами — через `IOperationRunner` (Read), UI не блокується, закриття діалогу
-    скасовує; (2) небезпечна ціль недоступна для секретів; після прив'язки дерево оновлюється; зміна цілей не скидає vault-и;
-    (3) заблокований pull ніколи не перезаписує без явного «Discard»; перший pull з наявними локальними ключами — лише після confirm;
-    (4) перемикання/збереження середовищ інвалідує `ExplorerState`; protected позначені всюди; (5) валідація форми середовищ.
-  - **Тести:** bUnit на fakes Application-інтерфейсів (у `tests/AzCfg.Ui.Tests/Features/<X>/Fakes`).
+- [ ] **S3 — Application: sync workflow, drafts**
+  - **Goal:** backend of FR-B4, FR-S1…S6; AD-5, AD-8; G14, G20.
+  - **Read:** §3.2, §3.4, §4 (G14, G20), §5 (AD-5…AD-8), §7.1 (C1, C2 blocks), §7.3 (Security, Sync), §9.
+  - **Scope:** `SyncWorkflowService`, `DraftService`, `PlanRows` (maps `SyncPlan`/`DiffItem` → rows with
+    `SecretPolicy`); registrations in `SyncServices.cs`.
+  - **Files:** `src/AzCfg.Ui.Application/Sync/**` (not the F1 contract files), `tests/AzCfg.Ui.Tests/Application/Sync/**`.
+  - **Depends on:** F1, T1, C1, C2.
+  - **Acceptance:** (1) `PreviewPushAsync` for a non-active env → `InvalidOperationException`; `includeDeletes` maps
+    to `LocalFiles(Delete)`; rows: plain before/after, secrets null with `SecretName`, `AwaitsVault` rows;
+    (2) `Select` = `PlanSelection`; `Check` = `NothingSelected` + `ApplyGuard`; (3) apply of a subset updates the
+    snapshot only for the selected keys (real `SyncService`); typed name and global confirmation reach `ApplyOptions`;
+    (4) pull preview grouping; `UnmanagedLocalKeysAsync` non-empty only without an active env; pull/pull
+    selected/resolve delegate to Core; (5) drafts: `StartAsync` (Base == Json); set/remove/revert/move/secret → expected
+    `PendingKeys`; secrets never in `Json`/`BaseJson`/`ToString`; `ToPushSource` injects values and `BaseJson`;
+    `Validate` gives key + line/column and no values; `ReplaceJson` keeps matching secrets; `ResolveConflictAsync`
+    KeepRemote/KeepLocal → re-preview has no conflict (KeepLocal → Update); (6) G14 end-to-end: draft started, another
+    writer changes an untouched key in `InMemoryAppConfig`, preview → no change for that key; (7) the sentinel is absent
+    from serialized `PushPreview`/`PullPreview` and from logs.
+  - **Tests:** `AddAzCfg().AddAzCfgInMemory(world)`.
 
-- [ ] **U2 — UI: Configuration Explorer + інспектор**
-  - **Мета:** FR-C1–C5, FR-A2–A4, AD-5, AD-9 (у редагуванні).
-  - **Читати:** 3 (G21), 4.3, 4.5, 5 (AD-5, AD-7, AD-9), 7.3 (Explorer, Sync, Documents), 7.4, 8, 9.
-  - **Scope:**
-    - `ExplorerTab` (тулбар: `EnvironmentSwitcher` з U1 — якщо U1 ще не змерджений, локальний `EnvPill`-рядок у своїй теці;
-      SearchBox, фільтри, Tree/JSON, Refresh, Open Remote JSON, Open local file → відкривають вкладки `RemoteJson`/`LocalFile`
-      через `EditorTabsState`; `TreeView` з колонками Key / Local / Remote / Status; JSON view — `CodeEditor ReadOnly` з `ToJson`;
-      remote-only банер з «Make active»-командою; protected-рамка; завантаження через runner (Read), skeleton, кеш у `ExplorerState`).
-    - `KeyInspector` (ключ, scope, тип, local/remote, джерело, `DiffKind`; KV: vault host, secret name, Reveal 30 с, Copy; дії:
-      Edit value, Set secret value (`PasswordInput`), Move to Key Vault, Delete key, Add key (шлях, scope service/global з
-      попередженням), Edit local value (лише активне → `ILocalDocumentService` Open/patch/Save через runner Write).
-      Remote-дії: `IRemoteDocumentService.OpenAsync` → `EditJsonPatcher` → `PlanRequest(EditedJson, ExportedAtOpen)` →
-      `EditorTabsState.Open(PlanReview, payload)`. Protected і не розблоковано → дії неактивні з «Unlock editing» (`ProtectedUnlockState`).
-    - Реєстрації (`// ui`): вкладка `Explorer`, команди «Find key…», «Refresh», «Unlock editing <env>», «Lock <env>».
-  - **Файли:** `src/AzCfg.Ui/Features/Explorer/**` (у `ExplorerFeature.cs` — лише `// ui`), `tests/AzCfg.Ui.Tests/Features/Explorer/**`.
-  - **Залежить від:** P1, P2, S1, S2.
-  - **Приймання:** (1) 2000 ключів — плавний скрол, фільтр < 100 мс; (2) маска AD-5 у розмітці; секрет зникає з розмітки після
-    Hide, зміни вкладки, 30 с; (3) remote-only для неактивного/без активного; (4) жодної remote-зміни без PlanReview; протектед —
-    unlock → review; (5) інспектор генерує правильний патч (fake `ISyncWorkflowService`/`IRemoteDocumentService`).
-  - **Тести:** bUnit: фільтри, маска, remote-only, вибір ключа, reveal/hide, unlock-gate, генерація `PlanRequest`.
+- [ ] **DH — Demo mode**
+  - **Goal:** FR-U6, AD-12, G36 — every screen visible without Azure.
+  - **Read:** §1.3 (FR-U6), §2 (to know which states to seed), §5 (AD-12), §7.2 (T1 block).
+  - **Scope:** `Demo/DemoSeed` writes a sample workspace to `<temp>/azcfg-demo/<yyyyMMdd-HHmmss>/Shop`: `Shop.slnx` with
+    `src/Orders.Api` (Web SDK, `UserSecretsId`, `appsettings.json`), `src/Billing.Worker` (Worker SDK),
+    `src/Shop.Contracts` (library); loose `tests/Orders.Tests` (test project). In-memory Azure (`InMemoryWorld`): store
+    mode; envs `dev`, `stage`, `prod` (protected) with `https://appcs-shop-<env>.azconfig.io`; vaults
+    `https://kv-shop-<env>.vault.azure.net`; per env ~40 keys of service `orders`, ~10 `global:` keys, 6 secrets; a
+    duplicate-label key in `stage`; 5 keys differ between `stage` and `prod`; service `billing` keys. Variant `full`:
+    profile saved, `Orders.Api` bound (values → `appsettings.local.json` in the sample folder, secrets → in-memory
+    user-secrets), `dev` pulled, then 2 local edits, 1 remote change and 1 conflict applied; workspace registered.
+    Variant `empty`: nothing saved (first run). `UiHostOptions.StateRoot` → `<demo folder>/state`. `AddAzCfgDemo`
+    registers `AddAzCfgInMemory(world)`, the seed (runs once at startup) and a `DEMO` status bar item.
+  - **Files:** `src/AzCfg.Ui/Demo/**`, `tests/AzCfg.Ui.Tests/Demo/**`.
+  - **Depends on:** F1, T1.
+  - **Acceptance:** (1) `full`: `DiffAsync(dev)` shows exactly 2 local changes, 1 remote change, 1 conflict; `stage`
+    read gives a `DuplicateLabels` warning; `prod` protected; (2) `empty`: `LoadProfileAsync` → null; (3) with `--demo`
+    the composed `IConfigStore` is `InMemoryAppConfig`, the state root is under the demo folder and nothing is written
+    to `JsonUserStateStore.DefaultRoot` or to the real user-secrets folder; (4) *manual:*
+    `dotnet run --project src/AzCfg.Ui -- --demo` opens the workbench with the sample workspace.
+  - **Tests:** `tests/AzCfg.Ui.Tests/Demo/**`.
 
-- [ ] **U3 — UI: JSON-документи + Sync/Diff**
-  - **Мета:** FR-J1–J5, FR-S1–S7, FR-A5 (відображення), G15, G17.
-  - **Читати:** 3 (G15, G17, G26), 4.4, 4.6, 5 (AD-5, AD-7, AD-9, AD-10), 7.3 (Sync, Documents), 7.4, 8, 9.
-  - **Scope:**
-    - `RemoteJsonTab` (`CodeEditor` зі schema; валідація з debounce → маркери; dirty; `Ctrl+S` = Review: невалідно → ні;
-      `IsStaleAsync` → діалог «Remote changed since opened: Reload / Review anyway» → `PlanRequest(EditedJson, ExportedAtOpen)` →
-      PlanReview; Format; Reload; protected → read-only до unlock). `LocalFileTab` (ціль із Discriminator; ціль секретів —
-      заглушка з «Reveal & edit»; валідація; `Ctrl+S` → `SaveAsync` (Write) → `ExplorerState.Invalidate`).
-    - `ChangesSidebar` (для `WorkspaceState.SelectedProject` + активного середовища: Conflicts / Local changes / Remote changes з
-      `ExplorerState.View` (завантажує, якщо немає); «Review push» → `PlanRequest(LocalFiles)` → PlanReview; «Review pull» → PullPreview).
-    - `PlanReviewTab` (рядки `ChangeRow` з чекбоксами за scope; Before/After plain; «secret will be set» для `CreateSecret`;
-      `DiffEditor` local/remote для вибраного ключа; stale-банер; `VaultPicker` при `RequiresVaultChoice` (пошук, `ChooseVaultAsync`);
-      `ApplyDialog`: зведення, `TypedConfirmAsync` для protected, чекбокс global; результат applied/failed, для `Failed` — «Re-plan»).
-    - `PullPreviewTab` (рядки з чекбоксами; «Pull selected» → `PullSelectedAsync`; «Pull all» → `PullAsync` з обробкою `Blocked`
-      як у U1; protected — попередження), `ConflictView` (base/local/remote; Keep remote = `PullSelectedAsync([key])`; Keep local =
-      `KeepLocalAsync` → PlanReview). Після apply/pull/save — `ExplorerState.Invalidate`.
-    - Реєстрації (`// ui`): вкладки `RemoteJson`, `LocalFile`, `PlanReview`, `PullPreview`; sidebar Changes (Order 1); команди
-      «Open Remote JSON», «Review push», «Review pull».
-  - **Файли:** `src/AzCfg.Ui/Features/{Documents,Sync}/**` (у `*Feature.cs` — лише `// ui`), `tests/AzCfg.Ui.Tests/Features/{Documents,Sync}/**`.
-  - **Залежить від:** P1, P2, S1, S2.
-  - **Приймання:** (1) невалідний JSON не дає зберегти/перейти до review; stale-діалог при зміненому remote; після save Explorer
-    показує `LocalModified`; (2) apply неможливий при конфліктах, порожньому виборі, без vault, без typed для protected; кнопка
-    заблокована під час операції; (3) push локальних файлів лише для активного; (4) вибір підмножини → `Select`; конфлікт-дії.
-  - **Тести:** bUnit з Loose JSInterop і fakes Application-інтерфейсів.
+- [ ] **U1 — UI: workspace, environments, settings**
+  - **Goal:** FR-W1…W6, FR-E1…E6 (UI), G15, G17, G30.
+  - **Read:** §2.2, §2.3, §2.8 (1–3), §2.9, §4 (G15, G17, G30), §5 (AD-9, AD-10), §7.3 (Workspace, Environments),
+    §7.4, §7.5, §9, `docs/ui-components.md`.
+  - **Scope:** sidebar sections WORKSPACE / ENVIRONMENTS / RESOURCES (§2.3; `FluentTreeView` for the workspace tree);
+    `OpenFolderDialog` (`IDirectoryBrowser`, completion, recent/pinned via `IWorkspaceRegistry`); `BindingFlow`
+    (`IBindingFlow`: wizard §FR-W5; after Bind → `WorkspaceState.UpdateBinding` and "Pull ‹env› now?" →
+    `IActivationFlow`); `EnvironmentSetupWizard` (`FluentWizard`, FR-E1) and `SettingsTab` (`TabKind.Settings`: envs
+    add/remove/edit endpoint/label/protected, mode, default label, gitignoreLocalFiles; no rename; warning when deleting
+    an env active in open projects; save → `WorkspaceState.SetEnvironments` + `ProjectSessions.InvalidateAll`);
+    `AccountStatusItem` (status bar, Retry); per-environment connection checks; commands `workspace.openFolder`,
+    `workspace.refresh`, `project.bind`, `project.settings`, `env.setup`, `env.manage`.
+  - **Files:** `src/AzCfg.Ui/Features/{Workspace,Environments}/**`, `tests/AzCfg.Ui.Tests/Features/{Workspace,Environments}/**`.
+  - **Depends on:** P1, S1.
+  - **Acceptance:** (1) scanning a folder with 3 solutions and 20 projects runs through `IOperationRunner` (Read), the
+    UI stays responsive, closing the dialog cancels; (2) unsafe targets are not offered for secrets (reason shown);
+    after Bind the tree updates; re-bind keeps vaults; (3) environment wizard saves mode and labels; validation errors
+    shown inline; (4) saving environments invalidates sessions; protected environments marked everywhere;
+    (5) `local.settings.json` read-only with tooltip; libraries dimmed; (6) *manual (demo `empty` and `full`)*.
+  - **Tests:** bUnit with fakes of Application interfaces (`tests/AzCfg.Ui.Tests/Features/<X>/Fakes`).
 
-- [ ] **Q1 — Наскрізні та безпекові тести**
-  - **Мета:** довести сценарії цілком і AD-3, AD-5, AD-9 (реальні Core + Application + компоненти; Azure/ФС — fakes).
-  - **Читати:** 5 (AD-3, AD-5, AD-9), 12, 7 (за потреби).
-  - **Scope:** `UiTestHost` (DI як у `Program`: `AddAzCfg()` із заміною портів на fakes + `AddAzCfgUi()`, bUnit-рендер `Workbench`).
-    Сценарії: (1) перший запуск → профіль → відкрити теку → прив'язати → pull (з G21-confirm) → Explorer; (2) змінити локальне
-    значення → Changes → 1 з 2 змін → apply → знімок оновлено лише для неї; (3) Remote JSON → новий секрет → vault choice →
-    apply (KV перед App Config); (4) конфлікт → Keep remote / Keep local; (5) protected: unlock → review → typed confirm, без нього
-    apply неможливий; (6) pull blocked → Discard; (7) stale Remote JSON; (8) 412 → `Failed` → Re-plan; (9) Auth required → banner
-    → Retry. Безпека: seed-секрет `AZCFG-TEST-SECRET-7f3a` у fake KV і local secrets — обхід усіх вкладок/станів, відсутній у
-    `Markup` до Reveal і після Hide; логи (перехоплювач) без seed і токена; `ToString`/JSON `PlanRequest`/`PushSource`/`SyncPlan`
-    без seed; жодна дія редагування protected без unlock; `LocalFiles` у неактивне неможливий.
-    Знайдені дефекти — виправлення у файлах відповідних фіч (дозволено цій задачі), кожне окремим комітом.
-  - **Файли:** `tests/AzCfg.Ui.Tests/{Integration,Security}/**`; виправлення — `src/AzCfg.Ui/**`.
-  - **Залежить від:** B2, U1, U2, U3.
-  - **Приймання:** 9 сценаріїв і безпекові інваріанти 12.3 зелені, без мережі.
+- [ ] **U2 — UI: project tab + Browse**
+  - **Goal:** FR-B1…B7, FR-X1, FR-X2, FR-S7 (header), AD-5…AD-8 in editing.
+  - **Read:** §2.4, §2.5, §2.9–§2.12, §5 (AD-4…AD-8), §7.3 (Configuration, Sync: drafts), §7.4, §7.5, §9,
+    `docs/ui-components.md`.
+  - **Scope:** `ProjectTab` (`TabKind.Project`): `ProjectHeader` (env switcher, mode switch, summary, Refresh, lock),
+    remote-only bar (`IActivationFlow`), protected frame + Unlock/Lock (`ProtectedUnlockState`, confirm),
+    `DraftBar`, body via `ProjectModeRegistration` (unregistered mode → "not available"), dirty state from drafts,
+    close confirmation. `BrowseView` (`ProjectMode.Browse`): toolbar, `KeyTreeGrid` columns §2.5, inline edit, context
+    menu, Tree/JSON (Azure draft in `CodeEditor` with schema + `IDraftService.Validate` markers; Local read-only),
+    `BrowseInspector` (§2.5). Draft actions → `IDraftService` + `ProjectSession.SetDraft`; local actions →
+    `ILocalValuesService` (Write) + invalidate; ignore → `IWorkspaceService.AddIgnoreAsync`/`RemoveIgnoreAsync`.
+    Commands `project.mode.*`, `project.refresh`, `project.unlock`, `project.lock`, `browse.*`, `draft.review`,
+    `draft.discard`; quick-open contributions for keys.
+  - **Files:** `src/AzCfg.Ui/Features/{Project,Browse}/**`, `tests/AzCfg.Ui.Tests/Features/{Project,Browse}/**`.
+  - **Depends on:** P1, P2, S1, S2, S3.
+  - **Acceptance:** (1) loads via the runner (Read) with skeleton rows, caches in the session, Refresh reloads;
+    (2) remote-only for a non-active env with the Make-active bar; (3) the sentinel is absent from markup until Reveal
+    and after hide / tab switch / 30 s; (4) edits create and extend the draft (bar count, tab dirty); protected and
+    locked → edit actions disabled; (5) JSON view edits update the draft (debounced); invalid JSON → markers, draft
+    unchanged; (6) local actions call `ILocalValuesService` and invalidate; (7) switching modes keeps env, filter and
+    selection; (8) 2000 keys: scrolling smooth, filter < 100 ms measured; (9) Delete / Revert / Move to Key Vault /
+    Set secret value produce the right `IDraftService` calls (fakes); (10) *manual (demo)*.
+  - **Tests:** bUnit + fakes (`IConfigurationService`, `IDraftService`, `ILocalValuesService`, `IActivationFlow`, …).
 
-- [ ] **Q2 — Документація, ADR, полірування, smoke**
-  - **Мета:** MVP Definition of Done.
-  - **Читати:** увесь план; `docs/adr/0007-*.md` як зразок формату ADR.
-  - **Scope:** `docs/adr/0008-ui-host-and-architecture.md` (AD-1–3, 6–8, 10, 11), `docs/adr/0009-ui-secrets-and-protected-environments.md`
-    (AD-4, 5, 9) у форматі наявних ADR; `docs/architecture.md` (розділ «UI»), `CLAUDE.md` (команда `dotnet run --project src/AzCfg.Ui`,
-    структура, правила UI-шару з розділу 9, посилання на ADR), `README.md` (розділ «UI»: запуск, `az login`, ролі, безпека localhost,
-    binding на теку `.csproj` — R9); полірування empty/loading/error, фокус і клавіатура; заміри 12.4 і рішення по R3; рішення
-    відкритих питань 13.2 зафіксовані; чекліст ручної перевірки з 12.5 + пункти «не перевірено» з PR-ів — у PR (smoke на реальному
-    Azure проходить **користувач**, агент готує чекліст і запускає UI локально).
-  - **Файли:** `docs/**`, `CLAUDE.md`, `README.md`, `src/AzCfg.Ui/**` (лише полірування, без нових фіч).
-  - **Залежить від:** Q1.
-  - **Приймання:** розділ 14 виконано, крім пункту smoke (його відмічає користувач).
+- [ ] **U3 — UI: Compare**
+  - **Goal:** FR-C1…C5.
+  - **Read:** §2.6, §2.9–§2.12, §7.3 (Configuration: compare), §7.4, §7.5, §9, `docs/ui-components.md`.
+  - **Scope:** `CompareView` (`ProjectMode.Compare`): side pickers (Local + every env), swap, differences only, search,
+    `KeyTreeGrid` with the Result column, JSON diff (`DiffEditor` of `LeftJson`/`RightJson`), `CompareInspector`
+    (both sides, Open in Browse), counts and ignored hint; caches in `ProjectSession.SetComparison`; [S] Copy to right
+    (plain only) via `IDraftService.SetValue` on the right env's draft (protected → requires unlock).
+  - **Files:** `src/AzCfg.Ui/Features/Compare/**`, `tests/AzCfg.Ui.Tests/Features/Compare/**`.
+  - **Depends on:** P1, P2, S1, S2.
+  - **Acceptance:** (1) default sides per §2.6; swap; (2) counts and "differences only"; (3) secrets show names or
+    same/different only — the sentinel never in markup; (4) the diff editor receives `LeftJson`/`RightJson`;
+    (5) changing the selected env or a write invalidates the comparison; (6) *manual (demo)*: dev ↔ stage and local ↔ dev.
+  - **Tests:** bUnit + fake `ICompareService`.
+
+- [ ] **U4 — UI: Sync + make active**
+  - **Goal:** FR-S1…S7, FR-X1 (apply), G16, G20.
+  - **Read:** §2.7, §2.8 (4–9), §2.9–§2.12, §4 (G16, G20), §5 (AD-5…AD-9), §7.3 (Sync), §7.4, §7.5, §9,
+    `docs/ui-components.md`.
+  - **Scope:** `SyncView` (`ProjectMode.Sync`): Push / Pull / Pending edits (§2.7), conflict rows with Keep local /
+    Keep remote (`ISyncWorkflowService.ResolveConflictAsync` for local files, `IDraftService.ResolveConflictAsync` for
+    drafts), change rows with checkboxes → `Select`, warnings, sticky footer with `Check` reasons, `VaultPicker`
+    (searchable `ListVaultsAsync`; `IWorkspaceService.SetVaultAsync` + re-preview), `ApplyDialog` (summary,
+    `ConfirmTypedAsync` for protected, global checkbox), result toast / message bar with "Refresh plan";
+    Pull selected / Pull all (blocked → dialog §2.8.4). `ActivationFlow` (`IActivationFlow`, FR-S6, G20).
+    `SyncStatusItem` (status bar summary → opens Sync). After every write: `ProjectSession.Invalidate()`, drafts
+    cleared after a successful draft apply, `WorkspaceState.UpdateBinding` after pulls. Commands `sync.apply`,
+    `sync.pullSelected`, `env.makeActive`.
+  - **Files:** `src/AzCfg.Ui/Features/Sync/**`, `tests/AzCfg.Ui.Tests/Features/Sync/**`.
+  - **Depends on:** P1, P2, S1, S3.
+  - **Acceptance:** (1) apply impossible with nothing selected, with `RequiresVaultChoice`, without the typed name for
+    protected or without the global checkbox — buttons disabled while an operation runs; (2) a conflict blocks only its
+    key; Keep local / Keep remote call the right service for local files vs drafts; (3) Push/Pull disabled for a
+    non-active env; (4) a blocked pull never overwrites without "Discard local changes"; a first pull with local keys
+    only after confirmation; protected pull warns; (5) partial selection → `Select` with the chosen keys; (6) failed
+    (412) result shows "Refresh plan"; (7) *manual (demo `full`)*: push 1 of 2 local changes, resolve the conflict,
+    apply a draft with a new secret (vault picker), make `stage` active.
+  - **Tests:** bUnit + fakes (`ISyncWorkflowService`, `IDraftService`, `IWorkspaceService`, `IDialogService` via Fluent).
+
+- [ ] **Q1 — Integration and security tests**
+  - **Goal:** prove the scenarios end to end and AD-1, AD-6, AD-7 on real Core + Application + components with the
+    in-memory world.
+  - **Read:** §2.8, §5 (AD-1, AD-6, AD-7), §12, §7 (as needed).
+  - **Scope:** `UiTestHost` (composition of `AzCfgUiApp` services over `AddAzCfgInMemory` + `DemoSeed`, bUnit render of
+    `Workbench`). Scenarios: (1) first run → environment wizard → open folder → bind → make active (G20 confirm) →
+    Browse; (2) local edit → Sync › Push → apply 1 of 2 → snapshot updated only for it; (3) draft with a new secret →
+    vault choice → apply (KV before App Config); (4) local-files conflict Keep remote / Keep local; (5) protected:
+    unlock → draft → typed confirmation; impossible without it; (6) pull blocked → Discard; (7) draft + concurrent
+    remote change of an untouched key → not reverted; same key → conflict; (8) 412 → Refresh plan; (9) auth required
+    → bar → Retry; (10) compare dev ↔ stage and local ↔ dev. Security: the sentinel in KV and local secrets — walk all
+    modes/tabs/states: absent from markup before Reveal and after hide; logs (capturing provider) contain neither the
+    sentinel nor the access token; `ToString`/JSON of `PushSource`, `SyncPlan`, `RemoteDraft`, previews without it; no
+    edit action on a locked protected env; `LocalFiles` push to a non-active env impossible.
+    Defects found are fixed in the owning feature's files (allowed for this task), one commit per fix.
+  - **Files:** `tests/AzCfg.Ui.Tests/{Integration,Security}/**`; fixes in `src/AzCfg.Ui/**`, `src/AzCfg.Ui.Application/**`.
+  - **Depends on:** I1, DH, U1, U2, U3, U4.
+  - **Acceptance:** the 10 scenarios and the invariants of §12.3 green, no network.
+
+- [ ] **Q2 — Docs, polish, measurements, smoke checklist**
+  - **Goal:** MVP Definition of Done (§14).
+  - **Read:** the whole plan; ADR 0010/0011.
+  - **Scope:** `README.md` (UI section: run, `--demo`, `az login`, RBAC roles, localhost security, binding per `.csproj`
+    folder — R9), `docs/architecture.md` (UI section), `CLAUDE.md` (commands `dotnet run --project src/AzCfg.Ui`,
+    `-- --demo`; structure with the new projects; UI layer rules from §9; `docs/ui-components.md` pointer),
+    `docs/ui-components.md` final; polish of empty/loading/error states, focus and keyboard; measurements §12.4 and the
+    R3 decision; manual smoke checklist §12.5 + all "not verified" items in the PR (the smoke on real Azure is run by
+    the **user**; the agent prepares the checklist and runs `--demo` locally).
+  - **Files:** `docs/**`, `CLAUDE.md`, `README.md`, `src/AzCfg.Ui/**`, `src/AzCfg.Ui.Application/**` (polish only, no
+    new features).
+  - **Depends on:** Q1.
+  - **Acceptance:** §14 done except the smoke item (ticked by the user).
 
 ---
 
-## 11. Граф, хвилі, спільні файли
+## 11. Graph, waves, shared files
 
-### 11.1 Граф
+### 11.1 Graph
 ```mermaid
 graph LR
-  F1[F1 Каркас + контракти] --> B2[B2 Infra] & P1[P1 UI-платформа] & P2[P2 Host + Monaco] & S1[S1 Сервіси workspace/env] & S2[S2 Сервіси config/sync]
-  B1[B1 Core] --> S2
-  P1 --> U1[U1 Проєкти + середовища] & U2[U2 Explorer] & U3[U3 Документи + Sync]
-  S1 --> U1 & U2 & U3
-  S2 --> U1 & U2 & U3
-  P2 --> U2 & U3
-  B2 & U1 & U2 & U3 --> Q1[Q1 Тести] --> Q2[Q2 Документація + полірування]
+  F0 --> D1 & C1 & C2 & T1 & F1
+  F1 --> I1 & P1 & P2 & S1 & S2 & S3 & DH
+  T1 --> S1 & S2 & S3 & DH
+  C1 --> S2 & S3
+  C2 --> S2 & S3
+  P1 --> U1 & U2 & U3 & U4
+  P2 --> U2 & U3 & U4
+  S1 --> U1 & U2 & U3 & U4
+  S2 --> U2 & U3
+  S3 --> U2 & U4
+  I1 & DH & U1 & U2 & U3 & U4 --> Q1 --> Q2
 ```
 
-### 11.2 Хвилі
-| Хвиля | Задачі | Агентів |
+### 11.2 Waves
+| Wave | Tasks | Agents |
 | --- | --- | --- |
-| W1 | F1, B1 | 2 |
-| W2 | B2, P1, P2, S1, S2 (S2 — після B1) | 5 |
-| W3 | U1, U2, U3 | 3 |
+| W0 | F0 (orchestrator) | 0 |
+| W1 | D1, C1, C2, T1, F1 | 5 |
+| W2 | I1, P1, P2, S1, S2, S3, DH | 7 |
+| W3 | U1, U2, U3, U4 | 4 |
 | W4 | Q1 | 1 |
 | W5 | Q2 | 1 |
 
-Критичний шлях: **F1 → P1 → U3 → Q1 → Q2**. P1 — найбільша задача W2; стартуй її першою.
+Critical path: **F0 → F1 → P1 → U2/U4 → Q1 → Q2**. F1 and P1 are the largest tasks of their waves — start them first.
+After W2 is merged, `--demo` works and every W3 agent can check its screens in a browser.
 
-### 11.3 Спільні файли
-| Файл | Хто | Як уникнути конфлікту |
+### 11.3 Shared files
+| File | Who | How conflicts are avoided |
 | --- | --- | --- |
-| `Directory.Packages.props`, `AzCfg.slnx`, `Program.cs`, `App.razor`, `appsettings.json` | лише F1 | Усе підключено одразу |
-| `AzCfg.Infrastructure/DependencyInjection.cs`, `JsonUserStateStore.cs`, `CsprojDetector.cs` | лише B2 | — |
-| `Core/UseCases/ISyncService.cs`, `SyncService.cs`, CLI `StubSync` | лише B1 | — |
-| `Application/PlatformServices.cs` | F1 (порожній), P1 | S1 реєструє свої singleton-и в `EnvironmentsFeature.cs` |
-| `Features/<X>/<X>Feature.cs` | F1 (порожні), S1/S2 (`// services`), U1/U2/U3/P1 (`// ui`) | Різні регіони; S і U різних хвиль |
-| `wwwroot/css/*.css`, `js/shortcuts.js` | F1 (порожні), P1 | — |
-| `EnvironmentSwitcher` | U1 (власник); U2 використовує | U2 до мерджу U1 — локальний рядок `EnvPill` у своїй теці, заміна в Q2 |
-| `docs/ui-mvp-plan.md` | усі (лише свій рядок `[x]`), оркестратор (0.6, розділ 7 за 0.5) | Рядки задач рознесені |
+| `Directory.Packages.props` | F0 only | All versions added up front |
+| `AzCfg.slnx`, `Program.cs`, `appsettings.json`, `_Imports.razor`, `Routes.razor` | F1 only | Everything wired once |
+| `Components/App.razor` | F1; P2 (BlazorMonaco script tags only) | Different waves |
+| `Components/Pages/Home.razor`, `Components/Layout/MainLayout.razor` | F1 (placeholders) → P1 | Different waves |
+| `Hosting/HostSecurityExtensions.cs` | F1 (empty) → P2 | Different waves |
+| `Demo/DemoServiceCollectionExtensions.cs` | F1 (no-op) → DH | Different waves |
+| `Application/<Area>/<Area>Services.cs` | F1 (empty) → the S task of that area | One owner per area |
+| `Features/<X>/<X>Feature.cs` | F1 (empty) → the P/U task of that feature | One owner per feature |
+| `Core/UseCases/{ISyncService,SyncService}.cs`, CLI `StubSync` | C2 only | — |
+| `Core/Mapping/KeyMapper.cs`, `Core/Sync/ThreeWayDiff.cs` | C1 only | — |
+| `Infrastructure/DependencyInjection.cs`, `JsonUserStateStore.cs`, `CsprojDetector.cs` | I1 only | — |
+| `tests/AzCfg.Cli.Tests/Scenario/**` | T1 only | C2 touches only the 4 `*CommandTests.cs` stubs |
+| `wwwroot/css/app.css` | F1 (empty) → P1 | — |
+| `CLAUDE.md` | D1 (ADR line), Q2 | Different waves |
+| `docs/ui-mvp-plan.md` | everybody (own `[x]` line), orchestrator (0.7, §7 via 0.6) | Separate lines |
 
-### 11.4 Що не можна змінювати без оркестратора
-Контракти розділу 7; `TabKind`/`TabDescriptor` і правило дедуплікації; семантика `OperationKind.Write`; правило «remote-зміни
-лише через edit JSON → PlanReview» (AD-7); «`LocalFiles` push лише в активне» (AD-9); ключ проєкту `ProjectId = CsprojPath`
-і G4.
+### 11.4 Not changeable without the orchestrator
+§7 contracts; `TabKind`/`ProjectMode` and the dedupe rule; `OperationKind.Write` semantics; "Azure edits only through
+drafts → Sync review" (AD-5); "local-files push/pull only for the active env" (AD-8); `ProjectId = CsprojPath` and G4;
+"Application never re-implements Core rules" (§5.2); the secret rules of AD-6.
 
 ---
 
-## 12. Тестування
+## 12. Testing
 
-### 12.1 Рівні
-| Рівень | Що | Де |
+### 12.1 Levels
+| Level | What | Where (task) |
 | --- | --- | --- |
-| Core unit (TDD) | `FromNestedJson`, `PullSelectedAsync`, redaction | `tests/AzCfg.Core.Tests` (B1) |
-| Infrastructure | `AzureErrors`, scanner, detector, lock, credential, паритет JSON | `tests/AzCfg.Infrastructure.Tests` (F1, B1, B2) |
-| Application | усі `Application/**` на реальних Core-сервісах + fakes портів | `tests/AzCfg.Ui.Tests/Application` (S1, S2) |
-| Components/Features | поведінка, gate-и, маскування, dirty (bUnit) | `tests/AzCfg.Ui.Tests/{Components,Features}` (P1, P2, U*) |
-| Hosting | token gate, host filtering, заголовки, instance lock | `tests/AzCfg.Ui.Tests/Hosting` (P2) |
-| Integration / Security | сценарії Q1 | `tests/AzCfg.Ui.Tests/{Integration,Security}` (Q1) |
-| Manual smoke | реальний Azure | 12.5 (Q2, користувач) |
+| Core unit (TDD) | patch, selection, comparer, base JSON, pull selected, resolve, read remote, guard | `tests/AzCfg.Core.Tests` (C1, C2) |
+| Infrastructure | `AzureErrors`, scanner, detector, lock, credential, in-memory composition | `tests/AzCfg.Infrastructure.Tests` (F1, T1, I1) |
+| CLI | unchanged suites incl. scenarios on the moved in-memory adapters | `tests/AzCfg.Cli.Tests` (T1, C2) |
+| Application | every service on real Core + `AddAzCfgInMemory` | `tests/AzCfg.Ui.Tests/Application` (S1–S3) |
+| Components / features | behaviour, gates, masking, dirty state (bUnit) | `tests/AzCfg.Ui.Tests/{Components,Features}` (P1, P2, U*) |
+| Host | token login, cookie, 401/400, headers, logs | `tests/AzCfg.Ui.Tests/Hosting` (P2) |
+| Demo | seed shape, isolation from real state | `tests/AzCfg.Ui.Tests/Demo` (DH) |
+| Integration / security | Q1 scenarios and §12.3 | `tests/AzCfg.Ui.Tests/{Integration,Security}` (Q1) |
+| Manual | `--demo` screens per task; real Azure smoke | §12.5 (Q2, user) |
 
-### 12.2 Правила
-Жодних живих Azure-викликів в автотестах; fakes не дублюються (Core-fakes лінкуються); UI-fakes — у теці тестів задачі;
-без mock-бібліотек; кожен FR [MVP] — щонайменше один тест на Application або компонент.
+### 12.2 Rules
+No live Azure calls in automated tests; one set of in-memory adapters (T1) — never duplicated; UI fakes only in the
+owning task's test folder; no mock libraries; every [MVP] FR has at least one Application or component test.
 
-### 12.3 Безпекові інваріанти (обов'язкові)
-1. Значення секрету відсутнє в розмітці, `ConfigurationView`, `ChangeRow`, `PullPreview`, логах — до явного Reveal і після Hide.
-2. `PlanRequest`, `PushSource.*`, `SyncPlan` — `ToString()` і JSON без значень.
-3. Apply у protected без typed-підтвердження неможливий в UI і падає в Core при обході gate.
-4. Конфлікти ніде в UI-коді не прибираються з плану.
-5. Без токена доступу → 401; чужий `Host` → 400; токен не в логах.
+### 12.3 Security invariants (mandatory)
+1. A secret value is absent from markup, view models (`ConfigurationView`, `ComparisonView`, previews, rows) and logs
+   — before an explicit Reveal and after hide.
+2. `PushSource.*`, `SyncPlan`, `RemoteDraft`: `ToString()` and JSON without values.
+3. Apply to a protected env without the typed name is impossible in the UI and fails in Core when the gate is bypassed.
+4. A conflicting key is never applied; conflicts are removed only by resolution or by deselecting the key (Core
+   `PlanSelection`), never by UI code.
+5. Without the access token → 401; foreign `Host` → 400; the token is never logged.
+6. `--demo` never touches real Azure, `%APPDATA%/azcfg` or real user-secrets.
 
-### 12.4 Продуктивність (Q2)
-Explorer на 2000 ключів: рендер дерева < 300 мс після даних, фільтр < 100 мс, палітра < 50 мс; заміряти `DiffAsync` на 200
-секретах (R3).
+### 12.4 Performance (measured in Q2)
+Browse with 2000 keys: tree render < 300 ms after data, filter < 100 ms, palette < 50 ms. `DiffAsync` with 200 secrets
+(R3).
 
-### 12.5 Ручний smoke (реальний Azure)
-`az login` → запуск UI → майстер середовищ (discovery) → відкрити репо з `.slnx` → прив'язати проєкт → pull dev → змінити
-локальне значення → push 1 зміни → Remote JSON: секрет із vault choice → перевірити reference і секрет у порталі → змінити ключ
-у порталі → stale-діалог → protected: unlock + typed confirm → вимкнути мережу → Unreachable → `az logout` → AuthRequired → Retry.
-Плюс CSP + Monaco без CDN (DevTools → Network), WebSocket-кадри без секрету до Reveal.
+### 12.5 Manual smoke on real Azure (user)
+`az login` → `dotnet run --project src/AzCfg.Ui` → environment wizard (discovery, both modes) → open a repo with
+`.slnx` → bind a project → make dev active → local edit → push 1 change → Browse: draft with a new secret → vault choice
+→ check the reference and the secret in the portal → change a key in the portal → draft review shows a conflict for the
+same key and no revert for others → protected: unlock + typed confirmation → Compare dev ↔ stage → disconnect the
+network → Unreachable → `az logout` → AuthRequired → Retry. Plus: CSP + Monaco without CDN (DevTools → Network);
+WebSocket frames without secrets before Reveal.
 
 ---
 
-## 13. Ризики і рішення відкритих питань
+## 13. Risks and decided questions
 
-### 13.1 Ризики
-| ID | Ризик | Пом'якшення |
+### 13.1 Risks
+| ID | Risk | Mitigation |
 | --- | --- | --- |
-| R1 | Інший локальний процес підключається до UI | AD-3: loopback, токен, SameSite=Strict, AllowedHosts, CSP |
-| R2 | Секрет витікає в DOM/WebSocket/логи | AD-5, 12.3, Q1, `DetailedErrors=false` |
-| R3 | `DiffAsync`/`PlanPushAsync` повільні на багатьох секретах (G14) | Кеш, Refresh; якщо заміри Q2 > 5 с на 200 секретах — окремий Core-PR з обмеженим паралелізмом у `ReadRemoteAsync` (поведінка та сама) |
-| R4 | Застарілий Remote JSON перетирає чужі зміни (G15) | Stale-детектор + ETag на ключах плану |
-| R5 | Частковий apply при розриві circuit-а | Write на `ApplicationStopping` (AD-10), `Failed` → Re-plan |
-| R6 | Гонка запису стану між CLI і UI | In-process lock (B2); міжпроцесний — поза MVP |
-| R7 | BlazorMonaco несумісний із .NET 10 | Обгортки P2; fallback — власний interop + вендоринг monaco-editor лише у файлах P2 (рішення оркестратора за 0.5) |
-| R8 | Великий JSON через SignalR | 2 MB ліміт хаба, 1 MB ліміт документа |
-| R9 | Binding на теку `.csproj` ≠ звичка CLI запускати з кореня | Fallback на binding предка (G4), README |
-| R10 | Перейменування середовища ламає знімки | Заборонене (G16) |
-| R11 | Паралельні агенти конфліктують у файлах | 11.3, DI-реєстрації (AD-11), бриф обмежує «Файли» |
-| R12 | `DefaultAzureCredential` повільно стартує | Один singleton, перша перевірка у фоні |
+| R1 | Another local process talks to the UI | AD-1: loopback, one-time token, SameSite=Strict cookie, AllowedHosts, CSP |
+| R2 | A secret leaks into DOM/WebSocket/logs | AD-6, §12.3, Q1, `DetailedErrors=false` |
+| R3 | `DiffAsync`/`PlanPushAsync` slow with many secrets (G13) | Session caches + Refresh; if Q2 measures > 5 s on 200 secrets — a Core PR with bounded parallelism in secret resolution (same behaviour) |
+| R4 | Fluent UI v5 is young (5.0.0 GA 2026-09-28, 5.1.0 on 2026-11-16) and agents know v4 better | F1 spike, P1 guide from the package XML docs, brief rule "no APIs from memory"; fallback 5.0.1 → 4.14.5 (orchestrator, touches only P1/U*) |
+| R5 | BlazorMonaco/Monaco changes or CSP issues | Wrappers in P2; fallback own interop with vendored monaco-editor inside P2 files |
+| R6 | Partial apply when a circuit drops | Write ops on `ApplicationStopping` (AD-9); 412 → Refresh plan |
+| R7 | CLI and UI write user state concurrently | In-process lock (I1); cross-process out of MVP |
+| R8 | Large JSON over SignalR | 2 MB hub limit, 1 MB editor limit |
+| R9 | Binding per `.csproj` folder ≠ CLI habit of running from the repo root | Ancestor fallback (G4), README |
+| R10 | Environment rename breaks snapshots | Not offered (G15) |
+| R11 | Parallel agents conflict in files | §11.3, DI registrations (AD-10), briefs restrict "Files" |
+| R12 | `DefaultAzureCredential` is slow to start | One singleton, first check in the background |
+| R13 | Demo mistaken for real data | DEMO badge; isolation tested (§12.3.6) |
 
-### 13.2 Відкриті питання — рішення для MVP (агенти не чекають на них)
-| # | Питання | Рішення MVP |
+### 13.2 Decided questions (agents do not wait for them)
+| # | Question | MVP decision |
 | --- | --- | --- |
-| Q1 | Пакування UI | Лише `dotnet run --project src/AzCfg.Ui` |
-| Q2 | Per-project набори середовищ | Ні: профіль глобальний, показуються всі |
-| Q3 | Binding-ключ | Тека `.csproj` для нових; адоптований binding предка — як є (G4) |
-| Q4 | Pull із protected у локальні файли | Дозволено з окремим попередженням |
-| Q5 | Редагування файлу цілі секретів у Monaco | Дозволено після «Reveal & edit» |
-| Q6 | Міжпроцесний lock CLI↔UI | Поза MVP |
-| Q7 | Promote у UI | Наступна ітерація |
-| Q8 | Перейменування середовищ | Наступна ітерація (з міграцією знімків і binding-ів) |
-| Q9 | Ранжування vault-ів (ADR 0005, крок 4) | Наступна ітерація, у Core для CLI й UI |
+| Q1 | Packaging | `dotnet run --project src/AzCfg.Ui`; `azcfg ui` in the dotnet tool — next iteration |
+| Q2 | Per-project environment sets | No: the profile is global, all environments shown |
+| Q3 | Binding key | `.csproj` folder for new bindings; an ancestor binding is adopted as is (G4) |
+| Q4 | Pull from a protected env into local files | Allowed with a separate warning |
+| Q5 | Raw editing of local files | Next iteration; MVP edits values through the inspector |
+| Q6 | Cross-process lock CLI ↔ UI | Out of MVP |
+| Q7 | Promote | Next iteration; Compare "Copy to right" [S] is the precursor |
+| Q8 | Environment rename | Next iteration (with snapshot and binding migration) |
+| Q9 | Vault ranking (ADR 0005 step 4) | Next iteration, in Core for CLI and UI |
+| Q10 | Light theme | Next iteration (Fluent supports it; tokens already separated) |
+| Q11 | Browser E2E (Playwright) | Next iteration, on top of `--demo` |
 
 ---
 
 ## 14. MVP Definition of Done
 
-Функціональність
-- [ ] Усі FR [MVP] (розділ 4) доступні в UI й покриті тестами.
-- [ ] Відкриття теки → solution/project дерево з конфіг-файлами; воркспейси зберігаються між запусками.
-- [ ] Майстри середовищ і прив'язки працюють без CLI; binding-и CLI підхоплюються (G4); зміна прив'язки зберігає vault-и (G5, G20).
-- [ ] Explorer: дерево, пошук/фільтри, джерела, Tree/JSON view; remote-only для неактивного середовища.
-- [ ] Monaco: Remote JSON (валідація, schema, stale) і Local file (валідація, save), dirty-вкладки.
-- [ ] Local→Azure і Azure→Local з preview, вибором змін, diff, конфліктами; перший pull попереджає про перезапис (G21).
-- [ ] Production: read-only за замовчуванням, unlock, typed confirm; `LocalFiles` push лише в активне.
-- [ ] Статуси акаунта й підключень, `az login` guidance, loading/empty/error стани, command palette.
+Functionality
+- [ ] Every [MVP] FR of §1.3 is available in the UI and covered by tests.
+- [ ] Open folder → solution/project tree with config files; folders persist between runs.
+- [ ] Environment and binding wizards work without the CLI (both environment modes); CLI bindings are adopted (G4);
+      re-binding keeps vaults, active env and ignore patterns (G5, G19).
+- [ ] Project tab with Browse / Compare / Sync switching in place; inspector; draft bar.
+- [ ] Browse: tree, search/filters, sources, Tree/JSON, remote-only for non-active envs, local and Azure edits.
+- [ ] Compare: local ↔ env and env ↔ env, differences only, JSON diff, secrets never exposed.
+- [ ] Sync: push/pull/draft previews, selection, conflicts, apply gates, vault picker, make active with G20 warning.
+- [ ] Protected envs: read-only by default, unlock, typed confirmation.
+- [ ] Account and connection status, sign-in guidance, notifications, loading/empty/error states, palette, keyboard.
+- [ ] `--demo` shows every screen without Azure.
 
-Якість і безпека
-- [ ] `dotnet build AzCfg.slnx` без warnings, `dotnet test AzCfg.slnx` зелений, `dotnet format` чистий.
-- [ ] Сценарії й безпекові інваріанти Q1 (12.3) зелені.
-- [ ] UI слухає лише `127.0.0.1`, доступ лише з токеном, токен не в логах; без CDN-запитів.
-- [ ] Core: зміни лише додаткові (G1, G6, G8, G9), TDD; CLI-тести без змін, крім стабів B1.
-- [ ] Нові пакети — лише `BlazorMonaco`, `Microsoft.VisualStudio.SolutionPersistence`, `bunit`.
+Quality and security
+- [ ] `dotnet build AzCfg.slnx` without warnings, `dotnet test AzCfg.slnx` green, `dotnet format` clean.
+- [ ] Q1 scenarios and §12.3 invariants green.
+- [ ] UI listens only on `127.0.0.1`, access only with the token, token never logged; no CDN requests.
+- [ ] Core changes additive (C1, C2, scanner types) and TDD; CLI behaviour unchanged.
+- [ ] Packages only those of §6.
 
-Документація
-- [ ] ADR 0008, 0009; `README.md` (UI), `docs/architecture.md` (UI), `CLAUDE.md` (команди, структура, правила UI).
-- [ ] Ручний smoke 12.5 пройдений користувачем на реальному Azure.
-- [ ] Усі задачі розділу 10 відмічені `[x]`.
+Documentation
+- [ ] ADR 0010, 0011; `docs/ui-components.md`; `README.md` (UI), `docs/architecture.md` (UI), `CLAUDE.md`.
+- [ ] Manual smoke §12.5 passed by the user on real Azure.
+- [ ] All tasks of §10 ticked `[x]`.
