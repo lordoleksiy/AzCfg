@@ -92,7 +92,7 @@ public static class ThreeWayDiff
 
     private static string Display(string? label) => label is null ? "no label" : $"label '{label}'";
 
-    internal static string SecretName(Uri secretUri) => secretUri.Segments.SkipWhile(s => s != "secrets/").Skip(1).First().TrimEnd('/');
+    internal static string SecretName(Uri secretUri) => KeyMapper.SecretNameOf(secretUri);
 
     internal static string SecretName(DiffItem item, string service) =>
         item.Local!.Value is StateValue.Secret { SecretUri: { } uri } && (item.Remote ?? item.Base)?.Scope == item.Local.Scope

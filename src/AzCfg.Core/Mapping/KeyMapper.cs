@@ -95,6 +95,20 @@ public static class KeyMapper
     }
 
     /// <summary>
+    /// Secret name of a Key Vault secret URI: the segment after <c>secrets/</c> (a version segment is ignored).
+    /// Throws <see cref="ArgumentException"/> when the URI is relative or has no <c>secrets/&lt;name&gt;</c> segment.
+    /// </summary>
+    public static string SecretNameOf(Uri secretUri)
+    {
+        ArgumentNullException.ThrowIfNull(secretUri);
+        var segments = secretUri.IsAbsoluteUri ? secretUri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries) : [];
+        var index = Array.IndexOf(segments, "secrets");
+        return index >= 0 && index + 1 < segments.Length
+            ? segments[index + 1]
+            : throw new ArgumentException("A Key Vault secret URI must contain a 'secrets/<name>' segment.", nameof(secretUri));
+    }
+
+    /// <summary>
     /// Splits a configuration path (no scope prefix) into nested JSON object names for local files:
     /// <c>Dataverse:ConnString</c> → <c>["Dataverse", "ConnString"]</c>. Empty segments are rejected.
     /// </summary>
