@@ -1,0 +1,9 @@
+.az-diff-editor {
+    height: 100%;
+    min-height: 160px;
+}
+
+.az-diff-editor ::deep .az-diff-editor-host {
+    height: 100%;
+    min-height: 160px;
+}

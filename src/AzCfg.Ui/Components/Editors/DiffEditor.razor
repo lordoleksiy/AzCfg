@@ -1,0 +1,99 @@
+@implements IAsyncDisposable
+
+<div class="az-diff-editor">
+    @if (_ready)
+    {
+        <StandaloneDiffEditor @ref="_editor" Id="@_id" CssClass="az-diff-editor-host"
+                              ConstructionOptions="BuildOptions"
+                              OnDidInit="InitializedAsync" />
+    }
+</div>
+
+@code {
+    private readonly string _id = $"azcfg-diff-{Guid.NewGuid():N}";
+    private StandaloneDiffEditor? _editor;
+    private TextModel? _original;
+    private TextModel? _modified;
+    private string _appliedOriginal = "";
+    private string _appliedModified = "";
+    private bool _appliedInline;
+    private bool _ready;
+    private bool _initialized;
+
+    [Inject] private IJSRuntime Js { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public string Original { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public string Modified { get; set; } = "";
+
+    /// <summary>Inline (unified) view instead of side by side.</summary>
+    [Parameter]
+    public bool Inline { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_initialized)
+        {
+            return;
+        }
+
+        if (Original != _appliedOriginal && _original is not null)
+        {
+            await _original.SetValue(_appliedOriginal = Original);
+        }
+
+        if (Modified != _appliedModified && _modified is not null)
+        {
+            await _modified.SetValue(_appliedModified = Modified);
+        }
+
+        if (Inline != _appliedInline)
+        {
+            _appliedInline = Inline;
+            await _editor!.UpdateOptions(new DiffEditorOptions { RenderSideBySide = !Inline });
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await MonacoSetup.DefineThemeAsync(Js);
+            _ready = true;
+            StateHasChanged();
+        }
+    }
+
+    private StandaloneDiffEditorConstructionOptions BuildOptions(StandaloneDiffEditor editor) => new()
+    {
+        AutomaticLayout = true,
+        Theme = MonacoSetup.ThemeName,
+        ReadOnly = true,
+        OriginalEditable = false,
+        RenderSideBySide = !Inline,
+        EnableSplitViewResizing = true,
+    };
+
+    private async Task InitializedAsync()
+    {
+        _appliedOriginal = Original;
+        _appliedModified = Modified;
+        _appliedInline = Inline;
+        _original = await BlazorMonaco.Editor.Global.CreateModel(Js, Original, MonacoSetup.Language, MonacoSetup.NewModelUri("original"));
+        _modified = await BlazorMonaco.Editor.Global.CreateModel(Js, Modified, MonacoSetup.Language, MonacoSetup.NewModelUri("modified"));
+        if (_original is not null && _modified is not null)
+        {
+            await _editor!.SetModel(new DiffEditorModel { Original = _original, Modified = _modified });
+        }
+
+        _initialized = true;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await MonacoSetup.DisposeModelAsync(_original);
+        await MonacoSetup.DisposeModelAsync(_modified);
+    }
+}
