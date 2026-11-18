@@ -59,6 +59,58 @@ public sealed class AppSettingsLocalTargetTests : IDisposable
         Assert.True(_target.CanHandle(project));
     }
 
+    [Theory]
+    [InlineData("appsettings.Development.json")]
+    [InlineData("appsettings.Local.json")]
+    [InlineData("AppSettings.Staging.json")]
+    public void CanHandle_AppWithOtherAppSettingsVariant_ReturnsTrue(string fileName)
+    {
+        File.WriteAllText(Path.Combine(_root, fileName), "{}");
+        var project = new ProjectInfo(_root, CsprojPath(), "Service", IsAzureFunctions: false, UserSecretsId: null);
+
+        Assert.True(_target.CanHandle(project));
+    }
+
+    [Fact]
+    public void CanHandle_AppWithUnrelatedJsonOnly_ReturnsFalse()
+    {
+        File.WriteAllText(Path.Combine(_root, "launchSettings.json"), "{}");
+        var project = new ProjectInfo(_root, CsprojPath(), "Service", IsAzureFunctions: false, UserSecretsId: null);
+
+        Assert.False(_target.CanHandle(project));
+    }
+
+    [Fact]
+    public async Task ReadAsync_ExistingLocalFileWithDifferentCase_ReadsIt()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "appsettings.Local.json"), """{ "A": { "B": "v" } }""");
+
+        var read = await _target.ReadAsync(Binding(), CancellationToken.None);
+
+        Assert.Equal([new LocalValue("A:B", "v")], read);
+    }
+
+    [Fact]
+    public async Task EnsureGitIgnoredAsync_ExistingLocalFileWithDifferentCase_IgnoresItsRealName()
+    {
+        RunGit("init");
+        File.WriteAllText(Path.Combine(_root, "appsettings.Local.json"), "{}");
+
+        await _target.EnsureGitIgnoredAsync(Binding(), CancellationToken.None);
+
+        Assert.Equal(["appsettings.Local.json"], File.ReadAllLines(Path.Combine(_root, ".gitignore")));
+    }
+
+    [Fact]
+    public async Task WriteAsync_ExistingLocalFileWithDifferentCase_KeepsItsName()
+    {
+        File.WriteAllText(Path.Combine(_root, "appsettings.Local.json"), "{}");
+
+        await _target.WriteAsync(Binding(), [new LocalValue("A", "1")], CancellationToken.None);
+
+        Assert.Equal(["appsettings.Local.json"], Directory.GetFiles(_root, "*.json").Select(Path.GetFileName));
+    }
+
     [Fact]
     public void CanHandle_LibraryWithAppSettings_ReturnsFalse()
     {

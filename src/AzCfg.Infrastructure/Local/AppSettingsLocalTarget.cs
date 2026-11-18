@@ -7,22 +7,26 @@ namespace AzCfg.Infrastructure.Local;
 /// <summary>
 /// <see cref="LocalTargetKind.AppSettingsLocal"/>: <c>appsettings.local.json</c> next to the project's
 /// <c>.csproj</c> (<see cref="LocalTargetBinding.ProjectPath"/>), nested JSON (ADR 0006). Offered only for
-/// application projects (not libraries) that already have <c>appsettings.json</c> or <c>appsettings.local.json</c>
-/// next to the <c>.csproj</c> (see <see cref="CanHandle"/>). A secrets target must live outside git's
+/// application projects (not libraries) that already have any <c>appsettings*.json</c> (e.g. <c>appsettings.json</c>,
+/// <c>appsettings.Development.json</c>, <c>appsettings.Local.json</c>; case-insensitive) next to the <c>.csproj</c>
+/// (see <see cref="CanHandle"/>). An existing local file is matched case-insensitively and keeps its real name
+/// (e.g. <c>appsettings.Local.json</c>); otherwise <c>appsettings.local.json</c> is used. A secrets target must live outside git's
 /// reach: <see cref="InspectAsync"/> reports it safe only when the file is git-ignored
 /// (<c>git check-ignore -q</c>) and not already tracked (<c>git ls-files --error-unmatch</c> fails);
 /// outside a git repository it is always unsafe.
 /// </summary>
 public sealed class AppSettingsLocalTarget : JsonFileTarget
 {
-    private const string FileName = "appsettings.local.json";
+    private const string DefaultFileName = "appsettings.local.json";
 
     public override LocalTargetKind Kind => LocalTargetKind.AppSettingsLocal;
 
     public override bool CanHandle(ProjectInfo project) =>
         !project.IsLibrary
         && Path.GetDirectoryName(project.CsprojPath) is { } directory
-        && (File.Exists(Path.Combine(directory, "appsettings.json")) || File.Exists(Path.Combine(directory, FileName)));
+        && Directory.Exists(directory)
+        && Directory.EnumerateFiles(directory, "*.json")
+            .Any(f => Path.GetFileName(f).StartsWith("appsettings", StringComparison.OrdinalIgnoreCase));
 
     public override async Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct)
     {
@@ -46,22 +50,31 @@ public sealed class AppSettingsLocalTarget : JsonFileTarget
             return;
         }
 
+        var fileName = Path.GetFileName(path);
         var gitIgnore = Path.Combine(directory, ".gitignore");
         var existing = File.Exists(gitIgnore) ? await File.ReadAllTextAsync(gitIgnore, ct) : "";
-        if (existing.Split('\n').Select(l => l.Trim()).Any(l => l == FileName || l == "/" + FileName))
+        if (existing.Split('\n').Select(l => l.Trim()).Any(l => l == fileName || l == "/" + fileName))
         {
             return;
         }
 
         var prefix = existing.Length == 0 || existing.EndsWith('\n') ? "" : Environment.NewLine;
-        await File.AppendAllTextAsync(gitIgnore, prefix + FileName + Environment.NewLine, ct);
+        await File.AppendAllTextAsync(gitIgnore, prefix + fileName + Environment.NewLine, ct);
     }
 
     protected override string GetFilePath(LocalTargetBinding target)
     {
         var directory = Path.GetDirectoryName(target.ProjectPath);
-        return string.IsNullOrEmpty(directory) ? FileName : Path.Combine(directory, FileName);
+        var fileName = FindLocalFileName(string.IsNullOrEmpty(directory) ? "." : directory) ?? DefaultFileName;
+        return string.IsNullOrEmpty(directory) ? fileName : Path.Combine(directory, fileName);
     }
+
+    private static string? FindLocalFileName(string directory) =>
+        Directory.Exists(directory)
+            ? Directory.EnumerateFiles(directory, "*.json")
+                .Select(Path.GetFileName)
+                .FirstOrDefault(f => string.Equals(f, DefaultFileName, StringComparison.OrdinalIgnoreCase))
+            : null;
 
     private static async Task<bool> IsSafeForSecretsAsync(string path, CancellationToken ct)
     {

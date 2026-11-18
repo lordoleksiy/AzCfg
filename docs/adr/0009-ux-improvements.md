@@ -25,7 +25,7 @@ Status: accepted (MVP, етап 7: U1–U5)
   проєкт **не** є застосунком: немає `OutputType` `Exe`/`WinExe`, SDK не `Microsoft.NET.Sdk.Web`/`Microsoft.NET.Sdk.Worker`
   (атрибут `Sdk` у `<Project>` або елемент `<Sdk Name=...>`, суфікс `/версія` ігнорується), немає `AzureFunctionsVersion`.
   Тест-проєкт (`IsTestProject=true` або `PackageReference Microsoft.NET.Test.Sdk`) — завжди `IsLibrary = true`.
-- `AppSettingsLocalTarget.CanHandle`: `!IsLibrary` і поруч із `.csproj` є `appsettings.json` або `appsettings.local.json`.
+- `AppSettingsLocalTarget.CanHandle`: `!IsLibrary` і поруч із `.csproj` є будь-який `appsettings*.json` (`appsettings.Development.json`, `appsettings.Local.json` тощо, без урахування регістру); наявний `appsettings.local.json` у будь-якому регістрі зберігає свою назву.
 - `UserSecretsTarget.CanHandle`: `!IsLibrary` або є `UserSecretsId`.
 - Дефолт `IsLibrary = false` зберігає поведінку для фейків/старих викликів.
 
