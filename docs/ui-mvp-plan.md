@@ -1270,7 +1270,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Depends on:** F0.
   - **Acceptance:** no decision beyond §5/§7; every AD id appears in exactly one ADR (manual review by the orchestrator).
 
-- [ ] **C1 — Core: pure helpers (patch, selection, comparer)**
+- [x] **C1 — Core: pure helpers (patch, selection, comparer)**
   - **Goal:** G7, G24, G27 (comparer) and edit-JSON patching — rules shared by CLI and UI.
   - **Read:** §3.2, §4 (G7, G24, G27), §7.1 (C1 blocks), §9.
   - **Scope:** `KeyMapper.SecretNameOf` (+ `ThreeWayDiff.SecretName(Uri)` delegates); `ScopedKey`; `EditJsonPatch` on
