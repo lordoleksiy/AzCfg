@@ -78,6 +78,40 @@ public sealed class CsprojDetector : IProjectDetector
             CsprojPath: csprojPath,
             Name: Path.GetFileNameWithoutExtension(csprojPath),
             IsAzureFunctions: isAzureFunctions,
-            UserSecretsId: string.IsNullOrEmpty(userSecretsId) ? null : userSecretsId);
+            UserSecretsId: string.IsNullOrEmpty(userSecretsId) ? null : userSecretsId,
+            IsLibrary: project is null || IsLibrary(project));
     }
+
+    private static bool IsLibrary(XElement project)
+    {
+        var elements = project.Descendants().ToList();
+
+        var isTestProject = elements.Any(e => e.Name.LocalName == "IsTestProject"
+                && string.Equals(e.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase))
+            || elements.Any(e => e.Name.LocalName == "PackageReference"
+                && string.Equals((string?)e.Attribute("Include"), "Microsoft.NET.Test.Sdk", StringComparison.OrdinalIgnoreCase));
+        if (isTestProject)
+        {
+            return true;
+        }
+
+        var outputType = elements.FirstOrDefault(e => e.Name.LocalName == "OutputType")?.Value.Trim();
+        var isExe = string.Equals(outputType, "Exe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(outputType, "WinExe", StringComparison.OrdinalIgnoreCase);
+
+        var sdks = new List<string?> { (string?)project.Attribute("Sdk") };
+        sdks.AddRange(elements.Where(e => e.Name.LocalName == "Sdk").Select(e => (string?)e.Attribute("Name")));
+        var isAppSdk = sdks.Any(IsAppSdk);
+
+        var isAzureFunctions = elements.Any(e => e.Name.LocalName == "AzureFunctionsVersion");
+
+        return !(isExe || isAppSdk || isAzureFunctions);
+    }
+
+    private static bool IsAppSdk(string? sdkAttribute) =>
+        sdkAttribute is not null
+        && sdkAttribute.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(sdk => sdk.Split('/')[0])
+            .Any(sdk => string.Equals(sdk, "Microsoft.NET.Sdk.Web", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sdk, "Microsoft.NET.Sdk.Worker", StringComparison.OrdinalIgnoreCase));
 }
