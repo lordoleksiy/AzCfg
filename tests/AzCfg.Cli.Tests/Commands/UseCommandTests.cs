@@ -1,7 +1,7 @@
 using System.Text.Json;
 using AzCfg.Cli.Commands;
-using AzCfg.Core.Environments;
 using AzCfg.Core.Abstractions;
+using AzCfg.Core.Environments;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
 using AzCfg.Core.UseCases;
