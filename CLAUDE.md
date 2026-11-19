@@ -57,19 +57,25 @@ tests/AzCfg.Cli.Tests     command tests + Scenario/ (end-to-end on in-memory fak
 - Small steps: one entity/behavior at a time; after each step `dotnet build` + `dotnet test`.
 - No business logic beyond the current MVP step; do not refactor others' code unasked.
 - New dependencies only via `Directory.Packages.props` and only when needed.
+- Changelog: every user-visible change updates `CHANGELOG.md` (git) and the version/release notes in the Cli csproj (NuGet).
 - Model: sealed records, immutable; async methods take a `CancellationToken`.
 
 ## Documentation
 - Full architecture, models, ports, CLI: `docs/architecture.md`
-- CLI MVP plan (done; where it differs from later ADRs, the ADR wins): `docs/mvp-plan.md`
+- CLI plan: `docs/mvp-plan.md` (stages 1–7 done; stages 8–10 = CLI 0.4.0–0.6.0, branches `release/<ver>` from
+  `master`, shipped before the UI; where it differs from later ADRs, the ADR wins)
+- CLI roadmap analysis (command budget, why this order): `docs/cli-roadmap.md`
 - UI plan (tasks for the orchestrator): `docs/ui-mvp-plan.md`
 - User-facing CLI reference, RBAC roles, release: `README.md`
 - Decisions (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
   0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety,
-  0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore)
+  0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore,
+  0012 project configuration: manifest, discovery, adopt (amended: profiles/standardize deferred),
+  0013 CLI daily workflow: status, diff, key selection, safe use)
 
 ## Skills
-- `/feature` — one task → branch from `dev` → tests → code → PR into `dev`
+- `/feature` — one task → branch from `dev` → tests → code → PR into `dev` (stages 8–10 of `docs/mvp-plan.md`: base
+  `origin/release/<ver>` and PR into it instead of `dev`)
 - `/add-local-target` — new `ILocalTarget` + test + DI
 - `/add-cli-command` — new command + `--json`
 - `/adr` — new ADR as a contract before code
