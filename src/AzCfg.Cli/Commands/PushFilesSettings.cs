@@ -20,5 +20,5 @@ public sealed class PushFilesSettings : PushSettings
     public bool Force { get; init; }
 
     public override ValidationResult Validate() =>
-        Force && Key.Length == 0 ? ValidationResult.Error("--force needs --key (it resolves conflicts of the selected keys).") : ValidationResult.Success();
+        Force && Key.Length == 0 ? ValidationResult.Error("--force needs --key (it resolves conflicts of the selected keys).") : KeyFilter.Validate(Key);
 }

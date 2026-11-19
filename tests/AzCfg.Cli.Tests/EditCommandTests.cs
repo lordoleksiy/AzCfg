@@ -238,6 +238,45 @@ public sealed class EditCommandTests
     }
 
     [Fact]
+    public async Task Set_on_a_global_key_moves_it_to_the_service_scope_as_an_override()
+    {
+        var s = new Stubs { Export = """{"Db":{"Host":"h"},"@global":{"Logging":{"Level":"Info"}}}""" };
+
+        var (exit, _) = await Run(s, "--yes", "--set", "Logging:Level=Debug");
+
+        Assert.Equal(0, exit);
+        var json = Parsed(PlannedJson(s));
+        Assert.Equal("Debug", (string?)json["Logging"]!["Level"]);
+        Assert.Null(json["@global"]);
+    }
+
+    [Fact]
+    public async Task Global_set_on_a_service_key_moves_it_to_the_global_section()
+    {
+        var s = new Stubs { Export = """{"Db":{"Host":"h"},"A":"1"}""", TouchesGlobal = true };
+
+        var (exit, _) = await Run(s, "--yes", "--global", "--set", "A=2");
+
+        Assert.Equal(0, exit);
+        var json = Parsed(PlannedJson(s));
+        Assert.Equal("2", (string?)json["@global"]!["A"]);
+        Assert.Null(json["A"]);
+    }
+
+    [Fact]
+    public async Task Global_set_over_a_service_parent_keeps_the_service_keys()
+    {
+        var s = new Stubs { TouchesGlobal = true };
+
+        var (exit, _) = await Run(s, "--yes", "--global", "--set", "Db=x");
+
+        Assert.Equal(0, exit);
+        var json = Parsed(PlannedJson(s));
+        Assert.Equal("x", (string?)json["@global"]!["Db"]);
+        Assert.Equal("h", (string?)json["Db"]!["Host"]);
+    }
+
+    [Fact]
     public async Task Global_without_yes_in_json_mode_is_not_applied_silently()
     {
         var s = new Stubs { TouchesGlobal = true };

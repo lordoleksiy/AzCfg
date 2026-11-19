@@ -272,15 +272,35 @@ public sealed class PlanPushCommandTests
         s = new Stubs
         {
             Existing = Binding("dev"),
-            PlanFor = b => MixedPlan(b, s.Resolved.Count > 0 ? [ConflictOf("Other")] : [ConflictOf("Db:Host"), ConflictOf("Other")]),
+            PlanFor = b => MixedPlan(b, KeepsLocal(s) ? [ConflictOf("Other")] : [ConflictOf("Db:Host"), ConflictOf("Other")]),
         };
 
         var (exit, _) = await Run("push", s, "", "--key", "Db:*", "--force", "--yes");
 
         Assert.Equal(0, exit);
-        Assert.Equal([("Db:Host", ConflictResolution.KeepLocal)], s.Resolved);
+        Assert.Equal(["Db:Host"], ((PushSource.LocalFiles)s.Planned[^1].Source).KeepLocal!);
+        Assert.Empty(s.Resolved);
         Assert.Equal(["Db:Host", "Db:Port"], Assert.Single(s.Applied).Plan.Changes.Select(c => c.After!.Key));
     }
+
+    [Fact]
+    public async Task Push_key_force_declined_changes_no_state()
+    {
+        Stubs s = null!;
+        s = new Stubs
+        {
+            Existing = Binding("dev"),
+            PlanFor = b => MixedPlan(b, KeepsLocal(s) ? [] : [ConflictOf("Db:Host")]),
+        };
+
+        var (exit, _) = await Run("push", s, "n\n", "--key", "Db:*", "--force");
+
+        Assert.Equal(1, exit);
+        Assert.Empty(s.Applied);
+        Assert.Empty(s.Resolved);
+    }
+
+    private static bool KeepsLocal(Stubs s) => s.Planned[^1].Source is PushSource.LocalFiles { KeepLocal.Count: > 0 };
 
     [Fact]
     public async Task Push_key_force_on_a_non_active_environment_is_a_clear_error()
@@ -291,6 +311,19 @@ public sealed class PlanPushCommandTests
 
         Assert.Contains("active environment", ex.Message);
         Assert.Empty(s.Resolved);
+    }
+
+    [Theory]
+    [InlineData("plan", " ")]
+    [InlineData("push", "global:")]
+    public async Task Blank_key_pattern_is_rejected(string command, string pattern)
+    {
+        var s = new Stubs();
+
+        var ex = await Record.ExceptionAsync(() => Run(command, s, "", "--key", pattern, "--yes"));
+
+        Assert.Contains("--key", ex?.Message);
+        Assert.Empty(s.Planned);
     }
 
     [Fact]

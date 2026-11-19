@@ -337,6 +337,15 @@ public class JsonProjectionTests
     public void FromEditJson_InvalidJson_Throws(string json) =>
         Assert.ThrowsAny<System.Text.Json.JsonException>(() => Parse(json));
 
+    [Fact]
+    public void FromEditJson_KeyInBothScopes_ThrowsWithKeyName()
+    {
+        var ex = Assert.Throws<ArgumentException>(() => Parse("""{"Logging":{"Level":"Debug"},"@global":{"Logging":{"Level":"Info"}}}"""));
+
+        Assert.Contains("'Logging:Level'", ex.Message);
+        Assert.Contains("@global", ex.Message);
+    }
+
     [Theory]
     [InlineData("[]")]
     [InlineData("\"x\"")]

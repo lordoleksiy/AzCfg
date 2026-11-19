@@ -26,11 +26,11 @@ public sealed class ConfigComparisonServiceTests
     private static ConfigEntry Plain(string key, string value, ConfigScope scope = ConfigScope.Service) => new(key, scope, new ConfigValue.Plain(value), "etag");
     private static ConfigEntry Ref(string key, Uri uri) => new(key, ConfigScope.Service, new ConfigValue.KeyVaultRef(uri), "etag");
 
-    private static ProjectBinding Binding(string[]? ignore = null) =>
-        new("/repo", "orders", Values, Secrets, new Dictionary<string, Uri>(), Ignore: ignore);
+    private static ProjectBinding Binding(string[]? ignore = null, string? active = null, LocalTargetBinding? secretsTarget = null) =>
+        new("/repo", "orders", Values, secretsTarget ?? Secrets, new Dictionary<string, Uri>(), active, ignore);
 
     private static ConfigComparisonService Create(
-        ConfigEntry[] dev, ConfigEntry[]? prod = null, LocalValue[]? values = null, LocalValue[]? secrets = null)
+        ConfigEntry[] dev, ConfigEntry[]? prod = null, LocalValue[]? values = null, LocalValue[]? secrets = null, FakeUserStateStore? state = null)
     {
         var store = new FakeConfigStore([], new() { ["dev"] = dev, ["prod"] = prod ?? [] });
         var secretStore = new FakeSecretStore(new()
@@ -45,7 +45,7 @@ public sealed class ConfigComparisonServiceTests
             new(LocalTargetKind.AppSettingsLocal) { Contents = values ?? [] },
             new(LocalTargetKind.UserSecrets) { Contents = secrets ?? [] },
         };
-        return new(new SyncService(store, secretStore, new FakeUserStateStore(), Fingerprinter, targets));
+        return new(new SyncService(store, secretStore, state ?? new FakeUserStateStore(), Fingerprinter, targets));
     }
 
     private static CompareSide.Local Local => new();
@@ -142,6 +142,65 @@ public sealed class ConfigComparisonServiceTests
 
         Assert.Equal(["A"], result.Items.Select(i => i.Key));
         Assert.Equal(1, result.IgnoredCount);
+    }
+
+    [Fact]
+    public async Task LocalVsEnv_SecretOnlyInSecretsTarget_IsHidden()
+    {
+        var sut = Create([], secrets: [new("Db:Password", Canary)]);
+
+        var result = await sut.CompareAsync(Binding(), Local, Env(Dev), Ct);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(ComparisonKind.OnlyLeft, item.Kind);
+        Assert.Equal(new ComparisonValue(true, null), item.Left);
+        Assert.DoesNotContain(Canary, JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LocalVsOtherEnv_SecretKnownToActiveSnapshot_IsHiddenWhenOtherEnvLacksIt()
+    {
+        var state = new FakeUserStateStore();
+        state.Snapshots["dev"] = new(new Dictionary<string, StateItem>
+        {
+            ["Db:Password"] = new("Db:Password", ConfigScope.Service, new StateValue.Secret(DevSecret, Fingerprinter.Fingerprint(new SecretString(Canary)))),
+        });
+        var sut = Create([Ref("Db:Password", DevSecret)], prod: [], values: [new("Db:Password", Canary)], state: state);
+
+        var result = await sut.CompareAsync(Binding(active: "dev", secretsTarget: Values), Local, Env(Prod), Ct);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(ComparisonKind.OnlyLeft, item.Kind);
+        Assert.Equal(new ComparisonValue(true, null), item.Left);
+        Assert.DoesNotContain(Canary, JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LocalVsEnv_SecretsTargetKeyWithEqualPlainRemote_IsSameAndHidden()
+    {
+        var sut = Create([Plain("Db:Password", Canary)], secrets: [new("Db:Password", Canary)]);
+
+        var result = await sut.CompareAsync(Binding(), Local, Env(Dev), Ct);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(ComparisonKind.Same, item.Kind);
+        Assert.Equal(new ComparisonValue(true, null), item.Left);
+        Assert.DoesNotContain(Canary, JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LocalVsEnv_KeyOnlyInSnapshot_IsNotListed()
+    {
+        var state = new FakeUserStateStore();
+        state.Snapshots["prod"] = new(new Dictionary<string, StateItem>
+        {
+            ["Old"] = new("Old", ConfigScope.Service, new StateValue.Plain("1")),
+        });
+        var sut = Create([], prod: [Plain("A", "1")], values: [new("A", "1")], state: state);
+
+        var result = await sut.CompareAsync(Binding(active: "dev"), Local, Env(Prod), Ct);
+
+        Assert.Equal(["A"], result.Items.Select(i => i.Key));
     }
 
     [Fact]

@@ -42,11 +42,9 @@ public sealed class PushCommand(IProjectService projects, ISyncService sync, IUs
             throw new InvalidOperationException($"--force resolves conflicts of the active environment only, not '{env.Name}'; run 'azcfg use {env.Name}' first.");
         }
 
-        foreach (var conflict in selected.Conflicts)
-        {
-            await Sync.ResolveConflictAsync(binding, env, conflict.Key, ConflictResolution.KeepLocal, ct);
-        }
-
-        return KeyFilter.Restrict(await base.PlanAsync(settings, binding, env, source, ct), settings.Key);
+        // Keep local is planned in memory: the snapshot changes only when the plan is applied (a declined or failed push leaves the conflict).
+        var keepLocal = selected.Conflicts.Select(c => c.Key).ToHashSet(StringComparer.Ordinal);
+        var resolved = source is PushSource.LocalFiles files ? files with { KeepLocal = keepLocal } : source;
+        return KeyFilter.Restrict(await base.PlanAsync(settings, binding, env, resolved, ct), settings.Key);
     }
 }

@@ -54,6 +54,31 @@ public sealed class SyncServiceResolveConflictTests
     }
 
     [Fact]
+    public async Task PlanPushAsync_KeepLocal_PlansTheLocalValueWithoutSavingTheSnapshot()
+    {
+        var s = Create();
+
+        var plan = await s.Service.PlanPushAsync(Binding(), Env, new PushSource.LocalFiles(KeepLocal: new HashSet<string>(StringComparer.Ordinal) { "A" }), Ct);
+
+        Assert.Empty(plan.Conflicts);
+        var change = Assert.Single(plan.Changes);
+        Assert.Equal(ChangeKind.Update, change.Kind);
+        Assert.Equal(new ConfigValue.Plain("mine"), change.After!.Value);
+        Assert.Null(s.State.SavedSnapshot);
+    }
+
+    [Fact]
+    public async Task PlanPushAsync_KeepLocal_KeyDeletedRemotely_IsPlannedAsAdd()
+    {
+        var s = Create(remote: [Plain("B", "2")]);
+
+        var plan = await s.Service.PlanPushAsync(Binding(), Env, new PushSource.LocalFiles(KeepLocal: new HashSet<string>(StringComparer.Ordinal) { "A" }), Ct);
+
+        Assert.Empty(plan.Conflicts);
+        Assert.Equal(ChangeKind.Add, Assert.Single(plan.Changes).Kind);
+    }
+
+    [Fact]
     public async Task ResolveConflictAsync_KeepRemote_PullsTheKey()
     {
         var s = Create();

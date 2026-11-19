@@ -22,6 +22,7 @@ public sealed class UseCommandTests
         public string? Active { get; init; }
         public IReadOnlyList<string> Blocked { get; init; } = [];
         public IReadOnlyList<string> Unmanaged { get; init; } = [];
+        public Exception? StatusError { get; init; }
         public List<(string Env, bool Force)> Pulled { get; } = [];
     }
 
@@ -56,8 +57,9 @@ public sealed class UseCommandTests
             return Task.FromResult(new PullResult(env.Name, 2, 1, false, []));
         }
 
-        public Task<SyncSummary> StatusAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) =>
-            Task.FromResult(new SyncSummary(env.Name, true, s.Blocked.Count, 0, [], s.Blocked, [], 0));
+        public Task<SyncSummary> StatusAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => s.StatusError is { } error
+            ? Task.FromException<SyncSummary>(error)
+            : Task.FromResult(new SyncSummary(env.Name, true, s.Blocked.Count, 0, [], s.Blocked, [], 0));
 
         public Task<IReadOnlyList<string>> UnmanagedLocalKeysAsync(ProjectBinding binding, CancellationToken ct) =>
             Task.FromResult(binding.ActiveEnvironment is null ? s.Unmanaged : []);
@@ -158,6 +160,34 @@ public sealed class UseCommandTests
         Assert.Equal(1, exit);
         Assert.Equal("blocked", doc.GetProperty("reason").GetString());
         Assert.Equal("Db:Host", doc.GetProperty("keys")[0].GetString());
+        Assert.Empty(s.Pulled);
+    }
+
+    [Theory]
+    [InlineData("y\n", 0, 1)]
+    [InlineData("n\n", 1, 0)]
+    public async Task Unreadable_active_environment_warns_and_asks(string answer, int exitCode, int pulls)
+    {
+        var s = new Stubs { Active = "prod", StatusError = new HttpRequestException("403 Forbidden") };
+
+        var (exit, output) = await Run(s, answer, "dev");
+
+        Assert.Equal(exitCode, exit);
+        Assert.Equal(pulls, s.Pulled.Count);
+        Assert.Contains("403 Forbidden", output);
+    }
+
+    [Fact]
+    public async Task Unreadable_active_environment_json_is_refused_as_unverified()
+    {
+        var s = new Stubs { Active = "prod", StatusError = new HttpRequestException("403 Forbidden") };
+
+        var (exit, output) = await Run(s, "", "dev", "--json");
+
+        var doc = JsonDocument.Parse(output).RootElement;
+        Assert.Equal(1, exit);
+        Assert.Equal("unverified", doc.GetProperty("reason").GetString());
+        Assert.Contains("--force", doc.GetProperty("hint").GetString());
         Assert.Empty(s.Pulled);
     }
 

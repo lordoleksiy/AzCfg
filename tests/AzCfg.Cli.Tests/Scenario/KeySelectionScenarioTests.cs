@@ -92,6 +92,30 @@ public sealed class KeySelectionScenarioTests
     }
 
     [Fact]
+    public async Task Pull_key_force_keeps_new_local_keys_that_were_never_pushed()
+    {
+        var host = await PulledWithConflictsAsync();
+
+        var (exit, _) = await host.RunAsync("pull", "--key", "*", "--force", "--json");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("1", host.Files.Local("Other"));
+        Assert.Equal("99", host.Files.Local("Timeout"));
+        Assert.Equal("remote-db", host.Files.Local("Db:Host"));
+    }
+
+    [Fact]
+    public async Task Pull_key_matching_only_new_local_keys_is_not_blocked_and_keeps_them()
+    {
+        var host = await PulledWithConflictsAsync();
+
+        var (exit, _) = await host.RunAsync("pull", "--key", "Other", "--json");
+
+        Assert.Equal(0, exit);
+        Assert.Equal("1", host.Files.Local("Other"));
+    }
+
+    [Fact]
     public async Task Pull_key_matching_nothing_is_an_error()
     {
         var host = await PulledWithConflictsAsync();

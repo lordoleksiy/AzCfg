@@ -28,7 +28,8 @@ public sealed class ConfigComparisonService(ISyncService sync) : IConfigComparis
     private async Task<ConfigComparison> CompareLocalAsync(ProjectBinding binding, ConfigEnvironment env, bool localIsLeft, CancellationToken ct)
     {
         var diff = await sync.DiffAsync(binding, env, ct);
-        var items = diff.Items.Select(d =>
+        // A key only in the base (deleted on both sides, or from an old snapshot) has nothing to compare.
+        var items = diff.Items.Where(d => d.Local is not null || d.Remote is not null).Select(d =>
         {
             var local = d.Local is null ? null : Show(d.Local.Value);
             var remote = d.Remote is null ? null : Show(d.Remote.Value);

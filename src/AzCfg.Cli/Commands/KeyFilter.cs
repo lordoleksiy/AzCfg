@@ -1,5 +1,6 @@
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
+using Spectre.Console;
 
 namespace AzCfg.Cli.Commands;
 
@@ -40,6 +41,24 @@ public static class KeyFilter
         }
 
         return PlanSelection.Select(plan, keys);
+    }
+
+    /// <summary>Validates <c>--key</c> patterns with <see cref="IgnoreRules.Normalize"/>: blank and <c>global:</c> without a key path are errors.</summary>
+    public static ValidationResult Validate(IEnumerable<string> patterns)
+    {
+        foreach (var pattern in patterns)
+        {
+            try
+            {
+                IgnoreRules.Normalize(pattern);
+            }
+            catch (ArgumentException)
+            {
+                return ValidationResult.Error($"--key '{pattern}' is not a key pattern: give a key path (* wildcard, optional global: prefix, e.g. 'global:*').");
+            }
+        }
+
+        return ValidationResult.Success();
     }
 
     /// <summary>Scope of the key as conflicts see it (local, else remote, else base; service when unknown).</summary>

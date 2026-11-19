@@ -38,11 +38,21 @@ public sealed class EditCommand(IProjectService projects, ISyncService sync, IUs
         return await PushAsync(settings, binding, env, new PushSource.EditedJson(edited, BaseJson: exported), ct);
     }
 
-    /// <summary>Applies <c>--unset</c>, <c>--set</c>, <c>--secret</c> (in that order) to the export; secret names are references, never values.</summary>
+    /// <summary>
+    /// Applies <c>--unset</c>, <c>--set</c>, <c>--secret</c> (in that order) to the export; secret names are references, never values.
+    /// The export shows a key once (service over global), so a key set in one scope is moved out of the other: <c>--set</c> on a
+    /// global key becomes a service override, <c>--global --set</c> on a service key a global value (no remote key is deleted).
+    /// </summary>
     private static string Patch(string exported, EditSettings settings)
     {
         var scope = settings.Global ? ConfigScope.Global : ConfigScope.Service;
+        var other = settings.Global ? ConfigScope.Service : ConfigScope.Global;
         var json = exported;
+        foreach (var (key, _) in settings.Set.Concat(settings.Secret).Select(Split))
+        {
+            json = MoveOut(json, new ScopedKey(other, key));
+        }
+
         foreach (var key in settings.Unset)
         {
             json = EditJsonPatch.Remove(json, new ScopedKey(scope, key));
@@ -59,6 +69,19 @@ public sealed class EditCommand(IProjectService projects, ISyncService sync, IUs
         }
 
         return json;
+    }
+
+    /// <summary>Removes the leaf of <paramref name="key"/>; a path that is not a leaf there (a parent, or through a value) cannot collide and is kept.</summary>
+    private static string MoveOut(string json, ScopedKey key)
+    {
+        try
+        {
+            return EditJsonPatch.Remove(json, key);
+        }
+        catch (ArgumentException)
+        {
+            return json;
+        }
     }
 
     private static (string Key, string Value) Split(string pair)

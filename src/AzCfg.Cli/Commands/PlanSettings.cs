@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace AzCfg.Cli.Commands;
@@ -13,4 +14,6 @@ public sealed class PlanSettings : GlobalSettings
     [CommandOption("--key <PATTERN>")]
     [Description("Plan only the keys matching the pattern (repeatable; * wildcard, optional global: prefix).")]
     public string[] Key { get; init; } = [];
+
+    public override ValidationResult Validate() => KeyFilter.Validate(Key);
 }

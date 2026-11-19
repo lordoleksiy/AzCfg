@@ -14,7 +14,11 @@ public interface ISyncService
 
     Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct);
 
-    /// <summary>The normalized local/remote/base comparison a future UI uses to show a diff (decision 3).</summary>
+    /// <summary>
+    /// The normalized local/remote/base comparison a future UI uses to show a diff (decision 3). Never carries a local secret
+    /// value: a key that is a secret locally (secrets target, or a secret in the active environment's snapshot) is a
+    /// <see cref="StateValue.Secret"/> even when <paramref name="env"/> does not know it as one.
+    /// </summary>
     Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct);
 
     /// <summary>

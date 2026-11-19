@@ -9,7 +9,7 @@ namespace AzCfg.Cli.Commands;
 /// <summary>
 /// Pulls <c>--env</c>, else the active environment, else <c>dev</c>. With <c>--key</c> only the matching keys are pulled
 /// (<see cref="ISyncService.PullSelectedAsync"/>): active environment only; keys with unpushed local changes block the pull
-/// unless <c>--force</c> (keep remote for those keys).
+/// unless <c>--force</c> (keep remote for those keys). Keys added locally and never pushed are left alone.
 /// </summary>
 public sealed class PullCommand(IProjectService projects, ISyncService sync, IUserStateStore state, IEnvironmentResolver resolver, IAnsiConsole console)
     : PullCommandBase<PullFilesSettings>(projects, sync, state, resolver, console)
@@ -36,7 +36,9 @@ public sealed class PullCommand(IProjectService projects, ISyncService sync, IUs
             throw new InvalidOperationException($"No key matches {string.Join(", ", settings.Key.Select(k => $"'{k}'"))}.");
         }
 
-        var changed = items.Where(i => i.Kind is DiffKind.LocalAdded or DiffKind.LocalModified or DiffKind.LocalDeleted or DiffKind.Conflict)
+        // A key added locally and never pushed has nothing to pull: it neither blocks the pull nor is removed by --force.
+        items.RemoveAll(i => i.Kind == DiffKind.LocalAdded);
+        var changed = items.Where(i => i.Kind is DiffKind.LocalModified or DiffKind.LocalDeleted or DiffKind.Conflict)
             .Select(i => i.Key).Order(StringComparer.Ordinal).ToList();
         if (changed.Count > 0 && !settings.Force)
         {

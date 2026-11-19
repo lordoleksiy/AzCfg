@@ -217,11 +217,30 @@ public sealed class SyncService(
         return JsonProjection.ToEditJson(added, secretPlaceholders: true).ToJsonString(new() { WriteIndented = true });
     }
 
+    /// <summary>
+    /// See <see cref="ISyncService.DiffAsync"/>. After classification, a local value that is still plain but is a secret locally
+    /// (read from a separate secrets target, or known as a secret by the active environment's snapshot) is reported as a
+    /// <see cref="StateValue.Secret"/> (fingerprint only), and so is a plain remote value of that key, so both sides compare by fingerprint.
+    /// </summary>
     public async Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct)
     {
         var (@base, remote, _, _) = await ReadRemoteAsync(binding, env, ct);
-        return WithoutIgnored(ThreeWayDiff.Compute(@base, await ReadLocalAsync(binding, ct), remote, fingerprinter), binding);
+        var (values, secrets) = await ReadTargetsAsync(binding, ct);
+        var diff = WithoutIgnored(ThreeWayDiff.Compute(@base, ToState([.. values, .. secrets]), remote, fingerprinter), binding);
+        var active = binding.ActiveEnvironment is { } name ? await state.LoadSnapshotAsync(binding.RepoPath, name, ct) : null;
+        var secretKeys = secrets.Select(s => s.Key)
+            .Concat(active?.Items.Values.Where(i => i.Value is StateValue.Secret).Select(i => i.Key) ?? [])
+            .ToHashSet(StringComparer.Ordinal);
+        return new([.. diff.Items.Select(i => i.Local is { Value: StateValue.Plain } && secretKeys.Contains(i.Key) ? Redact(i, active) : i)]);
     }
+
+    private DiffItem Redact(DiffItem item, ConfigState? active) => item with
+    {
+        Local = item.Local! with { Value = Hide((StateValue.Plain)item.Local.Value, (active?.Items.GetValueOrDefault(item.Key)?.Value as StateValue.Secret)?.SecretUri) },
+        Remote = item.Remote is { Value: StateValue.Plain plain } remote ? remote with { Value = Hide(plain, null) } : item.Remote,
+    };
+
+    private StateValue.Secret Hide(StateValue.Plain value, Uri? uri) => new(uri, fingerprinter.Fingerprint(new SecretString(value.Value)));
 
     /// <summary>See <see cref="ISyncService.StatusAsync"/>. Blocked keys = what makes <see cref="PullAsync"/> refuse: local changes and conflicts.</summary>
     public async Task<SyncSummary> StatusAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct)
@@ -266,6 +285,7 @@ public sealed class SyncService(
             PushSource.Promote => new ConfigState(new Dictionary<string, StateItem>()),
             PushSource.EditedJson { BaseJson: { } baseJson } => JsonProjection.FromEditJson(baseJson, fingerprinter, KnownSecrets(merged, merged)).State,
             PushSource.EditedJson => merged,
+            PushSource.LocalFiles { KeepLocal: { Count: > 0 } keep } => KeepLocal(snapshot, merged, keep),
             _ => snapshot,
         };
         var remote = promote ? Service(merged) : merged;
@@ -488,6 +508,25 @@ public sealed class SyncService(
     private static Dictionary<string, StateValue.Secret> KnownSecrets(ConfigState @base, ConfigState remote) => @base.Items.Values.Concat(remote.Items.Values)
         .Select(i => i.Value).OfType<StateValue.Secret>().Where(s => s.SecretUri is not null)
         .GroupBy(s => ThreeWayDiff.SecretName(s.SecretUri!)).ToDictionary(g => g.Key, g => g.Last());
+
+    /// <summary>The snapshot with the remote item (or none) as base of each key in <paramref name="keys"/>, as <see cref="ResolveConflictAsync"/> KeepLocal saves it.</summary>
+    private static ConfigState KeepLocal(ConfigState snapshot, ConfigState remote, IReadOnlySet<string> keys)
+    {
+        var items = new Dictionary<string, StateItem>(snapshot.Items, StringComparer.Ordinal);
+        foreach (var key in keys)
+        {
+            if (remote.Items.TryGetValue(key, out var item))
+            {
+                items[key] = item;
+            }
+            else
+            {
+                items.Remove(key);
+            }
+        }
+
+        return new(items);
+    }
 
     private static ConfigState Service(ConfigState state) => new(state.Items.Where(i => i.Value.Scope == ConfigScope.Service).ToDictionary(i => i.Key, i => i.Value, StringComparer.Ordinal));
 

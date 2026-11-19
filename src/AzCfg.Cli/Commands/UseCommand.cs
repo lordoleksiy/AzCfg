@@ -31,9 +31,18 @@ public sealed class UseCommand : PullCommandBase<UseSettings>
     {
         var (binding, env) = await ResolveAsync(settings, ct);
 
-        if (!settings.Force && await BlockedKeysAsync(binding, ct) is { Count: > 0 } blocked)
+        if (!settings.Force)
         {
-            return Refuse(settings, new(env.Name, "blocked", blocked, "Push them (azcfg push), keep the remote value (azcfg pull --key <KEY> --force) or overwrite everything with --force."), true);
+            var (blocked, error) = await BlockedKeysAsync(binding, ct);
+            if (blocked.Count > 0)
+            {
+                return Refuse(settings, new(env.Name, "blocked", blocked, "Push them (azcfg push), keep the remote value (azcfg pull --key <KEY> --force) or overwrite everything with --force."), true);
+            }
+
+            if (error is not null && !ConfirmUnverified(settings, binding.ActiveEnvironment!, error))
+            {
+                return Refuse(settings, new(env.Name, "unverified", [], $"Could not read '{binding.ActiveEnvironment}' to check for local changes ({error}); pass --force to switch anyway."), false);
+            }
         }
 
         if (EnvironmentRules.KindOf(env) == EnvironmentKind.Production && !ConfirmedProtected(settings, env.Name))
@@ -61,22 +70,47 @@ public sealed class UseCommand : PullCommandBase<UseSettings>
         return await base.ExecuteAsync(context, settings, ct);
     }
 
-    /// <summary>Local changes of the currently active environment that a pull would overwrite; none for a first activation or an active environment no longer in the profile.</summary>
-    private async Task<IReadOnlyList<string>> BlockedKeysAsync(ProjectBinding binding, CancellationToken ct)
+    /// <summary>
+    /// Local changes of the currently active environment that a pull would overwrite; none for a first activation or an active
+    /// environment no longer in the profile. When the active environment cannot be read (Azure error, lost access), no keys and the error message.
+    /// </summary>
+    private async Task<(IReadOnlyList<string> Keys, string? Error)> BlockedKeysAsync(ProjectBinding binding, CancellationToken ct)
     {
         if (binding.ActiveEnvironment is not { } active)
         {
-            return [];
+            return ([], null);
+        }
+
+        ConfigEnvironment current;
+        try
+        {
+            current = await FindEnvironmentAsync(active, ct);
+        }
+        catch (InvalidOperationException)
+        {
+            return ([], null);
         }
 
         try
         {
-            return (await sync.StatusAsync(binding, await FindEnvironmentAsync(active, ct), ct)).BlockedKeys;
+            return ((await sync.StatusAsync(binding, current, ct)).BlockedKeys, null);
         }
-        catch (InvalidOperationException)
+        catch (Exception e) when (e is not OperationCanceledException)
         {
-            return [];
+            return ([], e.Message);
         }
+    }
+
+    /// <summary>Unverifiable local changes: asks (default no); <c>--json</c> never prompts and refuses.</summary>
+    private bool ConfirmUnverified(UseSettings settings, string active, string error)
+    {
+        if (settings.Json)
+        {
+            return false;
+        }
+
+        console.MarkupLineInterpolated($"[yellow]Could not read '{active}' to check for unpushed local changes:[/] {error}");
+        return console.Confirm($"Switch anyway? Unpushed local changes of '{Markup.Escape(active)}' would be overwritten.", false);
     }
 
     private bool ConfirmedProtected(UseSettings settings, string env)
