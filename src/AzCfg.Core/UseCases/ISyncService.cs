@@ -17,6 +17,13 @@ public interface ISyncService
     /// <summary>The normalized local/remote/base comparison a future UI uses to show a diff (decision 3).</summary>
     Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct);
 
+    /// <summary>
+    /// Sync status of <paramref name="env"/> built from the local/remote/base comparison (ADR 0013): counters and keys only, never
+    /// values. When <paramref name="env"/> is not <c>binding.ActiveEnvironment</c> (OrdinalIgnoreCase) nothing is read and the
+    /// summary has <c>IsActive = false</c> with zero counts.
+    /// </summary>
+    Task<SyncSummary> StatusAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct);
+
     Task<ApplyResult> ApplyAsync(SyncPlan plan, ApplyOptions options, CancellationToken ct);
 
     /// <summary>Reads the remote configuration of <c>binding.Service</c> in <paramref name="env"/>. Never calls <c>ISecretStore</c>.</summary>
