@@ -382,8 +382,13 @@
 - [ ] **H2. `azcfg status --check`** — вивід звіту, `--json`, exit code ≠ 0 при `Error`.
   - Залежить від: H1
 
+- [ ] **H4. Редаговані налаштування проєкту** (ADR 0014) — `IProjectSettingsService`, ключі `config project.*`
+  (`service`, `values`, `secrets`, `vault.<env>`; `active`/`ignore` лише читання), зміна service скидає активне середовище
+  і снапшоти; `pull`/`use --service X` при іншій прив'язці → помилка з підказкою.
+  - Залежить від: —
+
 - [ ] **H3. Випуск 0.5.0** (+ `master` → `dev`; UI споживає `HealthReport` для FR-E6).
-  - Залежить від: H2
+  - Залежить від: H2, H4
 
 ## Етап 10. Конфігурація проєкту (ADR 0012, скорочено) — CLI 0.6.0
 
@@ -394,7 +399,12 @@
 - [x] **PC0. ADR 0012** — маніфест, профілі конвенцій, tier-и секретів, discovery, `adopt`, `standardize`, життєвий цикл, CI/CD-модель.
   - Залежить від: —
 
-- [ ] **PC1. Модель маніфесту** (`Core/Manifest`)
+- [ ] **PR0. Провайдери віддаленої конфігурації** (ADR 0014) — `IRemoteConfigProvider`, `RemoteKind`,
+  `RemoteCapabilities`, `RemoteLocation`, `AppConfigurationProvider(IConfigStore)`; `SyncService` працює через провайдери.
+  Без змін для користувача: усі наявні тести проходять без правок.
+  - Залежить від: —
+
+- [ ] **PC1. Модель маніфесту** (`Core/Manifest`, віддалені `ConfigSourceKind` — за ADR 0014)
   - `ProjectManifest`, `ManifestEnvironment`, `ConfigSource`/`ConfigSourceKind`/`ConfigRole`, `SecretRef`, `SecretTier`,
     `KeySpec`, `CiConfig`, `CiEnvironment`, `DeploymentTarget`; sealed immutable records.
   - `ManifestSerializer` (System.Text.Json, коментарі й trailing commas дозволені) + `ManifestValidator`: строга
