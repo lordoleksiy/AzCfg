@@ -377,6 +377,13 @@
 
 Замість окремих `doctor` і `validate`. Гілка `release/0.5.0` від `master` після 0.4.0.
 
+- [ ] **H0. CI на PR і безпечна публікація** (перший коміт `release/0.5.0`, до задач H1–H4)
+  - `.github/workflows/ci.yml`: `dotnet build`, `dotnet test`, `dotnet format --verify-no-changes` на PR у `dev`,
+    `release/**`, `master`. `publish-cli.yml`: `dotnet nuget push --skip-duplicate` (push у `master` без зміни
+    `<Version>` не валить workflow). Не змінює `src/**` → NuGet не публікується.
+  - Пак-тест `azcfg ui` додає UI-задача X1 (`docs/ui-mvp-plan.md`).
+  - Залежить від: —
+
 - [ ] **H1. Core `HealthReport`**
   - Перевірки: вхід в Azure, доступ до кожного середовища (проба `ReadAsync`/`ListServicePrefixesAsync` — та сама, що в
     UI `AzureStatusService`), цілі в `.gitignore`, мертві KV-референси, ключі, відсутні в частині середовищ

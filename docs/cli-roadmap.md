@@ -117,6 +117,8 @@ every behaviour the UI shows (`--json` = the same records).
 2. Order: 0.4.0 (phase A) → 0.5.0 (phase B) → 0.6.0 (phase C, ADR 0012 reduced); all before the UI reaches `master`.
 3. Convention profiles and `standardize` deferred (ADR 0012 amendment).
 4. Flags: `--key` (selection), `--force` with `--key` (per-key conflict resolution), `edit --set/--unset/--secret`.
+5. UI distribution: inside the `azcfg` tool as `azcfg ui` (a launcher, +1 top-level command on top of the budget),
+   not a separate package. The UI reaches `master` as CLI 0.7.0 (UI preview) after 0.6.0 (UI tasks X1, R1).
 
 ## 7. Execution (summary; tasks in `docs/mvp-plan.md`)
 - 0.4.0 is released (`master`, PR #53). `dev` still holds the unfinished UI and lacks 0.3.1/0.4.0 until M1.
@@ -124,8 +126,8 @@ every behaviour the UI shows (`--json` = the same records).
   touching `src/**` publishes NuGet, so no intermediate PRs into `master`) → merge `master` into `dev`.
 - 0.4.0: R0 docs → CW1 cherry-pick C1/C2 (`e2b3983`, `3ef4bfe`) → CW2–CW4 Core (parallel) → CW5–CW9 CLI (parallel by
   file) → CW10 release. Then UI M1: merge into `dev`, Application delegates to Core; U2–U4 start after M1.
-- 0.5.0: H1 `HealthReport` (+ value-free `ISecretStore.ExistsAsync`, ADR note first) → H2 `status --check`; H4 editable
-  project settings `config project.*` (ADR 0014, parallel) → H3 release → UI M2.
+- 0.5.0: H0 PR CI + `--skip-duplicate` → H1 `HealthReport` (+ value-free `ISecretStore.ExistsAsync`, ADR note first)
+  → H2 `status --check`; H4 editable project settings `config project.*` (ADR 0014, parallel) → H3 release → UI M2.
 - 0.6.0: PR0 remote providers (ADR 0014, no user-visible change) → PC1, PC3–PC7 (adopt, manifest checks in
   `status --check`) → PC9 release → UI M3.
 - UI on `dev` does not wait for 0.5.0/0.6.0 (they only gate the UI reaching `master`): M1 → U2–U4 in parallel with
