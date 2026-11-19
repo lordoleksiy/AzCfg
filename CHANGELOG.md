@@ -7,12 +7,20 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
 ## [Unreleased]
 
 ### Planned
-- 0.4.0 (ADR 0013): `azcfg status`, `azcfg diff` (local ↔ env, env ↔ env, `--missing --all`), `--key` for
-  `pull`/`plan`/`push` with per-key conflict resolution via `--force`, `edit --set/--unset/--secret` without an editor;
-  `use` asks before overwriting unmanaged local keys and before writing a protected environment's secrets locally;
-  `edit` no longer reverts remote changes made after the export.
 - 0.5.0: `azcfg status --check` (sign-in, access, `.gitignore`, dead Key Vault references, keys missing across environments).
 - 0.6.0 (ADR 0012, amended): project manifest `azcfg.json`, discovery, `azcfg adopt`.
+
+## [0.4.0]
+### Added
+- `azcfg status`: active environment, local/remote change counters, conflicts, blocked keys, warnings (ADR 0013).
+- `azcfg diff`: local ↔ env, env ↔ env, `--same`, `--missing --all` (exit code 1 when keys are missing).
+- `--key <pattern>` for `pull`/`plan`/`push`; per-key conflict resolution with `pull --key K --force` (keep remote)
+  and `push --key K --force` (keep local).
+- `edit --set/--unset/--secret` (with `--global`) patch the config without an editor.
+### Changed
+- `use` lists blocking keys, asks before overwriting unmanaged local keys on first activation (`--yes`) and before
+  writing a protected environment's secrets locally (`--confirm <ENV>`).
+- `edit` no longer reverts remote changes made after the export.
 
 ## [0.3.1]
 ### Fixed

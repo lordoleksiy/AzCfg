@@ -301,19 +301,19 @@
 Бюджет команд: нові лише `status` і `diff`; решта — прапорці існуючих команд. Core — адитивно і TDD. Значення секретів
 ніколи не потрапляють у `status`/`diff`/`--json`.
 
-- [ ] **R0. Гілка `release/0.4.0` + документи** (оркестратор)
+- [x] **R0. Гілка `release/0.4.0` + документи** (оркестратор)
   - `release/0.4.0` від `origin/master`; коміт документів (ADR 0012 з поправкою, ADR 0013, `cli-roadmap.md`, цей файл,
     `architecture.md`, `CHANGELOG.md`, `CLAUDE.md`); push лише з OK користувача.
   - Залежить від: —
 
-- [ ] **CW1. Перенести C1/C2 у `release/0.4.0`**
+- [x] **CW1. Перенести C1/C2 у `release/0.4.0`**
   - `git cherry-pick e2b3983 3ef4bfe` (Core-хелпери: `EditJsonPatch`, `PlanSelection`, `EnvironmentComparer`,
     `KeyMapper.SecretNameOf`; use cases: `PullSelectedAsync`, `ResolveConflictAsync`, `ReadRemoteConfigAsync`,
     `EditedJson.BaseJson`, `ApplyGuard`). Зміни `docs/ui-mvp-plan.md` у цих комітах — відкинути. Поведінка CLI не змінюється.
   - Перевірка: build + test зелені; тести C1/C2 перенесені як є.
   - Залежить від: R0
 
-- [ ] **CW2. Core: `EnvironmentRules`, `KeySelector`, `UnmanagedLocalKeysAsync`**
+- [x] **CW2. Core: `EnvironmentRules`, `KeySelector`, `UnmanagedLocalKeysAsync`**
   - `Core/Environments/EnvironmentRules` (`IsActive`, `SelectDefault`, `KindOf`) — та сама семантика, що в
     `AzCfg.Ui.Application` на `dev` (код звідти не копіюється автоматично — переписати за тестами).
   - `Core/Sync/KeySelector` — синтаксис шаблонів `IgnoreRules` (`*`, `global:`), кілька шаблонів = OR.
@@ -321,48 +321,48 @@
   - Тести (TDD): кожне правило; G20 для обох цілей і однієї спільної.
   - Залежить від: CW1
 
-- [ ] **CW3. Core: `StatusAsync` → `SyncSummary`**
+- [x] **CW3. Core: `StatusAsync` → `SyncSummary`**
   - Контракт — ADR 0013. З `DiffAsync`; лише ключі й лічильники; неактивне середовище → `IsActive = false`.
   - Тести: кожен `DiffKind` у правильному лічильнику, конфлікти й blocked keys, ігноровані, канарковий секрет відсутній у JSON.
   - Залежить від: CW1
 
-- [ ] **CW4. Core: порівняння і `MissingKeysReport`**
+- [x] **CW4. Core: порівняння і `MissingKeysReport`**
   - `IConfigComparisonService` (local ↔ env за fingerprint, env ↔ env через `EnvironmentComparer`), `CompareSide`,
     `ConfigComparison`; `MissingKeysReport` (static) по N середовищах; DI в `AddAzCfg()`.
   - Тести: секрет local ↔ env однаковий/різний без розкриття, env ↔ env за назвою секрету, Local ↔ Local → помилка,
     звіт відсутніх ключів (3 середовища).
   - Залежить від: CW1
 
-- [ ] **CW5. `azcfg status`** (через `/add-cli-command`)
+- [x] **CW5. `azcfg status`** (через `/add-cli-command`)
   - Людський вивід + `--json`; `--env` для іншого середовища.
   - Тести: команда; сценарій `/cli-scenario-test` pull → локальна зміна → зміна в Azure → `status` показує ⇡1 ⇣1.
   - Залежить від: CW3
 
-- [ ] **CW6. `azcfg diff`** (через `/add-cli-command`)
+- [x] **CW6. `azcfg diff`** (через `/add-cli-command`)
   - `diff`, `diff <env>`, `diff <a> <b>` (`local` як сторона), `--same`, `--missing --all` (exit 1, якщо є відсутні).
   - Тести: усі форми аргументів; секрети лише як назви / same-different; exit code.
   - Залежить від: CW4
 
-- [ ] **CW7. `--key` для `pull`/`plan`/`push` + розв'язання конфлікту**
+- [x] **CW7. `--key` для `pull`/`plan`/`push` + розв'язання конфлікту**
   - `pull --key` → `PullSelectedAsync` (лише активне середовище); `plan/push --key` → `PlanSelection.Select`;
     `pull --key K --force` = keep remote, `push --key K --force` = keep local (`ResolveConflictAsync`) + plan/apply.
   - Тести: вибір за шаблоном, неактивне середовище → зрозуміла помилка, конфлікт розв'язується лише для свого ключа,
     `--force` без `--key` поводиться як раніше.
   - Залежить від: CW1, CW2
 
-- [ ] **CW8. `edit --set/--unset/--secret` + `BaseJson`**
+- [x] **CW8. `edit --set/--unset/--secret` + `BaseJson`**
   - Патч експорту через `EditJsonPatch`, без редактора; `--global` → `@global`; значення секретів у командному рядку
     не приймаються. Обидва режими `edit` шлють `EditedJson(json, BaseJson)`.
   - Тести: кожен прапорець, `--global` з підтвердженням `TouchesGlobal`, паралельна зміна в Azure не відкочується (G14).
   - Залежить від: CW1
 
-- [ ] **CW9. Безпечний `use`**
+- [x] **CW9. Безпечний `use`**
   - Blocked → список ключів + підказки; перша активація з некерованими локальними ключами → підтвердження (`--yes`);
     захищене середовище → підтвердження запису секретів локально (`--confirm <ENV>`).
   - Тести: кожна гілка; `--json` не питає і повертає blocked/unmanaged як дані.
   - Залежить від: CW2
 
-- [ ] **CW10. Випуск 0.4.0**
+- [x] **CW10. Випуск 0.4.0**
   - README (status, diff, `--key`, `edit --set`, `use`), `CHANGELOG.md`, `<Version>` 0.4.0; PR `release/0.4.0` → `master`;
     після злиття — `master` → `dev` (UI M1).
   - Залежить від: CW5–CW9
