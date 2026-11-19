@@ -223,6 +223,32 @@ public sealed class SyncService(
         return WithoutIgnored(ThreeWayDiff.Compute(@base, await ReadLocalAsync(binding, ct), remote, fingerprinter), binding);
     }
 
+    /// <summary>See <see cref="ISyncService.StatusAsync"/>. Blocked keys = what makes <see cref="PullAsync"/> refuse: local changes and conflicts.</summary>
+    public async Task<SyncSummary> StatusAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct)
+    {
+        if (!string.Equals(binding.ActiveEnvironment, env.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return new(env.Name, false, 0, 0, [], [], [], 0);
+        }
+
+        var (@base, remote, _, warnings) = await ReadRemoteAsync(binding, env, ct);
+        var full = ThreeWayDiff.Compute(@base, await ReadLocalAsync(binding, ct), remote, fingerprinter);
+        var items = WithoutIgnored(full, binding).Items;
+        static bool IsLocal(DiffKind k) => k is DiffKind.LocalAdded or DiffKind.LocalModified or DiffKind.LocalDeleted;
+        static bool IsRemote(DiffKind k) => k is DiffKind.RemoteAdded or DiffKind.RemoteModified or DiffKind.RemoteDeleted;
+        List<string> KeysWhere(Func<DiffKind, bool> match) => [.. items.Where(i => match(i.Kind)).Select(i => i.Key).Order(StringComparer.Ordinal)];
+
+        return new(
+            env.Name,
+            true,
+            items.Count(i => IsLocal(i.Kind)),
+            items.Count(i => IsRemote(i.Kind)),
+            KeysWhere(k => k == DiffKind.Conflict),
+            KeysWhere(k => IsLocal(k) || k == DiffKind.Conflict),
+            warnings.Count == 0 ? [] : warnings,
+            full.Items.Count - items.Count);
+    }
+
     /// <summary>
     /// Plans local changes against <paramref name="env"/>. <see cref="PushSource.Promote"/> plans only new service keys
     /// (<c>Add</c>/<c>CreateSecret</c>, empty base, global ignored); <see cref="PushSource.EditedJson"/> uses its <see cref="PushSource.EditedJson.BaseJson"/>
