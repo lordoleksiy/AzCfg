@@ -7,12 +7,24 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
 ## [Unreleased]
 
 ### Planned
-- 0.4.0 (ADR 0013): `azcfg status`, `azcfg diff` (local ↔ env, env ↔ env, `--missing --all`), `--key` for
-  `pull`/`plan`/`push` with per-key conflict resolution via `--force`, `edit --set/--unset/--secret` without an editor;
-  `use` asks before overwriting unmanaged local keys and before writing a protected environment's secrets locally;
-  `edit` no longer reverts remote changes made after the export.
 - 0.5.0: `azcfg status --check` (sign-in, access, `.gitignore`, dead Key Vault references, keys missing across environments).
 - 0.6.0 (ADR 0012, amended): project manifest `azcfg.json`, discovery, `azcfg adopt`.
+
+## [0.4.0]
+### Added
+- `azcfg status`: active environment, local/remote change counters, conflicts, blocked keys, warnings (ADR 0013).
+- `azcfg diff`: local ↔ env, env ↔ env, `--same`, `--missing --all` (exit code 1 when keys are missing). Local
+  secrets (user-secrets, or secrets of the active environment) stay hidden even against an environment without them.
+- `--key <pattern>` for `pull`/`plan`/`push`; per-key conflict resolution with `pull --key K --force` (keep remote)
+  and `push --key K --force` (keep local; nothing is recorded until the push is applied). `pull --key` leaves keys
+  that were added locally and never pushed; blank patterns and a bare `global:` are rejected.
+- `edit --set/--unset/--secret` (with `--global`) patch the config without an editor; `--set` on a global key adds a
+  service override (`--global --set` on a service key sets the global value).
+### Changed
+- `use` lists blocking keys, asks before overwriting unmanaged local keys on first activation (`--yes`) and before
+  writing a protected environment's secrets locally (`--confirm <ENV>`). When the active environment cannot be read
+  to check for local changes, `use` asks before switching (`--json`: refused as `unverified`; `--force` skips the check).
+- `edit` no longer reverts remote changes made after the export.
 
 ## [0.3.1]
 ### Fixed

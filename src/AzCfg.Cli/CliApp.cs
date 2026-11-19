@@ -33,6 +33,8 @@ public static class CliApp
         config.AddCommand<InitCommand>("init").WithDescription("Choose how environments are separated (stores or labels) and save your environments.");
         config.AddCommand<PullCommand>("pull").WithDescription("Pull an environment into the local targets.");
         config.AddCommand<UseCommand>("use").WithDescription("Pull an environment and make it the active one.");
+        config.AddCommand<StatusCommand>("status").WithDescription("Show local, remote and conflicting changes of the active environment.");
+        config.AddCommand<DiffCommand>("diff").WithDescription("Compare local with an environment, or two environments (either side may be 'local'); --missing --all finds keys absent from some environments.");
         config.AddCommand<PlanCommand>("plan").WithDescription("Show what pushing the local files would change.");
         config.AddCommand<PushCommand>("push").WithDescription("Apply the local files to an environment (add/update; --delete also deletes).");
         config.AddCommand<EditCommand>("edit").WithDescription("Edit the remote config as JSON in your editor, then apply it.");

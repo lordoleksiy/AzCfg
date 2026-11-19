@@ -49,14 +49,17 @@ Status: accepted (CLI 0.4.0, stage 8 of `docs/mvp-plan.md`; ships to `master` **
 - `--key <pattern>` (repeatable) on `pull`, `plan`, `push`: `pull` → `PullSelectedAsync` (active env only, as in AD-8);
   `plan`/`push` → `PlanSelection.Select`.
 - Conflict resolution per key: `pull --key K --force` = keep remote; `push --key K --force` = keep local
-  (`ResolveConflictAsync(KeepLocal)` then plan/apply). `--force` without `--key` keeps its current meaning.
+  (planned in memory with `PushSource.LocalFiles(KeepLocal: keys)`; the snapshot changes only when the plan is applied,
+  so a declined or failed push keeps the conflict). `--force` without `--key` keeps its current meaning. `pull --key`
+  leaves keys added locally and never pushed (nothing to pull; `--force` does not delete them).
 - `edit --set K=V`, `--unset K`, `--secret K=<secret-name>` (repeatable; `--global` puts them under `@global`) — patch the
   export with `EditJsonPatch`, no editor; then the usual plan → confirm → apply. Secret *values* are not accepted on the
   command line (shell history); a new secret value still goes through the editor or the UI.
 - `edit` (both modes) always sends `EditedJson(json, BaseJson: export)`.
 - `use <env>`: blocked → list blocked keys + hint (`push`, `pull --key … --force`, `--force`); first activation with
   unmanaged local keys → confirmation; protected env → confirmation «secrets of <env> will be written to local files».
-  `--yes` skips the first, `--confirm <ENV>` the second.
+  `--yes` skips the first, `--confirm <ENV>` the second. Active env unreadable (Azure error, lost access) → warning +
+  confirmation; `--json` → refusal `unverified`; `--force` skips the check.
 
 ## Consequences
 - CLI 0.4.0 ships from `master` before the UI; `master` is merged back into `dev`, after which `AzCfg.Ui.Application`

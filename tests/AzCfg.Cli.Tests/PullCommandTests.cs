@@ -60,7 +60,12 @@ public sealed class PullCommandTests
         public Task<string> ExportPromoteJsonAsync(ProjectBinding binding, ConfigEnvironment from, ConfigEnvironment to, CancellationToken ct) => throw new NotSupportedException();
         public Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct) => throw new NotSupportedException();
         public Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => throw new NotSupportedException();
+        public Task<SyncSummary> StatusAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => Task.FromResult(new SyncSummary(env.Name, true, 0, 0, [], [], [], 0));
         public Task<ApplyResult> ApplyAsync(SyncPlan plan, ApplyOptions options, CancellationToken ct) => throw new NotSupportedException();
+        public Task<RemoteConfig> ReadRemoteConfigAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => throw new NotSupportedException();
+        public Task<PullResult> PullSelectedAsync(ProjectBinding binding, ConfigEnvironment env, IReadOnlyCollection<string> keys, CancellationToken ct) => throw new NotSupportedException();
+        public Task ResolveConflictAsync(ProjectBinding binding, ConfigEnvironment env, string key, ConflictResolution resolution, CancellationToken ct) => throw new NotSupportedException();
+        public Task<IReadOnlyList<string>> UnmanagedLocalKeysAsync(ProjectBinding binding, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
     }
 
     private static ConfigEnvironment Env(string name) => new(name, new Uri($"https://{name}.azconfig.io"), null, false);
@@ -237,6 +242,20 @@ public sealed class PullCommandTests
         await Run(s, force ? ["--force"] : []);
 
         Assert.Equal(force, s.Pulled!.Value.Force);
+    }
+
+    [Theory]
+    [InlineData(null, "has none")]
+    [InlineData("dev", "'dev'")]
+    public async Task Key_on_a_non_active_environment_is_a_clear_error(string? active, string expected)
+    {
+        var s = new Stubs { Resolution = new([], true, [], Binding(active)) };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(s, "--env", "stage", "--key", "Db:*"));
+
+        Assert.Contains(expected, ex.Message);
+        Assert.Contains("azcfg use stage", ex.Message);
+        Assert.Null(s.Pulled);
     }
 
     [Fact]
