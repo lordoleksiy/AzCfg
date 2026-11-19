@@ -435,6 +435,17 @@ public sealed class SyncService(
         return ToState([.. values, .. secrets]);
     }
 
+    public async Task<IReadOnlyList<string>> UnmanagedLocalKeysAsync(ProjectBinding binding, CancellationToken ct)
+    {
+        if (binding.ActiveEnvironment is not null)
+        {
+            return [];
+        }
+
+        var (values, secrets) = await ReadTargetsAsync(binding, ct);
+        return [.. values.Concat(secrets).Select(v => v.Key).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+    }
+
     /// <summary>Reads the values target and the secrets target separately; a shared target is read once (as values).</summary>
     private async Task<(IReadOnlyList<LocalValue> Values, IReadOnlyList<LocalValue> Secrets)> ReadTargetsAsync(ProjectBinding binding, CancellationToken ct) => (
         await targets.First(t => t.Kind == binding.ValuesTarget.Kind).ReadAsync(binding.ValuesTarget, ct),

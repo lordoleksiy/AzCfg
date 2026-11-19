@@ -47,4 +47,11 @@ public interface ISyncService
     /// plans the local value (Add/Update; a local deletion is a Delete only with <c>LocalFiles.Delete</c>, else DeleteSkipped).
     /// </summary>
     Task ResolveConflictAsync(ProjectBinding binding, ConfigEnvironment env, string key, ConflictResolution resolution, CancellationToken ct);
+
+    /// <summary>
+    /// Keys found in the local targets (sorted, distinct) while <c>binding.ActiveEnvironment</c> is <c>null</c> — nothing has
+    /// been pulled yet, so a first pull would overwrite them (G20). Empty (and nothing is read) when an environment is active.
+    /// Keys only, never values.
+    /// </summary>
+    Task<IReadOnlyList<string>> UnmanagedLocalKeysAsync(ProjectBinding binding, CancellationToken ct);
 }
