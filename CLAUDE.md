@@ -71,7 +71,8 @@ tests/AzCfg.Cli.Tests     command tests + Scenario/ (end-to-end on in-memory fak
   0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety,
   0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore,
   0012 project configuration: manifest, discovery, adopt (amended: profiles/standardize deferred),
-  0013 CLI daily workflow: status, diff, key selection, safe use)
+  0013 CLI daily workflow: status, diff, key selection, safe use,
+  0014 remote providers (App Config, App Service/Function App settings) and editable project settings `config project.*`)
 
 ## Skills
 - `/feature` — one task → branch from `dev` → tests → code → PR into `dev` (stages 8–10 of `docs/mvp-plan.md`: base

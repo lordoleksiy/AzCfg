@@ -1,7 +1,7 @@
 # 0012. Project Configuration: manifest, convention profiles, discovery, `adopt`, `standardize`
 
 Status: accepted, **amended 2026-11-20** (see «Amendment» at the end): CLI 0.6.0, stage 10 of `docs/mvp-plan.md`,
-after ADR 0013 (0.4.0) and the health stage (0.5.0)
+after ADR 0013 (0.4.0) and the health stage (0.5.0). Schema v1 remote source kinds are amended by ADR 0014.
 
 ## Context
 - Today AzCfg is zero-config (ADR 0001): everything is auto-detected and the choice is remembered in user state
