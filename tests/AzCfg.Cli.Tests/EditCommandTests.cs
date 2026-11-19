@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using AzCfg.Cli.Commands;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Environments;
@@ -25,6 +26,9 @@ public sealed class EditCommandTests
         public List<string> ContentSeenByEditor { get; } = [];
         public List<(ConfigEnvironment Env, PushSource Source)> Planned { get; } = [];
         public List<SyncPlan> Applied { get; } = [];
+        public List<ApplyOptions> ApplyOptionsSeen { get; } = [];
+        public string Export { get; init; } = Exported;
+        public bool TouchesGlobal { get; init; }
     }
 
     private sealed class StubEditor(Stubs s) : IEditorLauncher
@@ -67,17 +71,18 @@ public sealed class EditCommandTests
 
     private sealed class StubSync(Stubs s) : ISyncService
     {
-        public Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => Task.FromResult(Exported);
+        public Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => Task.FromResult(s.Export);
 
         public Task<SyncPlan> PlanPushAsync(ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct)
         {
             s.Planned.Add((env, source));
-            return Task.FromResult(new SyncPlan(binding, env, [new(ChangeKind.Update, null, new("Db:Host", ConfigScope.Service, new ConfigValue.Plain("edited")))], [], false, false));
+            return Task.FromResult(new SyncPlan(binding, env, [new(ChangeKind.Update, null, new("Db:Host", ConfigScope.Service, new ConfigValue.Plain("edited")))], [], false, s.TouchesGlobal));
         }
 
         public Task<ApplyResult> ApplyAsync(SyncPlan plan, ApplyOptions options, CancellationToken ct)
         {
             s.Applied.Add(plan);
+            s.ApplyOptionsSeen.Add(options);
             return Task.FromResult(new ApplyResult(1, []));
         }
 
@@ -131,7 +136,9 @@ public sealed class EditCommandTests
         Assert.Equal(".json", Path.GetExtension(path));
         Assert.StartsWith(Path.GetTempPath(), path);
         Assert.False(File.Exists(path));
-        Assert.Equal("""{"Db":{"Host":"edited"}}""", Assert.IsType<PushSource.EditedJson>(Assert.Single(s.Planned).Source).Json);
+        var source = Assert.IsType<PushSource.EditedJson>(Assert.Single(s.Planned).Source);
+        Assert.Equal("""{"Db":{"Host":"edited"}}""", source.Json);
+        Assert.Equal(Exported, source.BaseJson);
         Assert.Single(s.Applied);
         Assert.Matches(@"Applied\s+1", output);
     }
@@ -161,6 +168,132 @@ public sealed class EditCommandTests
 
         Assert.False(File.Exists(Assert.Single(s.EditorPaths)));
         Assert.Empty(s.Planned);
+    }
+
+    private static string PlannedJson(Stubs s) => Assert.IsType<PushSource.EditedJson>(Assert.Single(s.Planned).Source).Json;
+
+    private static JsonNode Parsed(string json) => JsonNode.Parse(json)!;
+
+    [Fact]
+    public async Task Set_patches_the_export_without_the_editor_and_sends_it_with_BaseJson()
+    {
+        var s = new Stubs();
+
+        var (exit, output) = await Run(s, "--yes", "--set", "Db:Host=new", "--set", "Timeout=30", "--set", "Conn=a=b");
+
+        Assert.Equal(0, exit);
+        Assert.Empty(s.EditorPaths);
+        var source = Assert.IsType<PushSource.EditedJson>(Assert.Single(s.Planned).Source);
+        Assert.Equal(Exported, source.BaseJson);
+        var json = Parsed(source.Json);
+        Assert.Equal("new", (string?)json["Db"]!["Host"]);
+        Assert.Equal("30", (string?)json["Timeout"]);
+        Assert.Equal("a=b", (string?)json["Conn"]);
+        Assert.Single(s.Applied);
+        Assert.Matches(@"Applied\s+1", output);
+    }
+
+    [Fact]
+    public async Task Unset_removes_the_key()
+    {
+        var s = new Stubs { Export = """{"Db":{"Host":"h","Port":"1"},"Old":"x"}""" };
+
+        var (exit, _) = await Run(s, "--yes", "--unset", "Old", "--unset", "Db:Port");
+
+        Assert.Equal(0, exit);
+        var json = Parsed(PlannedJson(s));
+        Assert.Null(json["Old"]);
+        Assert.Null(json["Db"]!["Port"]);
+        Assert.Equal("h", (string?)json["Db"]!["Host"]);
+    }
+
+    [Fact]
+    public async Task Secret_sets_a_key_vault_reference_by_name()
+    {
+        var s = new Stubs();
+
+        var (exit, _) = await Run(s, "--yes", "--secret", "Db:Password=orders--Db--Password");
+
+        Assert.Equal(0, exit);
+        var json = Parsed(PlannedJson(s));
+        Assert.Equal("orders--Db--Password", (string?)json["Db"]!["Password"]!["@kv"]);
+        Assert.Null(json["Db"]!["Password"]!["value"]);
+    }
+
+    [Fact]
+    public async Task Global_puts_the_keys_under_the_global_section_and_needs_the_global_confirmation()
+    {
+        var s = new Stubs { TouchesGlobal = true };
+
+        var (exit, _) = await Run(s, "--yes", "--global", "--set", "Logging:Level=Info", "--unset", "Gone", "--secret", "Key=kv-name");
+
+        Assert.Equal(0, exit);
+        var json = Parsed(PlannedJson(s));
+        Assert.Equal("Info", (string?)json["@global"]!["Logging"]!["Level"]);
+        Assert.Equal("kv-name", (string?)json["@global"]!["Key"]!["@kv"]);
+        Assert.Equal("h", (string?)json["Db"]!["Host"]);
+        Assert.True(Assert.Single(s.ApplyOptionsSeen).ConfirmGlobal);
+    }
+
+    [Fact]
+    public async Task Global_without_yes_in_json_mode_is_not_applied_silently()
+    {
+        var s = new Stubs { TouchesGlobal = true };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Run(s, "--json", "--global", "--set", "Logging:Level=Info"));
+
+        Assert.Empty(s.Applied);
+    }
+
+    [Fact]
+    public async Task Concurrent_change_after_export_is_sent_as_BaseJson_so_core_does_not_revert_it()
+    {
+        var s = new Stubs();
+
+        await Run(s, "--yes", "--set", "Timeout=30");
+
+        var source = Assert.IsType<PushSource.EditedJson>(Assert.Single(s.Planned).Source);
+        Assert.Equal(s.Export, source.BaseJson);
+        Assert.NotEqual(source.Json, source.BaseJson);
+    }
+
+    [Fact]
+    public async Task Json_with_patch_flags_applies_and_prints_the_result_record()
+    {
+        var s = new Stubs();
+
+        var (exit, output) = await Run(s, "--json", "--yes", "--set", "Timeout=30");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(1, (int)Parsed(output)["applied"]!);
+        Assert.Single(s.Applied);
+    }
+
+    [Theory]
+    [InlineData("--set", "NoEquals")]
+    [InlineData("--set", "=value")]
+    [InlineData("--secret", "Key")]
+    [InlineData("--secret", "Key=")]
+    [InlineData("--unset", " ")]
+    public async Task Invalid_pair_gives_a_clear_error_and_plans_nothing(string option, string value)
+    {
+        var s = new Stubs();
+
+        var ex = await Assert.ThrowsAsync<CommandRuntimeException>(() => Run(s, "--yes", option, value));
+
+        Assert.Contains(option, ex.Message);
+        Assert.Empty(s.Planned);
+    }
+
+    [Fact]
+    public async Task Global_without_patch_flags_is_an_error()
+    {
+        var s = new Stubs();
+
+        var ex = await Assert.ThrowsAsync<CommandRuntimeException>(() => Run(s, "--global"));
+
+        Assert.Contains("--global", ex.Message);
+        Assert.Empty(s.EditorPaths);
     }
 
     [Fact]
