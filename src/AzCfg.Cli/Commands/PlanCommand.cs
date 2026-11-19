@@ -16,7 +16,7 @@ public sealed class PlanCommand(IProjectService projects, ISyncService sync, IUs
     public override async Task<int> ExecuteAsync(CommandContext context, PlanSettings settings, CancellationToken ct)
     {
         var (binding, env) = await ResolveAsync(settings, ct);
-        var plan = await sync.PlanPushAsync(binding, env, new PushSource.LocalFiles(settings.Delete), ct);
+        var plan = KeyFilter.Restrict(await sync.PlanPushAsync(binding, env, new PushSource.LocalFiles(settings.Delete), ct), settings.Key);
 
         if (settings.Json)
         {

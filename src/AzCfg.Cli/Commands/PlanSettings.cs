@@ -9,4 +9,8 @@ public sealed class PlanSettings : GlobalSettings
     [CommandOption("--delete")]
     [Description("Also delete remote keys that were deleted locally (default: add and update only).")]
     public bool Delete { get; init; }
+
+    [CommandOption("--key <PATTERN>")]
+    [Description("Plan only the keys matching the pattern (repeatable; * wildcard, optional global: prefix).")]
+    public string[] Key { get; init; } = [];
 }

@@ -22,4 +22,31 @@ public sealed class PushCommand(IProjectService projects, ISyncService sync, IUs
         var (binding, env) = await ResolveAsync(settings, ct);
         return await PushAsync(settings, binding, env, new PushSource.LocalFiles(settings.Delete), ct);
     }
+
+    protected override async Task<SyncPlan> PlanAsync(PushFilesSettings settings, ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct)
+    {
+        var plan = await base.PlanAsync(settings, binding, env, source, ct);
+        if (settings.Key.Length == 0)
+        {
+            return plan;
+        }
+
+        var selected = KeyFilter.Restrict(plan, settings.Key);
+        if (!settings.Force || selected.Conflicts.Count == 0)
+        {
+            return selected;
+        }
+
+        if (!string.Equals(binding.ActiveEnvironment, env.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"--force resolves conflicts of the active environment only, not '{env.Name}'; run 'azcfg use {env.Name}' first.");
+        }
+
+        foreach (var conflict in selected.Conflicts)
+        {
+            await Sync.ResolveConflictAsync(binding, env, conflict.Key, ConflictResolution.KeepLocal, ct);
+        }
+
+        return KeyFilter.Restrict(await base.PlanAsync(settings, binding, env, source, ct), settings.Key);
+    }
 }

@@ -244,6 +244,20 @@ public sealed class PullCommandTests
         Assert.Equal(force, s.Pulled!.Value.Force);
     }
 
+    [Theory]
+    [InlineData(null, "has none")]
+    [InlineData("dev", "'dev'")]
+    public async Task Key_on_a_non_active_environment_is_a_clear_error(string? active, string expected)
+    {
+        var s = new Stubs { Resolution = new([], true, [], Binding(active)) };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(s, "--env", "stage", "--key", "Db:*"));
+
+        Assert.Contains(expected, ex.Message);
+        Assert.Contains("azcfg use stage", ex.Message);
+        Assert.Null(s.Pulled);
+    }
+
     [Fact]
     public async Task Human_output_shows_environment_and_counts()
     {
