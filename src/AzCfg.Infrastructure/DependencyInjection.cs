@@ -35,6 +35,7 @@ public static class DependencyInjection
             new HmacSecretFingerprinter(sp.GetRequiredService<IUserStateStore>().GetOrCreateFingerprintKeyAsync(CancellationToken.None).GetAwaiter().GetResult()));
         services.AddSingleton<IProjectService, ProjectService>();
         services.AddSingleton<ISyncService, SyncService>();
+        services.AddSingleton<IConfigComparisonService, ConfigComparisonService>();
         return services;
     }
 }
