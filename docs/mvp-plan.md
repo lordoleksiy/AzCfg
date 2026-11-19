@@ -7,7 +7,8 @@
 > **Статус:** етапи 1–7 виконано. Історія версій CLI: 0.1.0 — етапи 1–6 (MVP); 0.2.0 — ADR 0008 (режими
 > середовищ store / label, читання всіх labels у store-режимі, локальний ігнор `azcfg ignore`, push за
 > замовчуванням — upsert, `--delete`, `azcfg config`, `pull/use --service`); 0.3.0 — етап 7, ADR 0009;
-> 0.3.1 — виявлення `appsettings*.json`. Далі: 0.4.0 — етап 8 (ADR 0013), 0.5.0 — етап 9, 0.6.0 — етап 10 (ADR 0012).
+> 0.3.1 — виявлення `appsettings*.json`; 0.4.0 — етап 8 (ADR 0013). Далі: 0.5.0 — етап 9 (+ налаштування проєкту,
+> ADR 0014), 0.6.0 — етап 10 (ADR 0012 скорочено + провайдери ADR 0014), етап 11 — App Service / Function App settings.
 > Де текст задачі етапів 1–6 розходиться з ADR 0008/0009 — правильний ADR. Аналіз і обґрунтування порядку —
 > `docs/cli-roadmap.md`.
 
@@ -293,8 +294,13 @@
    працює від `dev`: у брифі агента явно вказати базу `origin/release/<версія>` (як у брифі 0.3 `ui-mvp-plan.md`).
 3. Остання задача етапу (реліз) — `<Version>`, `CHANGELOG.md`, README → один PR `release/<версія>` → `master`.
 4. Одразу після злиття — `master` → `dev` (задача UI M1 у `docs/ui-mvp-plan.md`); конфлікти розв'язуються на боці `dev`.
+   Після 0.5.0 і 0.6.0 — так само (M2, M3).
 5. Документи етапу (ADR 0013, цей файл, `cli-roadmap.md`, `architecture.md`) потрапляють у `release/0.4.0` першим
    комітом (R0), щоб `master` після релізу описував сам себе.
+6. UI не чекає на 0.5.0/0.6.0 — вони блокують лише потрапляння UI в `master`. Порядок на `dev`: M1 → U2–U4 паралельно
+   з етапом 9; U1 (стан середовищ FR-E6, налаштування проєкту) — після M2, щоб брати `HealthReport` і
+   `IProjectSettingsService` з Core, а не дублювати логіку в `AzCfg.Ui.Application`. Етап 10 іде паралельно з UI;
+   PR0 не змінює сигнатури `ISyncService`/портів (ADR 0014), тож UI на `dev` компілюється без змін.
 
 ## Етап 8. Щоденний workflow CLI (ADR 0013) — CLI 0.4.0, у `master` до UI
 
@@ -377,6 +383,8 @@
     (`MissingKeysReport`). Severity `Error`/`Warning`; лише ключі й назви, без значень.
   - Мертві референси — новий метод порту без читання значення (`ISecretStore.ExistsAsync`, Infrastructure — властивості
     секрету); ADR-поправка до 0013 перед кодом.
+  - Після H4: перевірка прив'язки (service / цілі / vault, що не відповідають реальності) з командою-виправленням
+    `azcfg config set project.*` (ADR 0014).
   - Залежить від: етап 8 (CW10)
 
 - [ ] **H2. `azcfg status --check`** — вивід звіту, `--json`, exit code ≠ 0 при `Error`.
@@ -387,7 +395,8 @@
   і снапшоти; `pull`/`use --service X` при іншій прив'язці → помилка з підказкою.
   - Залежить від: —
 
-- [ ] **H3. Випуск 0.5.0** (+ `master` → `dev`; UI споживає `HealthReport` для FR-E6).
+- [ ] **H3. Випуск 0.5.0** (+ `master` → `dev` — UI M2; UI споживає `HealthReport` для FR-E6 і
+  `IProjectSettingsService` для налаштувань проєкту в U1).
   - Залежить від: H2, H4
 
 ## Етап 10. Конфігурація проєкту (ADR 0012, скорочено) — CLI 0.6.0
@@ -412,7 +421,7 @@
     перехресні посилання (середовища, секрети, джерела), секрет не вказує на незігнорований файл.
   - Тести (TDD): round-trip, відхилення поля-значення, невідома версія схеми, кожне правило валідатора, CI/Deployments
     парсяться й валідуються без жодної автоматизації.
-  - Залежить від: —
+  - Залежить від: PR0 (`RemoteKind` у схемі v1)
 
 - [ ] **PC2. Профілі конвенцій** (`Core/Profiles`, `Infrastructure/State`) — **відкладено** (поправка ADR 0012), не входить у 0.6.0
   - `ConventionProfile` (Naming, Layout, Environments, Secrets, Providers), `BuiltInProfiles.Default` (`azcfg-default` =
@@ -469,8 +478,8 @@
 
 - [ ] **PC9. Випуск 0.6.0**
   - README: `adopt`, маніфест, перевірки маніфесту в `status --check`; `<Version>` 0.6.0; `CHANGELOG.md`;
-    PR `release/0.6.0` → `master`, потім `master` → `dev`.
-  - Залежить від: PC6, PC7
+    PR `release/0.6.0` → `master`, потім `master` → `dev` (UI M3).
+  - Залежить від: PR0, PC6, PC7
 
 ## Поза MVP
 Проєктна конфігурація (поза етапом 10): профілі конвенцій і `standardize` (PC2, PC8), `pull`/`push` через маніфест,
@@ -479,3 +488,5 @@
 сервісу, ранжування vault-ів з Resource Graph, створення Key Vault. (`diff` і `doctor` → етапи 8–9: `diff`,
 `status --check`.)
 (`LabelResolver` реалізовано в 0.2.0 — ADR 0008.)
+Етап 11 (ADR 0014): `AppServiceSettingsProvider` + порт `IAppSettingsStore`, `config set project.remote.<name>.<env>`,
+`--remote <name>`, `LocalSettingsTarget`.
