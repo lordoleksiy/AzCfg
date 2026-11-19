@@ -102,7 +102,11 @@ Writes use etags, so a key changed remotely since your last pull is reported ins
 
 ```bash
 azcfg edit --env dev       # opens the remote config in $VISUAL/$EDITOR, shows the plan, then applies it
+azcfg edit --set Db:Host=h --unset Old:Key --secret Db:Password=orders--Db--Password   # no editor; repeatable flags
+azcfg edit --global --set Logging:Level=Info                                          # keys go to the global scope
 ```
+
+Secret values are never accepted on the command line; `--secret` only points a key at an existing Key Vault secret.
 
 ### 5. Promote keys between environments
 
