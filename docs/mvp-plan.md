@@ -1,12 +1,15 @@
 # MVP — план виконання
 
-Список маленьких задач для агентів. Одна задача = одна гілка = один PR у `dev`.
+Список маленьких задач для агентів. Одна задача = одна гілка = один PR у `dev` (етапи 1–7).
+**Етапи 8–10 — інакше:** гілки від `release/<версія>` (яка відгалужена від `master`), PR у `release/<версія>`,
+потім один PR `release/<версія>` → `master` (див. «Гілки для етапів 8–10»).
 
-> **Статус:** усі задачі виконано. Історія версій CLI: 0.1.0 — етапи 1–6 (MVP); 0.2.0 — ADR 0008 (режими
+> **Статус:** етапи 1–7 виконано. Історія версій CLI: 0.1.0 — етапи 1–6 (MVP); 0.2.0 — ADR 0008 (режими
 > середовищ store / label, читання всіх labels у store-режимі, локальний ігнор `azcfg ignore`, push за
-> замовчуванням — upsert, `--delete`, `azcfg config`, `pull/use --service`); 0.3.0 — етап 7, ADR 0009.
-> Де текст задачі етапів 1–6 розходиться з ADR 0008/0009 — правильний ADR. Нові задачі — через issue +
-> `/issue-orchestrator`.
+> замовчуванням — upsert, `--delete`, `azcfg config`, `pull/use --service`); 0.3.0 — етап 7, ADR 0009;
+> 0.3.1 — виявлення `appsettings*.json`. Далі: 0.4.0 — етап 8 (ADR 0013), 0.5.0 — етап 9, 0.6.0 — етап 10 (ADR 0012).
+> Де текст задачі етапів 1–6 розходиться з ADR 0008/0009 — правильний ADR. Аналіз і обґрунтування порядку —
+> `docs/cli-roadmap.md`.
 
 ## Як взяти задачу
 1. Прочитай `CLAUDE.md` (правила шарів, безпека, конвенції ключів).
@@ -281,7 +284,188 @@
   - Тести: увімкнений режим додає файл у `.gitignore` (без дублів), вимкнений — нічого не змінює.
   - Залежить від: —
 
+## Гілки для етапів 8–10 (CLI іде в `master` раніше за UI)
+`dev` містить незавершений UI (34 коміти поверх `master`), тож через `dev` CLI-реліз не випустити. Будь-який push у
+`master`, що змінює `src/**`, публікує NuGet — тому проміжні PR у `master` заборонені.
+1. `release/0.4.0` від `origin/master` (етап 9 — `release/0.5.0`, етап 10 — `release/0.6.0`, кожна від `master` після
+   попереднього релізу).
+2. Задача = гілка `feature/<id>-<slug>` від `release/<версія>` → PR у `release/<версія>`. `/feature` за замовчуванням
+   працює від `dev`: у брифі агента явно вказати базу `origin/release/<версія>` (як у брифі 0.3 `ui-mvp-plan.md`).
+3. Остання задача етапу (реліз) — `<Version>`, `CHANGELOG.md`, README → один PR `release/<версія>` → `master`.
+4. Одразу після злиття — `master` → `dev` (задача UI M1 у `docs/ui-mvp-plan.md`); конфлікти розв'язуються на боці `dev`.
+5. Документи етапу (ADR 0013, цей файл, `cli-roadmap.md`, `architecture.md`) потрапляють у `release/0.4.0` першим
+   комітом (R0), щоб `master` після релізу описував сам себе.
+
+## Етап 8. Щоденний workflow CLI (ADR 0013) — CLI 0.4.0, у `master` до UI
+
+Бюджет команд: нові лише `status` і `diff`; решта — прапорці існуючих команд. Core — адитивно і TDD. Значення секретів
+ніколи не потрапляють у `status`/`diff`/`--json`.
+
+- [ ] **R0. Гілка `release/0.4.0` + документи** (оркестратор)
+  - `release/0.4.0` від `origin/master`; коміт документів (ADR 0012 з поправкою, ADR 0013, `cli-roadmap.md`, цей файл,
+    `architecture.md`, `CHANGELOG.md`, `CLAUDE.md`); push лише з OK користувача.
+  - Залежить від: —
+
+- [ ] **CW1. Перенести C1/C2 у `release/0.4.0`**
+  - `git cherry-pick e2b3983 3ef4bfe` (Core-хелпери: `EditJsonPatch`, `PlanSelection`, `EnvironmentComparer`,
+    `KeyMapper.SecretNameOf`; use cases: `PullSelectedAsync`, `ResolveConflictAsync`, `ReadRemoteConfigAsync`,
+    `EditedJson.BaseJson`, `ApplyGuard`). Зміни `docs/ui-mvp-plan.md` у цих комітах — відкинути. Поведінка CLI не змінюється.
+  - Перевірка: build + test зелені; тести C1/C2 перенесені як є.
+  - Залежить від: R0
+
+- [ ] **CW2. Core: `EnvironmentRules`, `KeySelector`, `UnmanagedLocalKeysAsync`**
+  - `Core/Environments/EnvironmentRules` (`IsActive`, `SelectDefault`, `KindOf`) — та сама семантика, що в
+    `AzCfg.Ui.Application` на `dev` (код звідти не копіюється автоматично — переписати за тестами).
+  - `Core/Sync/KeySelector` — синтаксис шаблонів `IgnoreRules` (`*`, `global:`), кілька шаблонів = OR.
+  - `ISyncService.UnmanagedLocalKeysAsync` (G20): ключі локальних цілей, коли `ActiveEnvironment` = null; інакше порожньо.
+  - Тести (TDD): кожне правило; G20 для обох цілей і однієї спільної.
+  - Залежить від: CW1
+
+- [ ] **CW3. Core: `StatusAsync` → `SyncSummary`**
+  - Контракт — ADR 0013. З `DiffAsync`; лише ключі й лічильники; неактивне середовище → `IsActive = false`.
+  - Тести: кожен `DiffKind` у правильному лічильнику, конфлікти й blocked keys, ігноровані, канарковий секрет відсутній у JSON.
+  - Залежить від: CW1
+
+- [ ] **CW4. Core: порівняння і `MissingKeysReport`**
+  - `IConfigComparisonService` (local ↔ env за fingerprint, env ↔ env через `EnvironmentComparer`), `CompareSide`,
+    `ConfigComparison`; `MissingKeysReport` (static) по N середовищах; DI в `AddAzCfg()`.
+  - Тести: секрет local ↔ env однаковий/різний без розкриття, env ↔ env за назвою секрету, Local ↔ Local → помилка,
+    звіт відсутніх ключів (3 середовища).
+  - Залежить від: CW1
+
+- [ ] **CW5. `azcfg status`** (через `/add-cli-command`)
+  - Людський вивід + `--json`; `--env` для іншого середовища.
+  - Тести: команда; сценарій `/cli-scenario-test` pull → локальна зміна → зміна в Azure → `status` показує ⇡1 ⇣1.
+  - Залежить від: CW3
+
+- [ ] **CW6. `azcfg diff`** (через `/add-cli-command`)
+  - `diff`, `diff <env>`, `diff <a> <b>` (`local` як сторона), `--same`, `--missing --all` (exit 1, якщо є відсутні).
+  - Тести: усі форми аргументів; секрети лише як назви / same-different; exit code.
+  - Залежить від: CW4
+
+- [ ] **CW7. `--key` для `pull`/`plan`/`push` + розв'язання конфлікту**
+  - `pull --key` → `PullSelectedAsync` (лише активне середовище); `plan/push --key` → `PlanSelection.Select`;
+    `pull --key K --force` = keep remote, `push --key K --force` = keep local (`ResolveConflictAsync`) + plan/apply.
+  - Тести: вибір за шаблоном, неактивне середовище → зрозуміла помилка, конфлікт розв'язується лише для свого ключа,
+    `--force` без `--key` поводиться як раніше.
+  - Залежить від: CW1, CW2
+
+- [ ] **CW8. `edit --set/--unset/--secret` + `BaseJson`**
+  - Патч експорту через `EditJsonPatch`, без редактора; `--global` → `@global`; значення секретів у командному рядку
+    не приймаються. Обидва режими `edit` шлють `EditedJson(json, BaseJson)`.
+  - Тести: кожен прапорець, `--global` з підтвердженням `TouchesGlobal`, паралельна зміна в Azure не відкочується (G14).
+  - Залежить від: CW1
+
+- [ ] **CW9. Безпечний `use`**
+  - Blocked → список ключів + підказки; перша активація з некерованими локальними ключами → підтвердження (`--yes`);
+    захищене середовище → підтвердження запису секретів локально (`--confirm <ENV>`).
+  - Тести: кожна гілка; `--json` не питає і повертає blocked/unmanaged як дані.
+  - Залежить від: CW2
+
+- [ ] **CW10. Випуск 0.4.0**
+  - README (status, diff, `--key`, `edit --set`, `use`), `CHANGELOG.md`, `<Version>` 0.4.0; PR `release/0.4.0` → `master`;
+    після злиття — `master` → `dev` (UI M1).
+  - Залежить від: CW5–CW9
+
+## Етап 9. Здоров'я конфігурації — CLI 0.5.0, `azcfg status --check`
+
+Замість окремих `doctor` і `validate`. Гілка `release/0.5.0` від `master` після 0.4.0.
+
+- [ ] **H1. Core `HealthReport`**
+  - Перевірки: вхід в Azure, доступ до кожного середовища (проба `ReadAsync`/`ListServicePrefixesAsync` — та сама, що в
+    UI `AzureStatusService`), цілі в `.gitignore`, мертві KV-референси, ключі, відсутні в частині середовищ
+    (`MissingKeysReport`). Severity `Error`/`Warning`; лише ключі й назви, без значень.
+  - Мертві референси — новий метод порту без читання значення (`ISecretStore.ExistsAsync`, Infrastructure — властивості
+    секрету); ADR-поправка до 0013 перед кодом.
+  - Залежить від: етап 8 (CW10)
+
+- [ ] **H2. `azcfg status --check`** — вивід звіту, `--json`, exit code ≠ 0 при `Error`.
+  - Залежить від: H1
+
+- [ ] **H3. Випуск 0.5.0** (+ `master` → `dev`; UI споживає `HealthReport` для FR-E6).
+  - Залежить від: H2
+
+## Етап 10. Конфігурація проєкту (ADR 0012, скорочено) — CLI 0.6.0
+
+Після етапів 8–9. Гілка `release/0.6.0` від `master`. Скорочення (поправка ADR 0012): `validate` — частина
+`status --check`; профілі конвенцій (PC2) і `standardize` (PC8) відкладено. Маніфест, discovery і плани **ніколи не
+містять значень** (ні секретних, ні звичайних). GitHub Actions і автоматизація деплою — поза етапом (у моделі лише дані).
+
+- [x] **PC0. ADR 0012** — маніфест, профілі конвенцій, tier-и секретів, discovery, `adopt`, `standardize`, життєвий цикл, CI/CD-модель.
+  - Залежить від: —
+
+- [ ] **PC1. Модель маніфесту** (`Core/Manifest`)
+  - `ProjectManifest`, `ManifestEnvironment`, `ConfigSource`/`ConfigSourceKind`/`ConfigRole`, `SecretRef`, `SecretTier`,
+    `KeySpec`, `CiConfig`, `CiEnvironment`, `DeploymentTarget`; sealed immutable records.
+  - `ManifestSerializer` (System.Text.Json, коментарі й trailing commas дозволені) + `ManifestValidator`: строга
+    схема (невідомі поля, зокрема `value`/`password`, → помилка), `SchemaVersion`, відповідність tier ↔ тип джерела,
+    перехресні посилання (середовища, секрети, джерела), секрет не вказує на незігнорований файл.
+  - Тести (TDD): round-trip, відхилення поля-значення, невідома версія схеми, кожне правило валідатора, CI/Deployments
+    парсяться й валідуються без жодної автоматизації.
+  - Залежить від: —
+
+- [ ] **PC2. Профілі конвенцій** (`Core/Profiles`, `Infrastructure/State`) — **відкладено** (поправка ADR 0012), не входить у 0.6.0
+  - `ConventionProfile` (Naming, Layout, Environments, Secrets, Providers), `BuiltInProfiles.Default` (`azcfg-default` =
+    поточні ADR 0004/0006/0008/0009), порт `IConventionProfileStore`, `JsonConventionProfileStore` (`profiles/<name>.json`
+    або шлях до файлу; атомарний запис), `UserProfile.ConventionProfile = "azcfg-default"` (старий `profile.json` читається),
+    `azcfg config set profile <name>`.
+  - Тести: round-trip, `azcfg-default` відповідає чинним конвенціям, відсутнє поле в старому `profile.json`.
+  - Залежить від: PC1
+
+- [ ] **PC3. Сховище маніфесту** (`Infrastructure/Project`)
+  - Порт `IProjectManifestStore`; `FileProjectManifestStore` (`azcfg.json` у корені репо, атомарний запис, відсутній файл → `null`).
+  - Тести: temp-папка, round-trip, коментарі у файлі, пошкоджений файл → зрозуміла помилка.
+  - Залежить від: PC1
+
+- [ ] **PC4. Discovery: Core** (`Core/Discovery`, `ProjectConfigService.DiscoverAsync`)
+  - `DiscoveryReport`, `DiscoveredSource` (лише `KeyPaths`), `DiscoveredEnvironment`, `DiscoveryFinding`; порт
+    `IConfigSourceScanner`; об'єднання з `IProjectDetector`, `IResourceDiscovery`, `ListServicePrefixesAsync`;
+    зіставлення сервісу — спільна логіка з `ProjectService`.
+  - Тести на fakes: джерела з різних сканерів, finding `SecretLikeKeyInTrackedFile`, відсутність значень у серіалізованому JSON.
+  - Залежить від: PC1
+
+- [ ] **PC5. Discovery: Infrastructure** (`FileConfigSourceScanner`)
+  - `appsettings*.json`, `local.settings.json`, user-secrets (через `UserSecretsTarget`), `launchSettings.json`
+    (`environmentVariables`), `.env*`, `docker-compose*` (`environment:`); значення читаються лише в памʼяті для
+    переліку шляхів і одразу відкидаються; `IsGitTracked` через `git ls-files`.
+  - Не скануємо змінні середовища машини та `.github/workflows`.
+  - Тести: temp-репо з кількома файлами; у результаті жодного значення (перевірка на «канарковому» секреті).
+  - Залежить від: PC4
+
+- [ ] **PC6. `azcfg adopt`** (через `/add-cli-command`)
+  - `ProjectConfigService.PlanAdoptAsync` (маніфест + binding + `Questions` для неоднозначностей) / `ApplyAdoptAsync`
+    (лише `azcfg.json` і стан користувача; файли проєкту не чіпає); ідемпотентність (merge із наявним маніфестом, показ diff).
+  - CLI: discovery → питання → превʼю → підтвердження; `--yes`, `--json` (AdoptPlan як є).
+  - Тести: Core на fakes; CLI-команда; сценарій `/cli-scenario-test` — незнайомий проєкт → `adopt` → `pull` працює.
+  - Залежить від: PC3, PC5, L3
+
+- [ ] **PC7. Валідація маніфесту в `status --check`** (без окремої команди `validate`)
+  - `DriftComparer` (static): бажане (маніфест; без профілю — його відкладено) vs фактичне (discovery) → `DriftReport`
+    (`Missing`/`Unexpected`/`Mismatch`); `ProjectConfigService.ValidateAsync`/`CompareAsync`; результати додаються в
+    `HealthReport` (етап 9) → `status --check`, exit code ≠ 0 при помилках.
+  - Тести: кожен `DriftKind`, проєкт без розбіжностей → порожній звіт.
+  - Залежить від: PC6, H2
+
+- [ ] **PC8. `azcfg standardize`** (через `/add-cli-command`) — **відкладено** (поправка ADR 0012), не входить у 0.6.0
+  - `StandardizePlanner` (static, pure, TDD): actual vs профіль → `MigrationPlan` (`UpdateManifest`, `CreateFile`,
+    `EnsureGitIgnored`, `CopyKeys`, `RenameKeys`, `SetEnvironmentMode`; кроки без значень, з `IsDestructive`).
+    Проєкт, що вже відповідає профілю → порожній план.
+  - Порт `IMigrationExecutor` + `FileMigrationExecutor` (через `ILocalTarget`; значення лише в памʼяті; копіювання з
+    перевіркою повторним читанням; без видалень; секрети лише в ігноровані цілі).
+  - CLI: `standardize [--profile <name|path>] [-S]`: превʼю завжди; без підтвердження застосувати неможливо; `--yes`
+    пропускає запит; `--json` друкує план без застосування; `-S` — вибір кроків (див. відкрите питання ADR 0012).
+  - Тести: планувальник (кожен крок), executor у temp-репо (секрет не потрапляє в tracked-файл і в plan/лог), CLI.
+  - Залежить від: PC2, PC3, PC7
+
+- [ ] **PC9. Випуск 0.6.0**
+  - README: `adopt`, маніфест, перевірки маніфесту в `status --check`; `<Version>` 0.6.0; `CHANGELOG.md`;
+    PR `release/0.6.0` → `master`, потім `master` → `dev`.
+  - Залежить від: PC6, PC7
+
 ## Поза MVP
-`doctor`, `diff` між середовищами, `LocalSettingsTarget` (local.settings.json), git remote як сигнал для
-зіставлення сервісу, ранжування vault-ів з Resource Graph, створення Key Vault.
+Проєктна конфігурація (поза етапом 10): профілі конвенцій і `standardize` (PC2, PC8), `pull`/`push` через маніфест,
+віддалена частина стандартизації, дискавері `.github/workflows`, генерація GitHub Actions environments і автоматизація
+деплою. `promote --key/--changed`, `LocalSettingsTarget` (local.settings.json), git remote як сигнал для зіставлення
+сервісу, ранжування vault-ів з Resource Graph, створення Key Vault. (`diff` і `doctor` → етапи 8–9: `diff`,
+`status --check`.)
 (`LabelResolver` реалізовано в 0.2.0 — ADR 0008.)
