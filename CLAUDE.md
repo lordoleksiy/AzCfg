@@ -62,7 +62,7 @@ tests/AzCfg.Cli.Tests     command tests + Scenario/ (end-to-end on in-memory fak
 
 ## Documentation
 - Full architecture, models, ports, CLI: `docs/architecture.md`
-- CLI plan: `docs/mvp-plan.md` (stages 1–7 done; stages 8–10 = CLI 0.4.0–0.6.0, branches `release/<ver>` from
+- CLI plan: `docs/mvp-plan.md` (stages 1–9 done, CLI 0.4.0–0.5.0; stage 10 = CLI 0.6.0, branches `release/<ver>` from
   `master`, shipped before the UI; where it differs from later ADRs, the ADR wins)
 - CLI roadmap analysis (command budget, why this order): `docs/cli-roadmap.md`
 - UI plan (tasks for the orchestrator): `docs/ui-mvp-plan.md`

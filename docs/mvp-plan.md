@@ -377,14 +377,14 @@
 
 Замість окремих `doctor` і `validate`. Гілка `release/0.5.0` від `master` після 0.4.0.
 
-- [ ] **H0. CI на PR і безпечна публікація** (перший коміт `release/0.5.0`, до задач H1–H4)
+- [x] **H0. CI на PR і безпечна публікація** (перший коміт `release/0.5.0`, до задач H1–H4)
   - `.github/workflows/ci.yml`: `dotnet build`, `dotnet test`, `dotnet format --verify-no-changes` на PR у `dev`,
     `release/**`, `master`. `publish-cli.yml`: `dotnet nuget push --skip-duplicate` (push у `master` без зміни
     `<Version>` не валить workflow). Не змінює `src/**` → NuGet не публікується.
   - Пак-тест `azcfg ui` додає UI-задача X1 (`docs/ui-mvp-plan.md`).
   - Залежить від: —
 
-- [ ] **H1. Core `HealthReport`**
+- [x] **H1. Core `HealthReport`**
   - Перевірки: вхід в Azure, доступ до кожного середовища (проба `ReadAsync`/`ListServicePrefixesAsync` — та сама, що в
     UI `AzureStatusService`), цілі в `.gitignore`, мертві KV-референси, ключі, відсутні в частині середовищ
     (`MissingKeysReport`). Severity `Error`/`Warning`; лише ключі й назви, без значень.
@@ -394,15 +394,15 @@
     `azcfg config set project.*` (ADR 0014).
   - Залежить від: етап 8 (CW10)
 
-- [ ] **H2. `azcfg status --check`** — вивід звіту, `--json`, exit code ≠ 0 при `Error`.
+- [x] **H2. `azcfg status --check`** — вивід звіту, `--json`, exit code ≠ 0 при `Error`.
   - Залежить від: H1
 
-- [ ] **H4. Редаговані налаштування проєкту** (ADR 0014) — `IProjectSettingsService`, ключі `config project.*`
+- [x] **H4. Редаговані налаштування проєкту** (ADR 0014) — `IProjectSettingsService`, ключі `config project.*`
   (`service`, `values`, `secrets`, `vault.<env>`; `active`/`ignore` лише читання), зміна service скидає активне середовище
   і снапшоти; `pull`/`use --service X` при іншій прив'язці → помилка з підказкою.
   - Залежить від: —
 
-- [ ] **H3. Випуск 0.5.0** (+ `master` → `dev` — UI M2; UI споживає `HealthReport` для FR-E6 і
+- [x] **H3. Випуск 0.5.0** (+ `master` → `dev` — UI M2; UI споживає `HealthReport` для FR-E6 і
   `IProjectSettingsService` для налаштувань проєкту в U1).
   - Залежить від: H2, H4
 
