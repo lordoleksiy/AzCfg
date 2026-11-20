@@ -31,11 +31,15 @@ public sealed class InMemoryCompositionTests
     }
 
     [Fact]
-    public void AddAzCfgInMemory_LocalTargets_AreRealAppSettingsAndWorldUserSecrets()
+    public void AddAzCfgInMemory_LocalTargets_AreRealFileTargetsAndWorldUserSecrets()
     {
         var targets = (IEnumerable<ILocalTarget>)Provider(_world).GetService(typeof(IEnumerable<ILocalTarget>))!;
 
-        Assert.Collection(targets, t => Assert.IsType<AppSettingsLocalTarget>(t), t => Assert.Same(_world.UserSecrets, t));
+        Assert.Collection(
+            targets,
+            t => Assert.IsType<AppSettingsLocalTarget>(t),
+            t => Assert.IsType<LocalSettingsTarget>(t),
+            t => Assert.Same(_world.UserSecrets, t));
     }
 
     [Fact]

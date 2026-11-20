@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using AzCfg.Core.Model;
 using AzCfg.Core.UseCases;
 
@@ -34,32 +33,16 @@ public sealed class AppSettingsLocalTarget : JsonFileTarget
 
         var path = GetFilePath(target);
         var exists = File.Exists(path);
-        var isSafeForSecrets = await IsSafeForSecretsAsync(path, ct);
+        var isSafeForSecrets = await GitIgnoreGuard.IsSafeForSecretsAsync(path, ct);
 
         return new LocalTargetOption(target, exists, isSafeForSecrets);
     }
 
-    public override async Task EnsureGitIgnoredAsync(LocalTargetBinding target, CancellationToken ct)
+    public override Task EnsureGitIgnoredAsync(LocalTargetBinding target, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(target);
 
-        var path = Path.GetFullPath(GetFilePath(target));
-        var directory = Path.GetDirectoryName(path)!;
-        if (await RunGitAsync(directory, ["check-ignore", "-q", path], ct) == 0)
-        {
-            return;
-        }
-
-        var fileName = Path.GetFileName(path);
-        var gitIgnore = Path.Combine(directory, ".gitignore");
-        var existing = File.Exists(gitIgnore) ? await File.ReadAllTextAsync(gitIgnore, ct) : "";
-        if (existing.Split('\n').Select(l => l.Trim()).Any(l => l == fileName || l == "/" + fileName))
-        {
-            return;
-        }
-
-        var prefix = existing.Length == 0 || existing.EndsWith('\n') ? "" : Environment.NewLine;
-        await File.AppendAllTextAsync(gitIgnore, prefix + fileName + Environment.NewLine, ct);
+        return GitIgnoreGuard.EnsureIgnoredAsync(GetFilePath(target), ct);
     }
 
     protected override string GetFilePath(LocalTargetBinding target)
@@ -75,55 +58,4 @@ public sealed class AppSettingsLocalTarget : JsonFileTarget
                 .Select(Path.GetFileName)
                 .FirstOrDefault(f => string.Equals(f, DefaultFileName, StringComparison.OrdinalIgnoreCase))
             : null;
-
-    private static async Task<bool> IsSafeForSecretsAsync(string path, CancellationToken ct)
-    {
-        var fullPath = Path.GetFullPath(path);
-        var directory = Path.GetDirectoryName(fullPath);
-        if (directory is null)
-        {
-            return false;
-        }
-
-        var ignored = await RunGitAsync(directory, ["check-ignore", "-q", fullPath], ct);
-        if (ignored != 0)
-        {
-            return false;
-        }
-
-        var tracked = await RunGitAsync(directory, ["ls-files", "--error-unmatch", fullPath], ct);
-        return tracked != 0;
-    }
-
-    private static async Task<int> RunGitAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken ct)
-    {
-        try
-        {
-            var startInfo = new ProcessStartInfo("git")
-            {
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            };
-            foreach (var argument in arguments)
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-
-            using var process = new Process { StartInfo = startInfo };
-            process.Start();
-            await process.WaitForExitAsync(ct);
-            return process.ExitCode;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception)
-        {
-            // git missing, or not a repository (outside git-репо завжди небезпечно).
-            return -1;
-        }
-    }
 }
