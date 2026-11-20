@@ -7,7 +7,7 @@ namespace AzCfg.Ui.Application.Workspace;
 
 /// <summary>
 /// <see cref="IWorkspaceService"/> over the Core services. A project's binding is keyed by the folder of its <c>.csproj</c>
-/// (G4); re-binding keeps vaults, active environment and ignore patterns (G5); a bound project still gets target options and
+/// (G4); re-binding goes through Core project settings (G5, ADR 0014); a bound project still gets target options and
 /// service candidates for re-binding (G19).
 /// </summary>
 public sealed class WorkspaceService(
@@ -64,25 +64,40 @@ public sealed class WorkspaceService(
         return new ProjectSetupProposal(info, new ProjectResolution(candidates, false, options, binding));
     }
 
+    /// <summary>
+    /// First bind: Core <see cref="IProjectService.BindAsync"/>. Re-bind: Core project settings (ADR 0014) for each changed key, so the
+    /// rules match the CLI: vaults and ignore stay; a new service clears the active environment and drops the snapshots.
+    /// </summary>
     public async Task<ProjectBinding> BindAsync(ProjectNode project, string service, LocalTargetBinding values, LocalTargetBinding secrets, CancellationToken ct)
     {
-        var old = project.Binding;
-        var bound = await projects.BindAsync(old?.RepoPath ?? FolderOf(project.Project.Project), service, values, secrets, ct);
-        if (old is null)
+        if (project.Binding is not { } old)
         {
-            return bound;
+            return await projects.BindAsync(FolderOf(project.Project.Project), service, values, secrets, ct);
         }
 
-        var restored = bound with { VaultByEnvironment = old.VaultByEnvironment, ActiveEnvironment = old.ActiveEnvironment, Ignore = old.Ignore };
-        await state.SaveBindingAsync(restored, ct);
-        return restored;
+        if (values != old.ValuesTarget)
+        {
+            await settings.SetAsync(old.RepoPath, ProjectSettingKeys.Values, ProjectSettingKeys.TargetValue(values), ct);
+        }
+
+        if (secrets != old.SecretsTarget)
+        {
+            await settings.SetAsync(old.RepoPath, ProjectSettingKeys.Secrets, ProjectSettingKeys.TargetValue(secrets), ct);
+        }
+
+        if (!string.Equals(service, old.Service, StringComparison.Ordinal))
+        {
+            await settings.SetAsync(old.RepoPath, ProjectSettingKeys.Service, service, ct);
+        }
+
+        return await Reload(old.RepoPath, ct);
     }
 
     /// <summary>Through Core <c>project.vault.&lt;env&gt;</c> (ADR 0014): same validation and env-name rules as the CLI.</summary>
     public async Task<ProjectBinding> SetVaultAsync(ProjectBinding binding, string environment, Uri? vault, CancellationToken ct)
     {
         await settings.SetAsync(binding.RepoPath, ProjectSettingKeys.VaultPrefix + environment, vault?.OriginalString, ct);
-        return await state.LoadBindingAsync(binding.RepoPath, ct) ?? throw new InvalidOperationException("The project binding disappeared.");
+        return await Reload(binding.RepoPath, ct);
     }
 
     public Task<ProjectBinding> AddIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) =>
@@ -90,6 +105,9 @@ public sealed class WorkspaceService(
 
     public Task<ProjectBinding> RemoveIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) =>
         projects.RemoveIgnoreAsync(binding.RepoPath, pattern, ct);
+
+    private async Task<ProjectBinding> Reload(string repoPath, CancellationToken ct) =>
+        await state.LoadBindingAsync(repoPath, ct) ?? throw new InvalidOperationException("The project binding disappeared.");
 
     private static string FolderOf(ProjectInfo project) => Path.GetDirectoryName(PathKeys.Full(project.CsprojPath))!;
 }

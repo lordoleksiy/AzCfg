@@ -207,8 +207,7 @@ public sealed class ProjectSettingsService(IUserStateStore state, IProjectDetect
         ];
     }
 
-    private static string Describe(LocalTargetBinding target) =>
-        $"{ProjectLookup.KindNames.First(k => k.Kind == target.Kind).Name}:{target.ProjectPath}";
+    private static string Describe(LocalTargetBinding target) => ProjectSettingKeys.TargetValue(target);
 
     private static UserSetting Find(List<UserSetting> settings, string key) =>
         settings.Find(s => s.Key.Equals(key, StringComparison.OrdinalIgnoreCase)) ?? throw UnknownKey(key, settings);

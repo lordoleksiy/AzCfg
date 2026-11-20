@@ -1,4 +1,5 @@
 using AzCfg.Core.Model;
+using AzCfg.Core.Sync;
 using AzCfg.Ui.Application.Workspace;
 
 namespace AzCfg.Ui.Tests.Application.Workspace;
@@ -26,6 +27,14 @@ public sealed class WorkspaceServiceTests : IDisposable
     public void Dispose() => _w.Dispose();
 
     private IWorkspaceService Service => _w.Get<IWorkspaceService>();
+
+    /// <summary>Core validates targets: <c>appsettings-local</c> applies only to a project folder with an appsettings*.json.</summary>
+    private static void WithAppSettings(WorkspaceProject project)
+    {
+        var folder = Path.GetDirectoryName(project.Project.CsprojPath)!;
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "appsettings.json"), "{}");
+    }
 
     [Fact]
     public async Task OpenAsync_GroupsProjectsBySolutionAndRestAreLoose()
@@ -83,20 +92,39 @@ public sealed class WorkspaceServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task BindAsync_Existing_KeepsVaultsActiveAndIgnore()
+    public async Task BindAsync_ExistingNewService_FollowsCoreRule_ClearsActiveAndSnapshots_KeepsVaultsAndIgnore()
     {
         var old = new ProjectBinding(_w.Root, "crm", _w.Target(_crm), _w.Target(_crm),
             new Dictionary<string, Uri> { ["dev"] = new("https://kv.vault.azure.net") }, "dev", ["Logging:*"]);
         await _w.World.State.SaveBindingAsync(old, default);
+        WithAppSettings(_crm);
+        await _w.World.State.SaveSnapshotAsync(_w.Root, "dev", new ConfigState(new Dictionary<string, StateItem>()), default);
 
-        var rebound = await Service.BindAsync(new ProjectNode(_crm, old), "crm2", _w.Target(_crm, LocalTargetKind.AppSettingsLocal), _w.Target(_crm), default);
+        var rebound = await Service.BindAsync(new ProjectNode(_crm, old), "billing", _w.Target(_crm, LocalTargetKind.AppSettingsLocal), _w.Target(_crm), default);
 
         Assert.Equal(_w.Root, rebound.RepoPath);
-        Assert.Equal("crm2", rebound.Service);
+        Assert.Equal("billing", rebound.Service);
+        Assert.Equal(LocalTargetKind.AppSettingsLocal, rebound.ValuesTarget.Kind);
         Assert.Equal(old.VaultByEnvironment, rebound.VaultByEnvironment);
-        Assert.Equal("dev", rebound.ActiveEnvironment);
+        Assert.Null(rebound.ActiveEnvironment);
         Assert.Equal(["Logging:*"], rebound.Ignore);
-        Assert.Equal("crm2", _w.World.State.Binding(_w.Root)!.Service);
+        Assert.Equal("billing", _w.World.State.Binding(_w.Root)!.Service);
+        Assert.Null(await _w.World.State.LoadSnapshotAsync(_w.Root, "dev", default));
+    }
+
+    [Fact]
+    public async Task BindAsync_ExistingSameServiceNewTarget_KeepsActiveAndSnapshots()
+    {
+        var old = new ProjectBinding(_w.Root, "crm", _w.Target(_crm), _w.Target(_crm), new Dictionary<string, Uri>(), "dev");
+        await _w.World.State.SaveBindingAsync(old, default);
+        WithAppSettings(_crm);
+        await _w.World.State.SaveSnapshotAsync(_w.Root, "dev", new ConfigState(new Dictionary<string, StateItem>()), default);
+
+        var rebound = await Service.BindAsync(new ProjectNode(_crm, old), "crm", _w.Target(_crm, LocalTargetKind.AppSettingsLocal), _w.Target(_crm), default);
+
+        Assert.Equal(LocalTargetKind.AppSettingsLocal, rebound.ValuesTarget.Kind);
+        Assert.Equal("dev", rebound.ActiveEnvironment);
+        Assert.NotNull(await _w.World.State.LoadSnapshotAsync(_w.Root, "dev", default));
     }
 
     [Fact]
