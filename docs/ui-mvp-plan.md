@@ -959,11 +959,7 @@ public interface IConfigurationService
     /// secret values replaced by "***".
     string ToJson(ConfigurationView view, ConfigSide side);
 }
-public abstract record CompareSide
-{
-    public sealed record Local : CompareSide;
-    public sealed record Remote(ConfigEnvironment Environment) : CompareSide;
-}
+// CompareSide is Core's AzCfg.Core.Sync.CompareSide { Local, Environment(ConfigEnvironment Env) } (M1: no UI copy).
 public enum CompareResult { Same, Different, OnlyLeft, OnlyRight }
 /// Value only for plain values.
 public sealed record CompareCell(string? Value, bool IsSecret, string? SecretName, ConfigScope Scope, string? Label);

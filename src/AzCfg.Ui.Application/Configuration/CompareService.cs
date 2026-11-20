@@ -2,7 +2,6 @@ using AzCfg.Core.Mapping;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
 using AzCfg.Core.UseCases;
-using CoreSide = AzCfg.Core.Sync.CompareSide;
 
 namespace AzCfg.Ui.Application.Configuration;
 
@@ -16,7 +15,7 @@ internal sealed class CompareService(IConfigComparisonService comparison, ISyncS
 {
     public async Task<ComparisonView> CompareAsync(ProjectBinding binding, CompareSide left, CompareSide right, CancellationToken ct)
     {
-        var result = await comparison.CompareAsync(binding, ToCore(left), ToCore(right), ct);
+        var result = await comparison.CompareAsync(binding, left, right, ct);
         var leftSide = await ReadSideAsync(binding, left, ct);
         var rightSide = await ReadSideAsync(binding, right, ct);
         var rows = result.Items
@@ -27,7 +26,7 @@ internal sealed class CompareService(IConfigComparisonService comparison, ISyncS
 
     private async Task<Side> ReadSideAsync(ProjectBinding binding, CompareSide side, CancellationToken ct) => side switch
     {
-        CompareSide.Remote r => new Side(null, (await sync.ReadRemoteConfigAsync(binding, r.Environment, ct)).Entries
+        CompareSide.Environment r => new Side(null, (await sync.ReadRemoteConfigAsync(binding, r.Env, ct)).Entries
             .GroupBy(e => e.Key, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal)),
         _ => new Side(LocalTargetAccess.ByKey(await local.ReadAllAsync(binding, ct)), null),
     };
@@ -49,12 +48,6 @@ internal sealed class CompareService(IConfigComparisonService comparison, ISyncS
         var remote = other.Remote?.GetValueOrDefault(key);
         return new(value.IsSecret ? null : value.Plain, value.IsSecret, remote is null ? null : SecretName(remote), local?.Value.Scope ?? ConfigScope.Service, null);
     }
-
-    private static CoreSide ToCore(CompareSide side) => side switch
-    {
-        CompareSide.Remote r => new CoreSide.Environment(r.Environment),
-        _ => new CoreSide.Local(),
-    };
 
     private static CompareResult Result(ComparisonKind kind) => kind switch
     {

@@ -1,3 +1,4 @@
+using AzCfg.Core.Sync;
 using AzCfg.Ui.Application.Configuration;
 using AzCfg.Ui.Application.Sync;
 

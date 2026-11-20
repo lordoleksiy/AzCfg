@@ -1,4 +1,5 @@
 using AzCfg.Core.Model;
+using AzCfg.Core.Sync;
 
 namespace AzCfg.Ui.Application.Configuration;
 

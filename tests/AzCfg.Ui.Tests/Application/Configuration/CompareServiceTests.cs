@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AzCfg.Core.Model;
+using AzCfg.Core.Sync;
 using AzCfg.Ui.Application.Configuration;
 
 namespace AzCfg.Ui.Tests.Application.Configuration;
@@ -7,8 +8,8 @@ namespace AzCfg.Ui.Tests.Application.Configuration;
 public sealed class CompareServiceTests
 {
     private static readonly CompareSide.Local Local = new();
-    private static readonly CompareSide.Remote Dev = new(ConfigurationWorld.Dev);
-    private static readonly CompareSide.Remote Stg = new(ConfigurationWorld.Stg);
+    private static readonly CompareSide.Environment Dev = new(ConfigurationWorld.Dev);
+    private static readonly CompareSide.Environment Stg = new(ConfigurationWorld.Stg);
 
     private static CompareRow Row(ComparisonView view, string key) => view.Rows.Single(r => r.Key == key);
 

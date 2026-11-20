@@ -1,4 +1,5 @@
 using AzCfg.Core.Model;
+using AzCfg.Core.Sync;
 using AzCfg.Ui.Application.Configuration;
 using AzCfg.Ui.Application.Sync;
 using AzCfg.Ui.Application.Workspace;
@@ -21,7 +22,7 @@ internal static class StateFixtures
     public static ConfigurationView View() => new(Binding(), Dev, false, [], [], DateTimeOffset.UnixEpoch);
 
     public static ComparisonView Comparison() =>
-        new(Binding(), new CompareSide.Local(), new CompareSide.Remote(Dev), [], 0, "{}", "{}", DateTimeOffset.UnixEpoch);
+        new(Binding(), new CompareSide.Local(), new CompareSide.Environment(Dev), [], 0, "{}", "{}", DateTimeOffset.UnixEpoch);
 
     public static RemoteDraft Draft() => new(Binding(), Dev, "{}", "{}", new Dictionary<DraftKey, DraftSecret>());
 }

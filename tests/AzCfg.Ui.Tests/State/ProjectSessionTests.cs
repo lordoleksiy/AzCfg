@@ -1,3 +1,4 @@
+using AzCfg.Core.Sync;
 using AzCfg.Ui.Application.Configuration;
 using AzCfg.Ui.Application.State;
 using static AzCfg.Ui.Tests.State.StateFixtures;
@@ -21,7 +22,7 @@ public sealed class ProjectSessionTests
         var session = new ProjectSession("p");
         session.SetEnvironment("dev");
         session.SetView(View());
-        session.SetComparison(new CompareSide.Local(), new CompareSide.Remote(Dev), Comparison());
+        session.SetComparison(new CompareSide.Local(), new CompareSide.Environment(Dev), Comparison());
         session.SetDraft("dev", Draft(), 2);
         session.SetEnvironment("test");
         Assert.Equal("test", session.EnvironmentName);
@@ -46,7 +47,7 @@ public sealed class ProjectSessionTests
     {
         var session = new ProjectSession("p");
         session.SetView(View());
-        session.SetComparison(new CompareSide.Local(), new CompareSide.Remote(Dev), Comparison());
+        session.SetComparison(new CompareSide.Local(), new CompareSide.Environment(Dev), Comparison());
         session.SetDraft("dev", Draft(), 1);
         session.Invalidate();
         Assert.Null(session.View);
@@ -96,7 +97,7 @@ public sealed class ProjectSessionTests
     public void SetComparison_StoresSides()
     {
         var session = new ProjectSession("p");
-        var right = new CompareSide.Remote(Dev);
+        var right = new CompareSide.Environment(Dev);
         session.SetComparison(new CompareSide.Local(), right, null);
         Assert.Equal(new CompareSide.Local(), session.CompareLeft);
         Assert.Equal(right, session.CompareRight);
