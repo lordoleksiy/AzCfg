@@ -96,7 +96,10 @@ Replaces the rejected `doctor`/`validate` commands (stage 9 of `docs/mvp-plan.md
   Without a binding only sign-in and environment access run.
 - New port method: `ISecretStore.ExistsAsync(Uri secretUri, CancellationToken ct) → bool` — reads secret **properties**
   only (Infrastructure: `SecretClient` properties of the referenced version / latest; 404 → `false`), never the value.
-  It is the only port change of 0.5.0; the UI on `dev` adds the method to its fakes when merging `master` (M2).
+  A disabled secret counts as missing (versioned URI: that version disabled; versionless: the newest version disabled).
+  The port changes of 0.5.0 are `ISecretStore.ExistsAsync` and `IUserStateStore.DeleteSnapshotsAsync(repoPath, ct)`
+  (drops a repo's snapshots; used by ADR 0014 editable settings); the UI on `dev` adds both to its fakes when merging
+  `master` (M2).
 
 ### CLI
 - `azcfg status --check [--project <PATH>]`: sign-in line, one line per environment (✓ / ✗ + error), findings grouped by

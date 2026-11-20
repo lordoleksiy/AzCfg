@@ -17,6 +17,10 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
 - Editable project settings: `azcfg config list|get|set project.*` (`service`, `values`, `secrets`, `vault.<env>`;
   `active`, `ignore` read-only). Changing the service clears the active environment and its snapshots (ADR 0014).
 ### Changed
+- `status --check`: local target checks (git-ignored secrets/values, missing target projects) also run when not signed in
+  to Azure; a Key Vault secret that is disabled counts as missing; the fix for a missing global key is `azcfg edit --global`.
+- `plan`/`push` warn (human output only) when no environment has been pulled, e.g. right after changing the service.
+- `project.vault.<env>` accepts only a root https URI; `--service` is compared case-sensitively.
 - `pull`/`use --service X` on a project bound to another service fails with the `config set project.service` command
   instead of silently ignoring `--service`.
 - CI runs build, tests and `dotnet format` on pull requests; NuGet publishing skips an already published version.
