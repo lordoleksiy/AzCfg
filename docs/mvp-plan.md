@@ -470,7 +470,7 @@
   - Тести: кожна перевірка; канарковий секрет відсутній у `HealthReport` JSON; поза git → перевірка пропускається.
   - Залежить від: PC1 (ManifestInvalid), H1
 
-- [ ] **LS1. `LocalSettingsTarget`** (через `/add-local-target`, ADR 0006)
+- [x] **LS1. `LocalSettingsTarget`** (через `/add-local-target`, ADR 0006)
   - `local.settings.json` поруч із `.csproj` Azure Functions: читання/запис лише секції `Values` (`FlatDictionary`, ключі
     `A:B` як є, без вкладення); інші секції (`IsEncrypted`, `Host`, `ConnectionStrings`) зберігаються як були; відсутній
     файл → створити `{ "IsEncrypted": false, "Values": {} }`. Безпека — як `AppSettingsLocalTarget` (git-ignored і

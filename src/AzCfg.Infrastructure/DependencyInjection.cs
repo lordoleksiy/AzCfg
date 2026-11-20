@@ -22,6 +22,7 @@ public static class DependencyInjection
         services.AddSingleton<IProjectDetector, CsprojDetector>();
         services.AddSingleton<IWorkspaceScanner, WorkspaceScanner>();
         services.AddSingleton<ILocalTarget, AppSettingsLocalTarget>();
+        services.AddSingleton<ILocalTarget, LocalSettingsTarget>();
         services.AddSingleton<IUserStateStore>(_ => new JsonUserStateStore(JsonUserStateStore.DefaultRoot));
         services.AddSingleton<ISecretStore>(sp =>
         {
