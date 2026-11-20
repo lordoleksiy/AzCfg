@@ -8,7 +8,9 @@ public static class PlanSelection
     /// <summary>
     /// Restricts <paramref name="plan"/> to <paramref name="keys"/> (ordinal): Changes whose <c>(After ?? Before).Key</c> is
     /// in keys, Conflicts and Warnings whose Key is in keys. A <see cref="ChangeKind.CreateSecret"/> with
-    /// <c>Before == null</c> and <c>After == null</c> (awaiting a vault, its key is unknown) is kept regardless of keys.
+    /// <c>Before == null</c> and <c>After == null</c> (a new secret awaiting a vault; the change carries no key) is kept regardless
+    /// of keys. Such a change comes only from edited JSON (<c>{"@kv": …, "value": …}</c>), which has no key selection: from local
+    /// files a value is a secret only when the remote or snapshot knows its URI, so its vault and <c>After</c> are always set.
     /// Recomputes <see cref="SyncPlan.TouchesGlobal"/> (a selected change other than Delete whose After or Before has scope
     /// Global) and <see cref="SyncPlan.RequiresVaultChoice"/> (a selected CreateSecret with <c>After == null</c>).
     /// Binding and Environment are unchanged. Applying the result updates the snapshot only for the selected keys.

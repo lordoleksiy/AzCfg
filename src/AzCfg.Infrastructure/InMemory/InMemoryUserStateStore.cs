@@ -54,6 +54,16 @@ public sealed class InMemoryUserStateStore : IUserStateStore
         return Task.CompletedTask;
     }
 
+    public Task DeleteSnapshotsAsync(string repoPath, CancellationToken ct)
+    {
+        foreach (var key in _snapshots.Keys.Where(k => k.Repo == repoPath).ToList())
+        {
+            _snapshots.Remove(key);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public Task<byte[]> GetOrCreateFingerprintKeyAsync(CancellationToken ct) => Task.FromResult(FingerprintKey);
 
     private static T? Load<T>(string? json) where T : class => json is null ? null : JsonSerializer.Deserialize<T>(json, Options);

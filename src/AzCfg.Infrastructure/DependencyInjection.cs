@@ -1,5 +1,6 @@
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Environments;
+using AzCfg.Core.Health;
 using AzCfg.Core.Security;
 using AzCfg.Core.UseCases;
 using AzCfg.Infrastructure.Azure;
@@ -33,11 +34,15 @@ public static class DependencyInjection
         services.AddSingleton<IConfigStore>(sp => new AppConfigStore(sp.GetRequiredService<TokenCredential>()));
         services.AddSingleton<ISetupService, SetupService>();
         services.AddSingleton<IUserSettingsService, UserSettingsService>();
+        services.AddSingleton<IProjectSettingsService, ProjectSettingsService>();
         services.AddSingleton<IEnvironmentResolver, ProfileEnvironmentResolver>();
         services.AddSingleton<ISecretFingerprinter>(sp =>
             new HmacSecretFingerprinter(sp.GetRequiredService<IUserStateStore>().GetOrCreateFingerprintKeyAsync(CancellationToken.None).GetAwaiter().GetResult()));
         services.AddSingleton<IProjectService, ProjectService>();
         services.AddSingleton<ISyncService, SyncService>();
+        services.AddSingleton<IConfigComparisonService, ConfigComparisonService>();
+        services.AddSingleton<IAzureAccountProbe, AzureAccountProbe>();
+        services.AddSingleton<IHealthService, HealthService>();
         return services;
     }
 }

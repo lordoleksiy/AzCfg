@@ -11,9 +11,10 @@ public abstract record PushSource
     /// <summary>
     /// Push from the local files bound in <c>ProjectBinding</c> (the default), skipping ignored keys (ADR 0008). By default
     /// an upsert: local deletions are not deleted remotely but reported as <see cref="SyncWarningKind.DeleteSkipped"/>;
-    /// <paramref name="Delete"/> also plans them as deletes.
+    /// <paramref name="Delete"/> also plans them as deletes. <paramref name="KeepLocal"/> = conflicting keys planned as
+    /// "keep local" (ADR 0013): their base is taken from the remote, in memory only — nothing is saved until the plan is applied.
     /// </summary>
-    public sealed record LocalFiles(bool Delete = false) : PushSource;
+    public sealed record LocalFiles(bool Delete = false, IReadOnlySet<string>? KeepLocal = null) : PushSource;
 
     /// <summary>
     /// Push from developer-edited JSON (<c>azcfg edit</c>, UI drafts). <paramref name="BaseJson"/> = the edit JSON the edit

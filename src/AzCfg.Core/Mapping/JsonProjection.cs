@@ -229,15 +229,24 @@ public static class JsonProjection
                             known = new(known?.SecretUri, fingerprinter.Fingerprint(secret));
                         }
 
-                        items.Add(key, new(key, scope, known ?? new StateValue.Secret(null, "")));
+                        Add(key, new(key, scope, known ?? new StateValue.Secret(null, "")));
                         break;
                     case JsonObject o:
                         Walk(o, [.. prefix, name], scope);
                         break;
                     default:
-                        items.Add(key, new(key, scope, new StateValue.Plain(Scalar(node, key))));
+                        Add(key, new(key, scope, new StateValue.Plain(Scalar(node, key))));
                         break;
                 }
+            }
+        }
+
+        void Add(string key, StateItem item)
+        {
+            if (!items.TryAdd(key, item))
+            {
+                throw new ArgumentException(
+                    $"Key '{key}' is both under '@global' and at the service level; keep one (a service value overrides the global one).", nameof(json));
             }
         }
 

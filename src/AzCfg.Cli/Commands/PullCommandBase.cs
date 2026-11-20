@@ -20,17 +20,25 @@ public abstract class PullCommandBase<TSettings>(
     IEnvironmentResolver resolver,
     IAnsiConsole console) : EnvironmentCommandBase<TSettings>(projects, state, resolver) where TSettings : PullSettings
 {
+    protected ISyncService Sync { get; } = sync;
+
     protected override async Task<ProjectBinding> GetBindingAsync(string repo, ProjectResolution resolution, TSettings settings, CancellationToken ct) =>
-        resolution.Existing ?? await BindAsync(repo, resolution, settings.Service, !settings.Json && !settings.Yes, ct);
+        resolution.Existing is { } existing
+            ? Guard(existing, settings.Service)
+            : await BindAsync(repo, resolution, settings.Service, !settings.Json && !settings.Yes, ct);
+
+    /// <summary>A bound project keeps its service: <c>--service</c> naming another one is an error (ADR 0014), the same one is a no-op.</summary>
+    private static ProjectBinding Guard(ProjectBinding existing, string? requested)
+    {
+        ProjectServiceGuard.EnsureSameService(existing, requested);
+        return existing;
+    }
 
     public override async Task<int> ExecuteAsync(CommandContext context, TSettings settings, CancellationToken ct)
     {
         var (binding, env) = await ResolveAsync(settings, ct);
 
-        var result = settings.Json
-            ? await sync.PullAsync(binding, env, null, settings.Force, ct)
-            : await console.Status().StartAsync($"Pulling {env.Name}...", status =>
-                sync.PullAsync(binding, env, new Progress<SyncProgress>(p => status.Status($"{p.Stage} {p.Done}/{p.Total}")), settings.Force, ct));
+        var result = await PullAsync(binding, env, settings, ct);
 
         if (settings.Json)
         {
@@ -60,6 +68,13 @@ public abstract class PullCommandBase<TSettings>(
 
         return result.Blocked ? 1 : 0;
     }
+
+    /// <summary>Runs the pull itself; a derived command overrides it to pull a subset of the keys.</summary>
+    protected virtual async Task<PullResult> PullAsync(ProjectBinding binding, ConfigEnvironment env, TSettings settings, CancellationToken ct) =>
+        settings.Json
+            ? await Sync.PullAsync(binding, env, null, settings.Force, ct)
+            : await console.Status().StartAsync($"Pulling {env.Name}...", status =>
+                Sync.PullAsync(binding, env, new Progress<SyncProgress>(p => status.Status($"{p.Stage} {p.Done}/{p.Total}")), settings.Force, ct));
 
     private async Task<ProjectBinding> BindAsync(string repo, ProjectResolution resolution, string? requested, bool interactive, CancellationToken ct)
     {

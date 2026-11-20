@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, master, 'release/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore AzCfg.slnx
+
+      - name: Build
+        run: dotnet build AzCfg.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test AzCfg.slnx -c Release --no-build
+
+      - name: Format
+        run: dotnet format AzCfg.slnx --verify-no-changes --no-restore

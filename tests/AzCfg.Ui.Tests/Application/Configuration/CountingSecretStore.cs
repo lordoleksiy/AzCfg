@@ -14,4 +14,6 @@ internal sealed class CountingSecretStore(ISecretStore inner) : ISecretStore
     }
 
     public Task<Uri> SetAsync(Uri vaultUri, string name, string value, CancellationToken ct) => inner.SetAsync(vaultUri, name, value, ct);
+
+    public Task<bool> ExistsAsync(Uri secretUri, CancellationToken ct) => inner.ExistsAsync(secretUri, ct);
 }

@@ -15,9 +15,13 @@ public abstract class PushCommandBase<TSettings>(IProjectService projects, ISync
 
     protected ISyncService Sync { get; } = sync;
 
+    /// <summary>Plans <paramref name="source"/>; a derived command overrides it to restrict or prepare the plan (<c>--key</c>).</summary>
+    protected virtual Task<SyncPlan> PlanAsync(TSettings settings, ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct) =>
+        Sync.PlanPushAsync(binding, env, source, ct);
+
     protected async Task<int> PushAsync(TSettings settings, ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct)
     {
-        var plan = await Sync.PlanPushAsync(binding, env, source, ct);
+        var plan = await PlanAsync(settings, binding, env, source, ct);
 
         if (plan.Conflicts.Count > 0)
         {
@@ -30,6 +34,7 @@ public abstract class PushCommandBase<TSettings>(IProjectService projects, ISync
             if (!settings.Json)
             {
                 WarningsView.Render(Console, plan.Warnings);
+                WarnIfNothingPulled(binding, source);
             }
 
             return exit;
@@ -45,12 +50,13 @@ public abstract class PushCommandBase<TSettings>(IProjectService projects, ISync
             var vault = Console.Prompt(new SelectionPrompt<AzureResource>().Title("Key Vault for new secrets:").AddChoices(await discovery.FindKeyVaultsAsync(ct)).UseConverter(v => Markup.Escape(v.Name)));
             binding = binding with { VaultByEnvironment = new Dictionary<string, Uri>(binding.VaultByEnvironment) { [env.Name] = vault.Endpoint } };
             await State.SaveBindingAsync(binding, ct);
-            plan = await Sync.PlanPushAsync(binding, env, source, ct);
+            plan = await PlanAsync(settings, binding, env, source, ct);
         }
 
         if (!settings.Json)
         {
             PlanView.Render(Console, plan);
+            WarnIfNothingPulled(binding, source);
         }
 
         var confirmed = settings.Confirm;
@@ -73,6 +79,14 @@ public abstract class PushCommandBase<TSettings>(IProjectService projects, ISync
 
         var result = await Sync.ApplyAsync(plan, new ApplyOptions(confirmed, global), ct);
         return Report(settings, result, $"Applied {result.Applied} change(s).");
+    }
+
+    private void WarnIfNothingPulled(ProjectBinding binding, PushSource source)
+    {
+        if (source is PushSource.LocalFiles)
+        {
+            WarningsView.RenderNoActiveEnvironment(Console, binding);
+        }
     }
 
     private bool Confirm(TSettings settings, string question) =>

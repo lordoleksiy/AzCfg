@@ -30,6 +30,11 @@ public sealed class InMemorySecretStore : ISecretStore
         return Task.FromResult(new Uri($"{Authority(vaultUri)}/secrets/{name}/v{++_versions}"));
     }
 
+    /// <summary>Deletes a secret (versioned or versionless identifier), as if it was removed from the vault.</summary>
+    public bool Remove(Uri secretUri) => _secrets.Remove(Parse(secretUri));
+
+    public Task<bool> ExistsAsync(Uri secretUri, CancellationToken ct) => Task.FromResult(_secrets.ContainsKey(Parse(secretUri)));
+
     private static (string Vault, string Name) Parse(Uri secretUri) =>
         (Authority(secretUri), secretUri.Segments.SkipWhile(s => s != "secrets/").Skip(1).First().TrimEnd('/'));
 

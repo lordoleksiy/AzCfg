@@ -15,7 +15,7 @@ Configuration. Ships as the `azcfg` dotnet tool.
 Requires the .NET 10 SDK or runtime.
 
 ```bash
-dotnet tool install --global AzCfg --version 0.3.0
+dotnet tool install --global AzCfg
 azcfg --help
 ```
 
@@ -23,6 +23,12 @@ Update to the latest version:
 
 ```bash
 dotnet tool update --global AzCfg
+```
+
+Prereleases (e.g. `0.5.0-preview.1`) are installed only on request:
+
+```bash
+dotnet tool update --global AzCfg --prerelease
 ```
 
 Uninstall:
@@ -74,6 +80,22 @@ azcfg config set env.dev.label Development   # fix a setting without re-running 
 Settings are per user (not stored in the repo): `mode`, `defaultLabel`, `gitignoreLocalFiles`,
 `env.<name>.endpoint`, `env.<name>.label`, `env.<name>.protected`.
 
+Project settings (the binding created by the first `pull`/`use`, also per user) are `project.*` keys, shown by
+`config list` inside a bound project:
+
+```bash
+azcfg config set project.service orders-api                  # rebind to another service (clears the active env)
+azcfg config set project.values appsettings-local            # <target>[:<project path>]
+azcfg config set project.secrets user-secrets:src/Api/Api.csproj
+azcfg config set project.vault.dev https://my-kv.vault.azure.net/
+azcfg config set project.vault.dev ""                        # unset
+```
+
+Targets: `user-secrets`, `appsettings-local`. Changing a target does not move data: run `azcfg pull --force` to fill
+the new one. A secrets target must be git-ignored. `project.active` and `project.ignore` are read-only (use `azcfg use`
+and `azcfg ignore`). `pull`/`use --service X` on a project bound to another service fails with the
+`config set project.service` command to run.
+
 ### 2. Get the config of an environment
 
 ```bash
@@ -81,7 +103,13 @@ azcfg use dev                     # pull dev into the local targets and make it 
 azcfg pull --service orders-api   # first pull when the service cannot be detected from the project
 azcfg pull                        # re-pull the active environment (--env <ENV> for another)
 azcfg pull --force                # overwrite local changes that were not pushed
+azcfg pull --key "Db:*"           # pull only the matching keys of the active environment (repeatable)
+azcfg pull --key Db:Host --force  # resolve one conflict by keeping the remote value
 ```
+
+`use` is safe by default: it lists the blocking keys when local changes would be overwritten, asks before the first
+activation overwrites unmanaged local keys (`--yes` skips it) and, for a protected environment, before secrets are
+written to local files (`--confirm <ENV>` skips it). With `--json` it never prompts and reports the refusal as data.
 
 On the first pull azcfg binds the project to a service and to local targets: user-secrets (outside the repo)
 or `appsettings.local.json` next to the `.csproj`. Only application projects are offered as targets — class
@@ -94,6 +122,8 @@ libraries and test projects are skipped.
 azcfg plan                 # show what pushing the local files would change
 azcfg push                 # add and update changed keys (never deletes)
 azcfg push --delete        # also delete remote keys that you deleted locally
+azcfg plan --key "Db:*"    # plan/push only the keys matching a pattern (`*`, optional `global:`; repeatable)
+azcfg push --key Db:Host --force   # resolve one conflict by keeping the local value
 ```
 
 Writes use etags, so a key changed remotely since your last pull is reported instead of overwritten.
@@ -102,7 +132,11 @@ Writes use etags, so a key changed remotely since your last pull is reported ins
 
 ```bash
 azcfg edit --env dev       # opens the remote config in $VISUAL/$EDITOR, shows the plan, then applies it
+azcfg edit --set Db:Host=h --unset Old:Key --secret Db:Password=orders--Db--Password   # no editor; repeatable flags
+azcfg edit --global --set Logging:Level=Info                                          # keys go to the global scope
 ```
+
+Secret values are never accepted on the command line; `--secret` only points a key at an existing Key Vault secret.
 
 ### 5. Promote keys between environments
 
@@ -123,7 +157,30 @@ Patterns are stored per user for this project; nothing is deleted anywhere. `*` 
 `:`; the `global:` prefix limits a pattern to global keys (`global:*`, `global:Serilog:*`, `*:Password`,
 `ConnectionStrings:Local`).
 
-### 7. Protected environments
+### 7. Daily workflow: status and diff
+
+```bash
+azcfg status                       # active environment, local/remote changes, conflicts, blocked keys, warnings
+azcfg status --env stage           # the same for another environment
+azcfg diff                         # local files <-> active environment
+azcfg diff stage                   # local files <-> stage
+azcfg diff dev stage               # dev <-> stage (either side may be `local`)
+azcfg diff --same                  # also show equal keys
+azcfg diff --missing --all         # keys missing in some environments; exit code 1 if any (usable in CI)
+```
+
+Secret values are never shown: only their names and whether they are the same or different.
+
+```bash
+azcfg status --check               # configuration health; exit code 1 on errors (usable in CI)
+```
+
+`status --check` verifies the Azure sign-in, access to every environment, that the secrets target is git-ignored
+(and warns about the values target), Key Vault references that point to missing secrets, keys missing in some
+environments and a binding that no longer matches reality. Each finding comes with the command that fixes it.
+Secrets are checked by metadata only; their values are never read.
+
+### 8. Protected environments
 
 Applying to a protected environment (by default `prod`, `production`, `prd`) requires typing its name, or
 `--confirm <ENV>` in scripts. `--yes` skips other confirmation prompts.
@@ -180,7 +237,7 @@ ignores it). Secrets are written there only after
 ## JSON output
 
 `--json` writes the result to stdout as JSON, without prompts or decoration; errors are also reported as JSON.
-`init --json` and `edit --json` only print (candidates / the exported config) and change nothing.
+`status --json` and `diff --json` print the record as-is. `init --json` and `edit --json` only print (candidates / the exported config) and change nothing.
 
 ```bash
 azcfg plan --json
@@ -201,7 +258,9 @@ Architecture, decisions and the roadmap: [`docs/architecture.md`](docs/architect
 
 The CLI is published by `.github/workflows/publish-cli.yml` on every push to `master` that changes `src/**`
 or `Directory.*.props`. Bump `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj` before merging to `master`:
-nuget.org does not accept an already published version, so the run fails if it was not bumped.
+nuget.org does not accept an already published version; the push uses `--skip-duplicate`, so an unbumped version is
+skipped instead of failing. A SemVer suffix (`0.5.0-preview.1`) publishes a prerelease that `dotnet tool update`
+ignores unless `--prerelease` is passed; drop the suffix to release it as stable.
 
 The workflow runs the tests, packs `AzCfg` and pushes it to nuget.org. It authenticates via Trusted Publishing
 (OIDC) and requires the `NUGET_USER` repository secret (nuget.org profile name).

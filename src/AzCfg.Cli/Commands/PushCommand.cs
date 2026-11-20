@@ -22,4 +22,29 @@ public sealed class PushCommand(IProjectService projects, ISyncService sync, IUs
         var (binding, env) = await ResolveAsync(settings, ct);
         return await PushAsync(settings, binding, env, new PushSource.LocalFiles(settings.Delete), ct);
     }
+
+    protected override async Task<SyncPlan> PlanAsync(PushFilesSettings settings, ProjectBinding binding, ConfigEnvironment env, PushSource source, CancellationToken ct)
+    {
+        var plan = await base.PlanAsync(settings, binding, env, source, ct);
+        if (settings.Key.Length == 0)
+        {
+            return plan;
+        }
+
+        var selected = KeyFilter.Restrict(plan, settings.Key);
+        if (!settings.Force || selected.Conflicts.Count == 0)
+        {
+            return selected;
+        }
+
+        if (!string.Equals(binding.ActiveEnvironment, env.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"--force resolves conflicts of the active environment only, not '{env.Name}'; run 'azcfg use {env.Name}' first.");
+        }
+
+        // Keep local is planned in memory: the snapshot changes only when the plan is applied (a declined or failed push leaves the conflict).
+        var keepLocal = selected.Conflicts.Select(c => c.Key).ToHashSet(StringComparer.Ordinal);
+        var resolved = source is PushSource.LocalFiles files ? files with { KeepLocal = keepLocal } : source;
+        return KeyFilter.Restrict(await base.PlanAsync(settings, binding, env, resolved, ct), settings.Key);
+    }
 }

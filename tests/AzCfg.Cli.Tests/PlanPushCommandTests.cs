@@ -26,6 +26,7 @@ public sealed class PlanPushCommandTests
         public List<(ProjectBinding Binding, ConfigEnvironment Env, PushSource Source)> Planned { get; } = [];
         public List<ProjectBinding> SavedBindings { get; } = [];
         public List<(SyncPlan Plan, ApplyOptions Options)> Applied { get; } = [];
+        public List<(string Key, ConflictResolution Resolution)> Resolved { get; } = [];
     }
 
     private sealed class StubState(Stubs s) : IUserStateStore
@@ -36,6 +37,7 @@ public sealed class PlanPushCommandTests
         public Task SaveBindingAsync(ProjectBinding binding, CancellationToken ct) { s.SavedBindings.Add(binding); return Task.CompletedTask; }
         public Task<ConfigState?> LoadSnapshotAsync(string repoPath, string environment, CancellationToken ct) => throw new NotSupportedException();
         public Task SaveSnapshotAsync(string repoPath, string environment, ConfigState state, CancellationToken ct) => throw new NotSupportedException();
+        public Task DeleteSnapshotsAsync(string repoPath, CancellationToken ct) => throw new NotSupportedException();
         public Task<byte[]> GetOrCreateFingerprintKeyAsync(CancellationToken ct) => throw new NotSupportedException();
     }
 
@@ -65,9 +67,15 @@ public sealed class PlanPushCommandTests
         public Task<string> ExportJsonAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => throw new NotSupportedException();
         public Task<string> ExportPromoteJsonAsync(ProjectBinding binding, ConfigEnvironment from, ConfigEnvironment to, CancellationToken ct) => throw new NotSupportedException();
         public Task<ConfigDiff> DiffAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => throw new NotSupportedException();
+        public Task<SyncSummary> StatusAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => throw new NotSupportedException();
         public Task<RemoteConfig> ReadRemoteConfigAsync(ProjectBinding binding, ConfigEnvironment env, CancellationToken ct) => throw new NotSupportedException();
         public Task<PullResult> PullSelectedAsync(ProjectBinding binding, ConfigEnvironment env, IReadOnlyCollection<string> keys, CancellationToken ct) => throw new NotSupportedException();
-        public Task ResolveConflictAsync(ProjectBinding binding, ConfigEnvironment env, string key, ConflictResolution resolution, CancellationToken ct) => throw new NotSupportedException();
+        public Task ResolveConflictAsync(ProjectBinding binding, ConfigEnvironment env, string key, ConflictResolution resolution, CancellationToken ct)
+        {
+            s.Resolved.Add((key, resolution));
+            return Task.CompletedTask;
+        }
+        public Task<IReadOnlyList<string>> UnmanagedLocalKeysAsync(ProjectBinding binding, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private sealed class StubDiscovery : IResourceDiscovery
@@ -211,6 +219,125 @@ public sealed class PlanPushCommandTests
         Assert.Equal(new PushSource.LocalFiles(delete), Assert.Single(s.Planned).Source);
     }
 
+    private static Conflict ConflictOf(string key) => new(key, null, new(key, ConfigScope.Service, new StateValue.Plain("l")), new(key, ConfigScope.Service, new StateValue.Plain("r")));
+
+    private static SyncPlan MixedPlan(ProjectBinding b, IReadOnlyList<Conflict> conflicts) =>
+        Plan(b, [new(ChangeKind.Add, null, Entry("Db:Host")), new(ChangeKind.Add, null, Entry("Db:Port")), new(ChangeKind.Update, Entry("Logging:Level", ConfigScope.Global), Entry("Logging:Level", ConfigScope.Global))], conflicts);
+
+    [Theory]
+    [InlineData("--key Db:*", "Db:Host,Db:Port")]
+    [InlineData("--key db:host --key Other", "Db:Host")]
+    [InlineData("--key global:*", "Logging:Level")]
+    [InlineData("--key Logging:*", "Logging:Level")]
+    [InlineData("--key Nope", "")]
+    public async Task Plan_key_keeps_only_the_matching_keys(string keys, string expected)
+    {
+        var s = new Stubs { PlanFor = b => MixedPlan(b, []) };
+
+        var (_, output) = await Run("plan", s, "", [.. keys.Split(' '), "--json"]);
+
+        var changed = System.Text.Json.JsonDocument.Parse(output).RootElement.GetProperty("changes").EnumerateArray()
+            .Select(c => (c.GetProperty("after").ValueKind == System.Text.Json.JsonValueKind.Null ? c.GetProperty("before") : c.GetProperty("after")).GetProperty("key").GetString());
+        Assert.Equal(expected.Split(',', StringSplitOptions.RemoveEmptyEntries), changed);
+    }
+
+    [Fact]
+    public async Task Push_key_applies_only_the_selected_changes()
+    {
+        var s = new Stubs { PlanFor = b => MixedPlan(b, [ConflictOf("Other")]) };
+
+        var exit = (await Run("push", s, "", "--key", "Db:Host", "--yes")).Exit;
+
+        Assert.Equal(0, exit);
+        Assert.Equal(["Db:Host"], Assert.Single(s.Applied).Plan.Changes.Select(c => c.After!.Key));
+        Assert.Empty(s.Resolved);
+    }
+
+    [Fact]
+    public async Task Push_key_conflict_is_refused_without_force()
+    {
+        var s = new Stubs { PlanFor = b => MixedPlan(b, [ConflictOf("Db:Host")]) };
+
+        var (exit, output) = await Run("push", s, "", "--key", "Db:*", "--yes");
+
+        Assert.Equal(1, exit);
+        Assert.Contains("Push refused", output);
+        Assert.Empty(s.Applied);
+        Assert.Empty(s.Resolved);
+    }
+
+    [Fact]
+    public async Task Push_key_force_keeps_local_for_the_conflicts_of_the_selected_keys_only()
+    {
+        Stubs s = null!;
+        s = new Stubs
+        {
+            Existing = Binding("dev"),
+            PlanFor = b => MixedPlan(b, KeepsLocal(s) ? [ConflictOf("Other")] : [ConflictOf("Db:Host"), ConflictOf("Other")]),
+        };
+
+        var (exit, _) = await Run("push", s, "", "--key", "Db:*", "--force", "--yes");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(["Db:Host"], ((PushSource.LocalFiles)s.Planned[^1].Source).KeepLocal!);
+        Assert.Empty(s.Resolved);
+        Assert.Equal(["Db:Host", "Db:Port"], Assert.Single(s.Applied).Plan.Changes.Select(c => c.After!.Key));
+    }
+
+    [Fact]
+    public async Task Push_key_force_declined_changes_no_state()
+    {
+        Stubs s = null!;
+        s = new Stubs
+        {
+            Existing = Binding("dev"),
+            PlanFor = b => MixedPlan(b, KeepsLocal(s) ? [] : [ConflictOf("Db:Host")]),
+        };
+
+        var (exit, _) = await Run("push", s, "n\n", "--key", "Db:*", "--force");
+
+        Assert.Equal(1, exit);
+        Assert.Empty(s.Applied);
+        Assert.Empty(s.Resolved);
+    }
+
+    private static bool KeepsLocal(Stubs s) => s.Planned[^1].Source is PushSource.LocalFiles { KeepLocal.Count: > 0 };
+
+    [Fact]
+    public async Task Push_key_force_on_a_non_active_environment_is_a_clear_error()
+    {
+        var s = new Stubs { Existing = Binding("dev"), Profile = new([Env("dev"), Env("stage")]), PlanFor = b => MixedPlan(b, [ConflictOf("Db:Host")]) };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Run("push", s, "", "--env", "stage", "--key", "Db:*", "--force", "--yes"));
+
+        Assert.Contains("active environment", ex.Message);
+        Assert.Empty(s.Resolved);
+    }
+
+    [Theory]
+    [InlineData("plan", " ")]
+    [InlineData("push", "global:")]
+    public async Task Blank_key_pattern_is_rejected(string command, string pattern)
+    {
+        var s = new Stubs();
+
+        var ex = await Record.ExceptionAsync(() => Run(command, s, "", "--key", pattern, "--yes"));
+
+        Assert.Contains("--key", ex?.Message);
+        Assert.Empty(s.Planned);
+    }
+
+    [Fact]
+    public async Task Push_force_without_key_is_rejected()
+    {
+        var s = new Stubs();
+
+        var ex = await Record.ExceptionAsync(() => Run("push", s, "", "--force", "--yes"));
+
+        Assert.Contains("--force needs --key", ex?.Message);
+        Assert.Empty(s.Planned);
+    }
+
     [Fact]
     public async Task Plan_shows_the_label_of_each_change()
     {
@@ -226,6 +353,33 @@ public sealed class PlanPushCommandTests
         Assert.Matches(@"Add[\s│]+Service[\s│]+Db:Host[\s│]+\(none\)", output);
         Assert.Matches(@"Update[\s│]+Service[\s│]+Api:Url[\s│]+Development", output);
         Assert.Matches(@"Delete[\s│]+Service[\s│]+Old:Key[\s│]+\[x\]", output);
+    }
+
+    [Theory]
+    [InlineData("plan")]
+    [InlineData("push")]
+    public async Task Nothing_pulled_warns_in_human_mode_only(string command)
+    {
+        var s = new Stubs { Existing = Binding(null), PlanFor = b => Plan(b) };
+
+        var (_, human) = await Run(command, s, "", "--yes");
+        var (_, json) = await Run(command, new Stubs { Existing = Binding(null), PlanFor = b => Plan(b) }, "", "--yes", "--json");
+
+        Assert.Contains("Warning: no environment has been pulled for this project; local files may not belong to service orders", human);
+        Assert.Contains("azcfg use <ENV>", human);
+        Assert.DoesNotContain("no environment has been pulled", json);
+    }
+
+    [Theory]
+    [InlineData("plan")]
+    [InlineData("push")]
+    public async Task Active_environment_means_no_nothing_pulled_warning(string command)
+    {
+        var s = new Stubs { Existing = Binding("dev"), PlanFor = b => Plan(b) };
+
+        var (_, output) = await Run(command, s, "", "--yes");
+
+        Assert.DoesNotContain("no environment has been pulled", output);
     }
 
     private static readonly SyncWarning Skipped = new(SyncWarningKind.DeleteSkipped, "Old:Key", "'Old:Key' [kept] (use --delete).");

@@ -4,7 +4,7 @@ Local manager for Azure App Configuration + Key Vault for .NET developers: two-w
 and local files (user-secrets, `appsettings.local.json`; `local.settings.json` is designed, not implemented yet)
 and JSON editing of App Configuration.
 Core is a class library; the client is currently a CLI (`dotnet tool azcfg`), a UI comes later.
-Code, identifiers, commits and docs are in English (ADRs 0001–0009, `docs/architecture.md` and `docs/mvp-plan.md` are in Ukrainian).
+Code, identifiers, commits and docs are in English (existing ADRs and plans in `docs/` are in Ukrainian).
 
 ## Commands
 ```
@@ -57,20 +57,27 @@ tests/AzCfg.Cli.Tests     command tests + Scenario/ (end-to-end on in-memory fak
 - Small steps: one entity/behavior at a time; after each step `dotnet build` + `dotnet test`.
 - No business logic beyond the current MVP step; do not refactor others' code unasked.
 - New dependencies only via `Directory.Packages.props` and only when needed.
+- Changelog: every user-visible change updates `CHANGELOG.md` (git) and the version/release notes in the Cli csproj (NuGet).
 - Model: sealed records, immutable; async methods take a `CancellationToken`.
 
 ## Documentation
 - Full architecture, models, ports, CLI: `docs/architecture.md`
-- CLI MVP plan (done; where it differs from later ADRs, the ADR wins): `docs/mvp-plan.md`
+- CLI plan: `docs/mvp-plan.md` (stages 1–9 done, CLI 0.1.0–0.5.0; stage 10 = CLI 0.6.0; orchestrator sessions 0–3
+  and branching; where it differs from later ADRs, the ADR wins)
+- Branching: one trunk `master` — `feature/<id>-<slug>` from `origin/master`, PR into `master`; a release is a PR that
+  changes `<Version>` (NuGet publishes only then, `--skip-duplicate`). No `dev`/`release/*` branches after session 0.
+- CLI roadmap analysis (command budget, why this order, 2026-11-21 scope revision §8): `docs/cli-roadmap.md`
 - UI plan (tasks for the orchestrator): `docs/ui-mvp-plan.md`
 - User-facing CLI reference, RBAC roles, release: `README.md`
 - Decisions (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
   0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety,
   0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore,
-  0010 UI architecture and hosting, 0011 UI editing, sync and secret safety)
+  0012 project configuration (amendment 2: minimal `azcfg.json` read by `pull`; adopt/discovery/profiles deferred),
+  0013 CLI daily workflow: status, diff, key selection, safe use,
+  0014 editable project settings `config project.*`; remote providers / App Service settings deferred to stage 11)
 
 ## Skills
-- `/feature` — one task → branch from `dev` → tests → code → PR into `dev`
+- `/feature` — one task → branch from `origin/master` → tests → code → PR into `master`
 - `/add-local-target` — new `ILocalTarget` + test + DI
 - `/add-cli-command` — new command + `--json`
 - `/adr` — new ADR as a contract before code

@@ -10,6 +10,6 @@ public class PullSettings : GlobalSettings
     public bool Force { get; init; }
 
     [CommandOption("--service <NAME>")]
-    [Description("Bind a not-yet-bound project to this service without detecting it.")]
+    [Description("Bind a not-yet-bound project to this service without detecting it. A bound project keeps its service (change it with: config set project.service).")]
     public string? Service { get; init; }
 }
