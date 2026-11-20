@@ -34,6 +34,7 @@ public abstract class PushCommandBase<TSettings>(IProjectService projects, ISync
             if (!settings.Json)
             {
                 WarningsView.Render(Console, plan.Warnings);
+                WarnIfNothingPulled(binding, source);
             }
 
             return exit;
@@ -55,6 +56,7 @@ public abstract class PushCommandBase<TSettings>(IProjectService projects, ISync
         if (!settings.Json)
         {
             PlanView.Render(Console, plan);
+            WarnIfNothingPulled(binding, source);
         }
 
         var confirmed = settings.Confirm;
@@ -77,6 +79,14 @@ public abstract class PushCommandBase<TSettings>(IProjectService projects, ISync
 
         var result = await Sync.ApplyAsync(plan, new ApplyOptions(confirmed, global), ct);
         return Report(settings, result, $"Applied {result.Applied} change(s).");
+    }
+
+    private void WarnIfNothingPulled(ProjectBinding binding, PushSource source)
+    {
+        if (source is PushSource.LocalFiles)
+        {
+            WarningsView.RenderNoActiveEnvironment(Console, binding);
+        }
     }
 
     private bool Confirm(TSettings settings, string question) =>

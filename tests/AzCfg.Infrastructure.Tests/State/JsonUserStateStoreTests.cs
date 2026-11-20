@@ -92,6 +92,21 @@ public sealed class JsonUserStateStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteSnapshots_RemovesEveryEnvironmentOfOneRepoOnly()
+    {
+        await _store.SaveSnapshotAsync(Repo, "dev", State(), CancellationToken.None);
+        await _store.SaveSnapshotAsync(Repo, "prod", State(), CancellationToken.None);
+        await _store.SaveSnapshotAsync(Other, "dev", State(), CancellationToken.None);
+
+        await _store.DeleteSnapshotsAsync(Repo, CancellationToken.None);
+        await _store.DeleteSnapshotsAsync(Repo, CancellationToken.None); // none left: no-op
+
+        Assert.Null(await _store.LoadSnapshotAsync(Repo, "dev", CancellationToken.None));
+        Assert.Null(await _store.LoadSnapshotAsync(Repo, "prod", CancellationToken.None));
+        Assert.NotNull(await _store.LoadSnapshotAsync(Other, "dev", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task MissingFiles_LoadAsNull()
     {
         Assert.Null(await _store.LoadProfileAsync(CancellationToken.None));

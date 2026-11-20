@@ -7,8 +7,24 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
 ## [Unreleased]
 
 ### Planned
-- 0.5.0: `azcfg status --check` (sign-in, access, `.gitignore`, dead Key Vault references, keys missing across environments).
 - 0.6.0 (ADR 0012, amended): project manifest `azcfg.json`, discovery, `azcfg adopt`.
+
+## [0.5.0-preview.1]
+Prerelease: install with `--prerelease` (or `--version 0.5.0-preview.1`). Not yet verified against real Azure.
+### Added
+- `azcfg status --check`: Azure sign-in, access to each environment, git-ignored secrets/values targets, Key Vault
+  references to missing secrets (metadata only, values are never read), keys missing in some environments, binding
+  mismatches; each finding has a fix command. Exit code 1 on errors; `--json` prints the report (ADR 0013 amendment).
+- Editable project settings: `azcfg config list|get|set project.*` (`service`, `values`, `secrets`, `vault.<env>`;
+  `active`, `ignore` read-only). Changing the service clears the active environment and its snapshots (ADR 0014).
+### Changed
+- `status --check`: local target checks (git-ignored secrets/values, missing target projects) also run when not signed in
+  to Azure; a Key Vault secret that is disabled counts as missing; the fix for a missing global key is `azcfg edit --global`.
+- `plan`/`push` warn (human output only) when no environment has been pulled, e.g. right after changing the service.
+- `project.vault.<env>` accepts only a root https URI; `--service` is compared case-sensitively.
+- `pull`/`use --service X` on a project bound to another service fails with the `config set project.service` command
+  instead of silently ignoring `--service`.
+- CI runs build, tests and `dotnet format` on pull requests; NuGet publishing skips an already published version.
 
 ## [0.4.0]
 ### Added

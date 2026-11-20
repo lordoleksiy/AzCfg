@@ -37,6 +37,7 @@ public sealed class PlanPushCommandTests
         public Task SaveBindingAsync(ProjectBinding binding, CancellationToken ct) { s.SavedBindings.Add(binding); return Task.CompletedTask; }
         public Task<ConfigState?> LoadSnapshotAsync(string repoPath, string environment, CancellationToken ct) => throw new NotSupportedException();
         public Task SaveSnapshotAsync(string repoPath, string environment, ConfigState state, CancellationToken ct) => throw new NotSupportedException();
+        public Task DeleteSnapshotsAsync(string repoPath, CancellationToken ct) => throw new NotSupportedException();
         public Task<byte[]> GetOrCreateFingerprintKeyAsync(CancellationToken ct) => throw new NotSupportedException();
     }
 
@@ -352,6 +353,33 @@ public sealed class PlanPushCommandTests
         Assert.Matches(@"Add[\s│]+Service[\s│]+Db:Host[\s│]+\(none\)", output);
         Assert.Matches(@"Update[\s│]+Service[\s│]+Api:Url[\s│]+Development", output);
         Assert.Matches(@"Delete[\s│]+Service[\s│]+Old:Key[\s│]+\[x\]", output);
+    }
+
+    [Theory]
+    [InlineData("plan")]
+    [InlineData("push")]
+    public async Task Nothing_pulled_warns_in_human_mode_only(string command)
+    {
+        var s = new Stubs { Existing = Binding(null), PlanFor = b => Plan(b) };
+
+        var (_, human) = await Run(command, s, "", "--yes");
+        var (_, json) = await Run(command, new Stubs { Existing = Binding(null), PlanFor = b => Plan(b) }, "", "--yes", "--json");
+
+        Assert.Contains("Warning: no environment has been pulled for this project; local files may not belong to service orders", human);
+        Assert.Contains("azcfg use <ENV>", human);
+        Assert.DoesNotContain("no environment has been pulled", json);
+    }
+
+    [Theory]
+    [InlineData("plan")]
+    [InlineData("push")]
+    public async Task Active_environment_means_no_nothing_pulled_warning(string command)
+    {
+        var s = new Stubs { Existing = Binding("dev"), PlanFor = b => Plan(b) };
+
+        var (_, output) = await Run(command, s, "", "--yes");
+
+        Assert.DoesNotContain("no environment has been pulled", output);
     }
 
     private static readonly SyncWarning Skipped = new(SyncWarningKind.DeleteSkipped, "Old:Key", "'Old:Key' [kept] (use --delete).");

@@ -1,8 +1,8 @@
 # 0014. Remote config providers and editable project settings
 
-Status: accepted (2026-11-20). Builds on the CLI 0.4.0 contract (ADR 0013) without breaking it; amends ADR 0012
-(manifest schema v1). Editable project settings ship in CLI 0.5.0 (stage 9), the provider refactor is a prerequisite
-of 0.6.0 (stage 10), App Service / Function App settings are a later stage (11).
+Status: accepted (2026-11-20), **amended 2026-11-21** (see «Amendment» at the end). Editable project settings shipped
+in CLI 0.5.0 (stage 9). The provider refactor is **no longer** a prerequisite of 0.6.0: it moves to stage 11 together
+with App Service / Function App settings, and is scheduled only when a user needs them.
 
 ## Context
 - Project settings exist only as `ProjectBinding` in user state (`projects.json`, ADR 0006): `Service`, `ValuesTarget`,
@@ -63,7 +63,11 @@ of 0.6.0 (stage 10), App Service / Function App settings are a later stage (11).
   - Changing `project.values`/`project.secrets` does **not** move data (moving is `standardize`, deferred by the ADR
     0012 amendment). The result carries a hint: run `azcfg pull --force` to fill the new target. Secret-safety rule of
     ADR 0006 still applies: a secrets target that is a git-tracked, non-ignored file is rejected.
-  - Values are validated with the same rules as the `pull` wizard (service name syntax, existing csproj, KV URI).
+  - Snapshots are dropped through the new port method `IUserStateStore.DeleteSnapshotsAsync(repoPath, ct)`, **before**
+    the binding is saved: if deletion fails the binding is unchanged and the command can be retried.
+  - Values are validated with the same rules as the `pull` wizard (service name syntax, existing csproj, KV URI). A
+    `project.vault.<env>` value must be an absolute https root URI (no path, query, fragment or user info); it is stored
+    without a trailing slash.
 - `pull`/`use --service X` on a project bound to another service → error naming the current service and the
   `azcfg config set project.service X` command (today it is silently ignored). Same service → no-op.
 
@@ -157,3 +161,16 @@ of 0.6.0 (stage 10), App Service / Function App settings are a later stage (11).
 - Adding App Service / Function App later is: one Infrastructure port + one Core provider + `local.settings.json`
   target, with sync, plan, conflicts, secret safety and `--key` reused.
 - Cost: a Core refactor of `SyncService` before 0.6.0, guarded by the existing test suite.
+
+## Amendment (2026-11-21)
+Decided with the owner after reviewing the remaining scope (`docs/cli-roadmap.md` §8).
+- **Provider refactor deferred to stage 11.** The argument "the manifest schema v1 must know `RemoteKind`" no longer
+  holds: ADR 0012 Amendment 2 reduces schema v1 to service, targets and vaults, and later fields arrive by bumping
+  `SchemaVersion` (v1 files stay valid, nothing to migrate). `SyncService` touches `IConfigStore` in exactly two places
+  (read and apply), so introducing `IRemoteConfigProvider` when App Service settings are actually built costs little and
+  is guarded by the same "all existing tests pass unchanged" criterion. Until then no `Core/Remotes` types exist.
+- **Manifest interplay.** When `azcfg.json` exists, `config set project.service|values|secrets|vault.<env>` writes the
+  manifest as well as the binding (ADR 0012 Amendment 2); without it the behaviour above is unchanged.
+- **New key** `project.shared` — settable only to `true`: writes `azcfg.json` from the current binding. Reading it gives
+  `true` (with the manifest path) or `false`. Unsharing = deleting the file.
+- The `local-settings` target name becomes accepted once `LocalSettingsTarget` ships (CLI 0.6.0), as planned above.

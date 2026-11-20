@@ -5,7 +5,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>azcfg</ToolCommandName>
     <PackageId>AzCfg</PackageId>
-    <Version>0.4.0</Version>
+    <Version>0.5.0-preview.1</Version>
     <Description>Local manager for Azure App Configuration and Key Vault: sync configs with local files and edit them as JSON.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageReleaseNotes>See https://github.com/lordoleksiy/AzCfg/blob/master/CHANGELOG.md</PackageReleaseNotes>

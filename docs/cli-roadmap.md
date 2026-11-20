@@ -1,6 +1,6 @@
 # CLI roadmap analysis: daily workflow, consistency, environment switching
 
-Status: **accepted** (2026-11-20). Contract: ADR 0013 (+ amendment of ADR 0012). Tasks: `docs/mvp-plan.md`
+Status: **accepted** (2026-11-20), **revised 2026-11-21** (§8 supersedes the 0.6.0 scope and the branching of §6–§7). Contract: ADR 0013 (+ amendment of ADR 0012). Tasks: `docs/mvp-plan.md`
 stages 8–10; UI side: task M1 in `docs/ui-mvp-plan.md`. Releases go to `master` **before** the UI. Sources: `docs/architecture.md` §«Майбутнє», `docs/mvp-plan.md`
 (stage 8, «Поза MVP»), ADR 0010–0012, `docs/ui-mvp-plan.md` (U1–U4 open), the code of `AzCfg.Core`, `AzCfg.Cli`,
 `AzCfg.Ui.Application`. Purpose: one place to restore the context of «what to build next in the CLI and why».
@@ -113,23 +113,38 @@ Ordering: **A1 before U2–U4**, so the UI is built on Core use cases instead of
 every behaviour the UI shows (`--json` = the same records).
 
 ## 6. Decisions (taken 2026-11-20)
-1. Command budget accepted: +`status`, +`diff`, later +`adopt`; no `doctor`/`validate`/`standardize`/`get`/`set` commands.
+1. Command budget accepted: +`status`, +`diff` (`adopt` dropped on 2026-11-21, §8); no `doctor`/`validate`/`standardize`/`get`/`set` commands.
 2. Order: 0.4.0 (phase A) → 0.5.0 (phase B) → 0.6.0 (phase C, ADR 0012 reduced); all before the UI reaches `master`.
 3. Convention profiles and `standardize` deferred (ADR 0012 amendment).
 4. Flags: `--key` (selection), `--force` with `--key` (per-key conflict resolution), `edit --set/--unset/--secret`.
 5. UI distribution: inside the `azcfg` tool as `azcfg ui` (a launcher, +1 top-level command on top of the budget),
    not a separate package. The UI reaches `master` as CLI 0.7.0 (UI preview) after 0.6.0 (UI tasks X1, R1).
 
-## 7. Execution (summary; tasks in `docs/mvp-plan.md`)
-- 0.4.0 is released (`master`, PR #53). `dev` still holds the unfinished UI and lacks 0.3.1/0.4.0 until M1.
-- Each release: `release/<ver>` from `master` → task branches/PRs into it → one PR into `master` (every push to `master`
-  touching `src/**` publishes NuGet, so no intermediate PRs into `master`) → merge `master` into `dev`.
-- 0.4.0: R0 docs → CW1 cherry-pick C1/C2 (`e2b3983`, `3ef4bfe`) → CW2–CW4 Core (parallel) → CW5–CW9 CLI (parallel by
-  file) → CW10 release. Then UI M1: merge into `dev`, Application delegates to Core; U2–U4 start after M1.
-- 0.5.0: H0 PR CI + `--skip-duplicate` → H1 `HealthReport` (+ value-free `ISecretStore.ExistsAsync`, ADR note first)
-  → H2 `status --check`; H4 editable project settings `config project.*` (ADR 0014, parallel) → H3 release → UI M2.
-- 0.6.0: PR0 remote providers (ADR 0014, no user-visible change) → PC1, PC3–PC7 (adopt, manifest checks in
-  `status --check`) → PC9 release → UI M3.
-- UI on `dev` does not wait for 0.5.0/0.6.0 (they only gate the UI reaching `master`): M1 → U2–U4 in parallel with
-  0.5.0; U1 after M2 (env health from `HealthReport`, project settings from `IProjectSettingsService`); stage 10 runs in
-  parallel with the UI.
+## 7. Execution (history; current plan in §8 and `docs/mvp-plan.md`)
+- 0.4.0 released (PR #53): R0 docs → CW1 cherry-pick C1/C2 → CW2–CW4 Core → CW5–CW9 CLI → CW10.
+- 0.5.0: H0 PR CI + `--skip-duplicate` → H1 `HealthReport` → H2 `status --check`; H4 `config project.*` → H3 release.
+- Both went through `release/<ver>` branches because every push to `master` touching `src/**` published NuGet; the UI
+  lived on `dev`. H0 removed that reason (§8).
+
+## 8. Revision (2026-11-21): less speculative scope, one trunk, more UI
+Review of the remaining plan after 0.5.0. The layering (Core / Infrastructure / Cli, ports) stays; no re-architecture.
+
+| Item | Decision | Why |
+| --- | --- | --- |
+| PR0 remote providers (ADR 0014) | **Defer to stage 11** | `SyncService` uses `IConfigStore` in two places (read, apply): the seam already exists; adding a provider when App Service is actually built is cheap. Manifest v1 no longer needs `RemoteKind` |
+| ADR 0012 manifest | **Minimal schema v1** (service, targets, vaults) **that `pull` reads** | Value = onboarding (clone → `pull` works). The amended plan wrote a big public schema nothing consumed |
+| `adopt` | **Drop** | Wizard offers "save as `azcfg.json`"; `config set project.shared true` for bound projects. Budget stays 11 (+`ui`) |
+| Discovery scanners, drift, tiers, CI model | **Drop until asked** | Model without behaviour = public contract without benefit |
+| Secret-like keys in tracked `appsettings*.json` | **Keep**, as a `status --check` warning | Cheap, real security value |
+| `LocalSettingsTarget` | **Pull into 0.6.0** | Azure Functions developers are a likely real audience; designed since ADR 0006 |
+| `config project.*` | Shipped in 0.5.0; writes `azcfg.json` when it exists | One place for shared settings |
+| `release/*` + `dev` + merge gates M2/M3/R1 | **One trunk `master`** | `--skip-duplicate`: a push without a `<Version>` change publishes nothing; `AzCfg.Cli` does not reference `AzCfg.Ui`, so the unfinished UI is not packed until X1 |
+| Freed capacity | **UI** | Problems panel, consistency matrix + copy to environment, editable `local.settings.json`, "share with team" |
+
+Execution in orchestrator sessions (one coherent chunk each, 2–4 worktree agents; table in `docs/mvp-plan.md`):
+0. one trunk + UI M1 (docs, 0.5.0 to `master`, `dev` merged both ways, delete `dev`/`release/*`);
+1. UI core screens U1–U4 ∥ 2. CLI 0.6.0 (manifest, checks, `local.settings.json`);
+3. UI extras UX1–UX3 + X1 → Q1, Q2 → 0.7.0 (`azcfg ui`).
+
+Watch, do not act on now: `SyncService` (≈540 lines, 11 public methods) — split only when a feature lands there;
+`ConfigEnvironment` is App Configuration-shaped — fine until stage 11.

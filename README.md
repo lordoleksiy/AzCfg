@@ -15,7 +15,7 @@ Configuration. Ships as the `azcfg` dotnet tool.
 Requires the .NET 10 SDK or runtime.
 
 ```bash
-dotnet tool install --global AzCfg --version 0.3.1
+dotnet tool install --global AzCfg
 azcfg --help
 ```
 
@@ -23,6 +23,12 @@ Update to the latest version:
 
 ```bash
 dotnet tool update --global AzCfg
+```
+
+Prereleases (e.g. `0.5.0-preview.1`) are installed only on request:
+
+```bash
+dotnet tool update --global AzCfg --prerelease
 ```
 
 Uninstall:
@@ -73,6 +79,22 @@ azcfg config set env.dev.label Development   # fix a setting without re-running 
 
 Settings are per user (not stored in the repo): `mode`, `defaultLabel`, `gitignoreLocalFiles`,
 `env.<name>.endpoint`, `env.<name>.label`, `env.<name>.protected`.
+
+Project settings (the binding created by the first `pull`/`use`, also per user) are `project.*` keys, shown by
+`config list` inside a bound project:
+
+```bash
+azcfg config set project.service orders-api                  # rebind to another service (clears the active env)
+azcfg config set project.values appsettings-local            # <target>[:<project path>]
+azcfg config set project.secrets user-secrets:src/Api/Api.csproj
+azcfg config set project.vault.dev https://my-kv.vault.azure.net/
+azcfg config set project.vault.dev ""                        # unset
+```
+
+Targets: `user-secrets`, `appsettings-local`. Changing a target does not move data: run `azcfg pull --force` to fill
+the new one. A secrets target must be git-ignored. `project.active` and `project.ignore` are read-only (use `azcfg use`
+and `azcfg ignore`). `pull`/`use --service X` on a project bound to another service fails with the
+`config set project.service` command to run.
 
 ### 2. Get the config of an environment
 
@@ -148,6 +170,15 @@ azcfg diff --missing --all         # keys missing in some environments; exit cod
 ```
 
 Secret values are never shown: only their names and whether they are the same or different.
+
+```bash
+azcfg status --check               # configuration health; exit code 1 on errors (usable in CI)
+```
+
+`status --check` verifies the Azure sign-in, access to every environment, that the secrets target is git-ignored
+(and warns about the values target), Key Vault references that point to missing secrets, keys missing in some
+environments and a binding that no longer matches reality. Each finding comes with the command that fixes it.
+Secrets are checked by metadata only; their values are never read.
 
 ### 8. Protected environments
 
@@ -227,7 +258,9 @@ Architecture, decisions and the roadmap: [`docs/architecture.md`](docs/architect
 
 The CLI is published by `.github/workflows/publish-cli.yml` on every push to `master` that changes `src/**`
 or `Directory.*.props`. Bump `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj` before merging to `master`:
-nuget.org does not accept an already published version, so the run fails if it was not bumped.
+nuget.org does not accept an already published version; the push uses `--skip-duplicate`, so an unbumped version is
+skipped instead of failing. A SemVer suffix (`0.5.0-preview.1`) publishes a prerelease that `dotnet tool update`
+ignores unless `--prerelease` is passed; drop the suffix to release it as stable.
 
 The workflow runs the tests, packs `AzCfg` and pushes it to nuget.org. It authenticates via Trusted Publishing
 (OIDC) and requires the `NUGET_USER` repository secret (nuget.org profile name).

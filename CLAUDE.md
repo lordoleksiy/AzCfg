@@ -62,21 +62,22 @@ tests/AzCfg.Cli.Tests     command tests + Scenario/ (end-to-end on in-memory fak
 
 ## Documentation
 - Full architecture, models, ports, CLI: `docs/architecture.md`
-- CLI plan: `docs/mvp-plan.md` (stages 1–7 done; stages 8–10 = CLI 0.4.0–0.6.0, branches `release/<ver>` from
-  `master`, shipped before the UI; where it differs from later ADRs, the ADR wins)
-- CLI roadmap analysis (command budget, why this order): `docs/cli-roadmap.md`
+- CLI plan: `docs/mvp-plan.md` (stages 1–9 done, CLI 0.1.0–0.5.0; stage 10 = CLI 0.6.0; orchestrator sessions 0–3
+  and branching; where it differs from later ADRs, the ADR wins)
+- Branching: one trunk `master` — `feature/<id>-<slug>` from `origin/master`, PR into `master`; a release is a PR that
+  changes `<Version>` (NuGet publishes only then, `--skip-duplicate`). No `dev`/`release/*` branches after session 0.
+- CLI roadmap analysis (command budget, why this order, 2026-11-21 scope revision §8): `docs/cli-roadmap.md`
 - UI plan (tasks for the orchestrator): `docs/ui-mvp-plan.md`
 - User-facing CLI reference, RBAC roles, release: `README.md`
 - Decisions (ADR): `docs/adr/` (0001 zero-config, 0002 stores per env, 0003 core never prompts,
   0004 key naming, 0005 KV discovery, 0006 local targets and binding, 0007 sync state and secret safety,
   0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore,
-  0012 project configuration: manifest, discovery, adopt (amended: profiles/standardize deferred),
+  0012 project configuration (amendment 2: minimal `azcfg.json` read by `pull`; adopt/discovery/profiles deferred),
   0013 CLI daily workflow: status, diff, key selection, safe use,
-  0014 remote providers (App Config, App Service/Function App settings) and editable project settings `config project.*`)
+  0014 editable project settings `config project.*`; remote providers / App Service settings deferred to stage 11)
 
 ## Skills
-- `/feature` — one task → branch from `dev` → tests → code → PR into `dev` (stages 8–10 of `docs/mvp-plan.md`: base
-  `origin/release/<ver>` and PR into it instead of `dev`)
+- `/feature` — one task → branch from `origin/master` → tests → code → PR into `master`
 - `/add-local-target` — new `ILocalTarget` + test + DI
 - `/add-cli-command` — new command + `--json`
 - `/adr` — new ADR as a contract before code

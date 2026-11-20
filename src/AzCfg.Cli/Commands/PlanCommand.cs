@@ -30,6 +30,7 @@ public sealed class PlanCommand(IProjectService projects, ISyncService sync, IUs
         }
 
         PlanView.Render(console, plan);
+        WarningsView.RenderNoActiveEnvironment(console, binding);
         return 0;
     }
 }

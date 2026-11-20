@@ -33,6 +33,7 @@ public sealed class PullCommandTests
         public Task SaveBindingAsync(ProjectBinding binding, CancellationToken ct) => throw new NotSupportedException();
         public Task<ConfigState?> LoadSnapshotAsync(string repoPath, string environment, CancellationToken ct) => throw new NotSupportedException();
         public Task SaveSnapshotAsync(string repoPath, string environment, ConfigState state, CancellationToken ct) => throw new NotSupportedException();
+        public Task DeleteSnapshotsAsync(string repoPath, CancellationToken ct) => throw new NotSupportedException();
         public Task<byte[]> GetOrCreateFingerprintKeyAsync(CancellationToken ct) => throw new NotSupportedException();
     }
 
@@ -191,11 +192,24 @@ public sealed class PullCommandTests
     }
 
     [Fact]
-    public async Task Service_option_does_not_rebind_a_bound_project()
+    public async Task Service_option_naming_another_service_is_refused_with_the_fix_command()
     {
         var s = Bound();
 
-        await Run(s, "--service", "billing");
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(s, "--service", "billing"));
+
+        Assert.Contains("'orders'", ex.Message);
+        Assert.Contains("azcfg config set project.service billing", ex.Message);
+        Assert.Null(s.Bound);
+        Assert.Null(s.Pulled);
+    }
+
+    [Fact]
+    public async Task Service_option_naming_the_bound_service_is_a_no_op()
+    {
+        var s = Bound();
+
+        await Run(s, "--service", "orders");
 
         Assert.Null(s.Bound);
         Assert.Equal("orders", s.Pulled!.Value.Binding.Service);
