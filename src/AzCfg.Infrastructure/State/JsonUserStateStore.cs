@@ -48,6 +48,17 @@ public sealed class JsonUserStateStore(string root) : IUserStateStore
     public Task SaveSnapshotAsync(string repoPath, string environment, ConfigState state, CancellationToken ct) =>
         WriteAsync(SnapshotPath(repoPath, environment), JsonSerializer.SerializeToUtf8Bytes(state, Options), ct);
 
+    public Task DeleteSnapshotsAsync(string repoPath, CancellationToken ct)
+    {
+        var directory = Path.GetDirectoryName(SnapshotPath(repoPath, "x"))!;
+        if (Directory.Exists(directory))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public async Task<byte[]> GetOrCreateFingerprintKeyAsync(CancellationToken ct)
     {
         var path = Path.Combine(root, "fingerprint.key");

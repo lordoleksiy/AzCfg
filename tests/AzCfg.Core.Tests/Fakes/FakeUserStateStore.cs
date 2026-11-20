@@ -33,5 +33,12 @@ internal sealed class FakeUserStateStore : IUserStateStore
         SavedSnapshot = (environment, state);
         return Task.CompletedTask;
     }
+    public int DeleteSnapshotsCalls { get; private set; }
+    public Task DeleteSnapshotsAsync(string repoPath, CancellationToken ct)
+    {
+        DeleteSnapshotsCalls++;
+        Snapshots.Clear();
+        return Task.CompletedTask;
+    }
     public Task<byte[]> GetOrCreateFingerprintKeyAsync(CancellationToken ct) => throw new NotSupportedException();
 }
