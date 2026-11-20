@@ -1,0 +1,166 @@
+@implements IDisposable
+
+<div class="az-sync-view">
+    @if (_loadError is not null)
+    {
+        <ErrorBar Message="@_loadError" OnRetry="LoadAsync" />
+    }
+    else if (_preview is null)
+    {
+        <FluentProgressBar />
+    }
+    else
+    {
+        @if (_applyError is not null)
+        {
+            <FluentMessageBar Intent="MessageBarIntent.Error" Layout="MessageBarLayout.SingleLine" AllowDismiss="false">
+                <ChildContent>@_applyError</ChildContent>
+                <ActionsTemplate>
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@Busy" OnClick="RefreshPlanAsync">Refresh plan</FluentButton>
+                </ActionsTemplate>
+            </FluentMessageBar>
+        }
+        @if (_preview.Plan.RequiresVaultChoice)
+        {
+            <VaultPicker Environment="@Environment.Name" Disabled="@Busy" OnChosen="SetVaultAsync" />
+        }
+        @if (Origin == PushOrigin.LocalFiles)
+        {
+            <label class="az-sync-option">
+                <input type="checkbox" class="az-sync-deletes" checked="@_includeDeletes" disabled="@Busy" @onchange="ToggleDeletesAsync" />
+                Include deletions
+            </label>
+        }
+        <div class="az-sync-body">
+            <div class="az-sync-list">
+                @if (_preview.Changes.Count == 0 && _preview.Conflicts.Count == 0 && _preview.Warnings.Count == 0)
+                {
+                    <EmptyState Text="Nothing to push" />
+                }
+                @if (_preview.Conflicts.Count > 0)
+                {
+                    <section class="az-sync-group">
+                        <h4 class="az-sync-group-title conflict">Conflicts (@_preview.Conflicts.Count)</h4>
+                        @foreach (var conflict in _preview.Conflicts)
+                        {
+                            <div class="az-sync-conflict" data-key="@conflict.Key">
+                                <div class="az-sync-conflict-head">
+                                    <span class="az-sync-kind conflict">!</span>
+                                    <span class="az-mono">@conflict.Key</span>
+                                    @if (conflict.Scope == ConfigScope.Global)
+                                    {
+                                        <span class="az-sync-badge">global</span>
+                                    }
+                                    <span class="az-sync-spacer"></span>
+                                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@Busy"
+                                                  OnClick="() => ResolveAsync(conflict.Key, ConflictChoice.KeepLocal)">Keep local</FluentButton>
+                                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@Busy"
+                                                  OnClick="() => ResolveAsync(conflict.Key, ConflictChoice.KeepRemote)">Keep remote</FluentButton>
+                                </div>
+                                <table class="az-sync-mini">
+                                    <tr><th>base</th><td class="az-mono">@Shown(conflict.IsSecret, conflict.Base)</td></tr>
+                                    <tr><th>local</th><td class="az-mono">@Shown(conflict.IsSecret, conflict.Local)</td></tr>
+                                    <tr><th>remote</th><td class="az-mono">@Shown(conflict.IsSecret, conflict.Remote)</td></tr>
+                                </table>
+                            </div>
+                        }
+                    </section>
+                }
+                @if (_preview.Changes.Count > 0)
+                {
+                    <section class="az-sync-group">
+                        <h4 class="az-sync-group-title">Changes (@_preview.Changes.Count)</h4>
+                        <table class="az-sync-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" class="az-sync-all" title="Select all" checked="@AllSelected" disabled="@Busy" @onchange="ToggleAll" /></th>
+                                    <th>Kind</th>
+                                    <th>Key</th>
+                                    <th>Value</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in _preview.Changes)
+                                {
+                                    <tr class="@(row.Key == _selectedKey ? "selected" : null)" data-key="@row.Key" @onclick="() => _selectedKey = row.Key">
+                                        <td @onclick:stopPropagation="true">
+                                            <input type="checkbox" class="az-sync-check" checked="@(row.AwaitsVault || _selected.Contains(row.Key))"
+                                                   disabled="@(Busy || row.AwaitsVault)" @onchange="e => Toggle(row.Key, e)" />
+                                        </td>
+                                        <td><span class="az-sync-kind @SyncText.KindClass(row.Kind)">@SyncText.Kind(row.Kind)</span></td>
+                                        <td class="az-mono">@row.Key</td>
+                                        <td class="az-mono az-sync-value">
+                                            @if (row.IsSecret)
+                                            {
+                                                <FluentIcon Value="@(new Icons.Regular.Size16.Key())" Title="Secret" />
+                                                <span>@SecretPolicy.Mask</span>
+                                            }
+                                            else
+                                            {
+                                                @if (row.Before is not null)
+                                                {
+                                                    <span class="az-sync-before">@row.Before</span>
+                                                }
+                                                @if (row.Before is not null && row.After is not null)
+                                                {
+                                                    <span> → </span>
+                                                }
+                                                @if (row.After is not null)
+                                                {
+                                                    <span>@row.After</span>
+                                                }
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (row.Scope == ConfigScope.Global)
+                                            {
+                                                <span class="az-sync-badge">global</span>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </section>
+                }
+                @if (_preview.Warnings.Count > 0)
+                {
+                    <section class="az-sync-group">
+                        <h4 class="az-sync-group-title">Warnings (@_preview.Warnings.Count)</h4>
+                        <ul class="az-sync-warnings">
+                            @foreach (var warning in _preview.Warnings)
+                            {
+                                <li><span class="az-sync-badge">@warning.Kind</span> <span class="az-mono">@warning.Key</span> @warning.Message</li>
+                            }
+                        </ul>
+                    </section>
+                }
+            </div>
+            @if (_preview.Changes.FirstOrDefault(c => c.Key == _selectedKey) is { } selected)
+            {
+                <InspectorPane Title="@selected.Key" Subtitle="@SyncText.Kind(selected.Kind)">
+                    <InspectorSection Title="Change">
+                        @if (selected.IsSecret)
+                        {
+                            <p>Secret value will be @(selected.Kind is ChangeKind.Update ? "changed" : "set").</p>
+                            @if (selected.SecretName is not null)
+                            {
+                                <p class="az-mono">@selected.SecretName</p>
+                            }
+                        }
+                        else
+                        {
+                            <DiffEditor Original="@(selected.Before ?? string.Empty)" Modified="@(selected.After ?? string.Empty)" Inline="true" />
+                        }
+                    </InspectorSection>
+                </InspectorPane>
+            }
+        </div>
+        <footer class="az-sync-footer">
+            <span class="az-sync-summary">@Summary</span>
+            <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" Disabled="@(!CanApply)" Loading="@_busy"
+                          Title="@BlockedText" OnClick="ApplyAsync">@ApplyText</FluentButton>
+        </footer>
+    }
+</div>

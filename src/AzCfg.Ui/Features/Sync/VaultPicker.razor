@@ -1,0 +1,73 @@
+@implements IDisposable
+@inject ISyncWorkflowService Workflow
+@inject IOperationRunner Runner
+
+<section class="az-vault-picker">
+    <div class="az-vault-title">New secrets need a Key Vault for <strong>@Environment</strong>. Choose vault…</div>
+    @if (_error is not null)
+    {
+        <ErrorBar Message="@_error" OnRetry="LoadAsync" />
+    }
+    else if (_vaults is null)
+    {
+        <FluentProgressBar />
+    }
+    else
+    {
+        <input class="az-input" type="search" placeholder="Search vaults" autocomplete="off" spellcheck="false" value="@_filter"
+               @oninput="e => _filter = e.Value?.ToString() ?? string.Empty" />
+        <ul class="az-vault-list">
+            @foreach (var vault in Filtered)
+            {
+                <li>
+                    <button type="button" class="az-vault-item" disabled="@Disabled" @onclick="() => OnChosen.InvokeAsync(vault)">
+                        <span class="az-mono">@vault.Name</span>
+                        <span class="az-vault-sub">@vault.ResourceGroup</span>
+                    </button>
+                </li>
+            }
+            @if (!Filtered.Any())
+            {
+                <li class="az-vault-sub">No vaults match</li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private IReadOnlyList<AzureResource>? _vaults;
+    private string _filter = string.Empty;
+    private string? _error;
+
+    [Parameter, EditorRequired] public string Environment { get; set; } = string.Empty;
+
+    [Parameter] public bool Disabled { get; set; }
+
+    [Parameter] public EventCallback<AzureResource> OnChosen { get; set; }
+
+    private IEnumerable<AzureResource> Filtered =>
+        (_vaults ?? []).Where(v => v.Name.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        switch (await Runner.RunAsync("List key vaults", OperationKind.Read, Workflow.ListVaultsAsync, _cts.Token))
+        {
+            case OperationResult<IReadOnlyList<AzureResource>>.Success s:
+                _vaults = s.Value;
+                break;
+            case OperationResult<IReadOnlyList<AzureResource>>.Failed f:
+                _error = f.Message;
+                break;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

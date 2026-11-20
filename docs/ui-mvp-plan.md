@@ -1719,7 +1719,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     (5) changing the selected env or a write invalidates the comparison; (6) *manual (demo)*: dev ↔ stage and local ↔ dev.
   - **Tests:** bUnit + fake `ICompareService`.
 
-- [ ] **U4 — UI: Sync + make active**
+- [x] **U4 — UI: Sync + make active**
   - **Goal:** FR-S1…S7, FR-X1 (apply), G16, G20.
   - **Read:** §2.7, §2.8 (4–9), §2.9–§2.12, §4 (G16, G20), §5 (AD-5…AD-9), §7.3 (Sync), §7.4, §7.5, §9,
     `docs/ui-components.md`.

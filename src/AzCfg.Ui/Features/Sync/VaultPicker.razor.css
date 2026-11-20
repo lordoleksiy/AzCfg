@@ -1,0 +1,38 @@
+.az-vault-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+}
+
+.az-vault-list {
+    max-height: 160px;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+}
+
+.az-vault-item {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    height: var(--az-row-h);
+    padding: 0 6px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.az-vault-item:hover:not(:disabled) {
+    background: var(--colorNeutralBackground1Hover);
+}
+
+.az-vault-sub {
+    color: var(--colorNeutralForeground3);
+    font-size: 12px;
+}

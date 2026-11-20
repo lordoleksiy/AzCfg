@@ -14,7 +14,7 @@ public sealed class DemoBadgeTests : UiTestContext
     public async Task Demo_RegistersBadgeAsRightAlignedStatusBarItem()
     {
         await using var demo = await DemoApp.StartAsync("--demo=empty");
-        var item = Assert.Single(demo.Services.GetServices<StatusBarItemRegistration>());
-        Assert.Equal((typeof(DemoBadge), StatusBarAlignment.Right), (item.Component, item.Alignment));
+        var item = Assert.Single(demo.Services.GetServices<StatusBarItemRegistration>(), r => r.Component == typeof(DemoBadge));
+        Assert.Equal(StatusBarAlignment.Right, item.Alignment);
     }
 }

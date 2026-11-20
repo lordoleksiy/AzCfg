@@ -1,0 +1,63 @@
+<div class="az-apply">
+    <p>Apply @Changes.Count @(Changes.Count == 1 ? "change" : "changes") to <strong>@Environment</strong>: @Totals</p>
+    <div class="az-apply-rows">
+        <table class="az-apply-table">
+            <thead>
+                <tr><th>Kind</th><th>Key</th><th>Scope</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var row in Changes)
+                {
+                    <tr>
+                        <td>@SyncText.Kind(row.Kind)</td>
+                        <td class="az-mono">@row.Key</td>
+                        <td>@(row.Scope == ConfigScope.Global ? "global" : "service")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (TouchesGlobal)
+    {
+        <label class="az-apply-global">
+            <input type="checkbox" checked="@_global" @onchange="e => _global = e.Value is true" />
+            I understand this changes global keys shared by all services
+        </label>
+    }
+    <div class="az-apply-actions">
+        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="CancelAsync">Cancel</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" Disabled="@(TouchesGlobal && !_global)" OnClick="ApplyAsync">Apply</FluentButton>
+    </div>
+</div>
+
+@code {
+    private bool _global;
+
+    [CascadingParameter] public IDialogInstance? Dialog { get; set; }
+
+    [Parameter, EditorRequired] public string Environment { get; set; } = string.Empty;
+
+    /// <summary>The selected changes (plain values only; the summary shows no values).</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<ChangeRow> Changes { get; set; } = [];
+
+    /// <summary>Requires the "global keys" checkbox before Apply; the dialog result is whether it was checked.</summary>
+    [Parameter] public bool TouchesGlobal { get; set; }
+
+    private string Totals => string.Join(" · ", Changes.GroupBy(c => SyncText.Kind(c.Kind)).Select(g => $"{g.Count()} {g.Key}"));
+
+    private async Task ApplyAsync()
+    {
+        if ((!TouchesGlobal || _global) && Dialog is not null)
+        {
+            await Dialog.CloseAsync(_global);
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (Dialog is not null)
+        {
+            await Dialog.CancelAsync();
+        }
+    }
+}

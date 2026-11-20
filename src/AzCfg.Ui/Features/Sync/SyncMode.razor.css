@@ -1,0 +1,184 @@
+.az-sync {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.az-sync-views {
+    display: flex;
+    gap: 2px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+    flex-wrap: wrap;
+}
+
+.az-sync-tab {
+    height: var(--az-tab-h);
+    padding: 0 10px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--colorNeutralForeground2);
+    font: inherit;
+    cursor: pointer;
+}
+
+.az-sync-tab.selected {
+    border-bottom-color: var(--colorBrandStroke1);
+    color: var(--colorNeutralForeground1);
+}
+
+.az-sync-tab:disabled {
+    color: var(--colorNeutralForegroundDisabled);
+    cursor: not-allowed;
+}
+
+.az-sync-count {
+    color: var(--az-draft);
+}
+
+.az-sync ::deep .az-sync-view {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.az-sync ::deep .az-sync-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+}
+
+.az-sync ::deep .az-sync-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.az-sync ::deep .az-sync-list {
+    flex: 1;
+    min-width: 0;
+    padding: 0 12px 12px;
+    overflow: auto;
+}
+
+.az-sync ::deep .az-sync-group-title {
+    margin: 12px 0 4px;
+    color: var(--colorNeutralForeground3);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.az-sync ::deep .az-sync-group-title.conflict {
+    color: var(--az-diff-conflict);
+}
+
+.az-sync ::deep .az-sync-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.az-sync ::deep .az-sync-table th,
+.az-sync ::deep .az-sync-table td {
+    height: var(--az-row-h);
+    padding: 0 8px 0 0;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.az-sync ::deep .az-sync-table th {
+    color: var(--colorNeutralForeground3);
+    font-weight: 600;
+}
+
+.az-sync ::deep .az-sync-table tbody tr {
+    cursor: pointer;
+}
+
+.az-sync ::deep .az-sync-table tbody tr:hover {
+    background: var(--colorNeutralBackground1Hover);
+}
+
+.az-sync ::deep .az-sync-table tbody tr.selected {
+    background: var(--colorNeutralBackground1Selected);
+}
+
+.az-sync ::deep .az-sync-value {
+    max-width: 420px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.az-sync ::deep .az-sync-before {
+    color: var(--colorNeutralForeground3);
+    text-decoration: line-through;
+}
+
+.az-sync ::deep .az-sync-kind {
+    font-family: var(--az-font-mono);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.az-sync ::deep .az-sync-kind.added { color: var(--az-diff-added); }
+.az-sync ::deep .az-sync-kind.modified { color: var(--az-diff-modified); }
+.az-sync ::deep .az-sync-kind.deleted { color: var(--az-diff-deleted); }
+.az-sync ::deep .az-sync-kind.conflict { color: var(--az-diff-conflict); }
+.az-sync ::deep .az-sync-kind.remote { color: var(--az-diff-remote); }
+
+.az-sync ::deep .az-sync-badge {
+    padding: 0 6px;
+    border-radius: 8px;
+    background: var(--colorNeutralBackground3);
+    color: var(--colorNeutralForeground2);
+    font-size: 11px;
+}
+
+.az-sync ::deep .az-sync-conflict {
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    border-left: 2px solid var(--az-diff-conflict);
+    background: var(--colorNeutralBackground2);
+}
+
+.az-sync ::deep .az-sync-conflict-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.az-sync ::deep .az-sync-spacer {
+    flex: 1;
+}
+
+.az-sync ::deep .az-sync-mini th {
+    padding-right: 8px;
+    color: var(--colorNeutralForeground3);
+    font-weight: normal;
+    text-align: left;
+}
+
+.az-sync ::deep .az-sync-warnings {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.az-sync ::deep .az-sync-footer {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--colorNeutralStroke2);
+    background: var(--colorNeutralBackground1);
+}
+
+.az-sync ::deep .az-sync-summary {
+    flex: 1;
+    color: var(--colorNeutralForeground2);
+}

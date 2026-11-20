@@ -1,0 +1,84 @@
+@implements IDisposable
+@inject WorkspaceState Workspace
+@inject ProjectSessions Sessions
+@inject WorkbenchNavigator Navigator
+
+@if (Workspace.SelectedProjectId is { } id && Workspace.FindProject(id) is { } node)
+{
+    <button type="button" class="az-sync-status" title="Open Sync" @onclick="() => Navigator.OpenProject(id, mode: ProjectMode.Sync)">
+        <FluentIcon Value="@(new Icons.Regular.Size16.ArrowSync())" />
+        <span>@node.Project.Project.Name</span>
+        @if (node.Binding?.ActiveEnvironment is { } active)
+        {
+            <span>· @active</span>
+            @if (Counts(active) is { } counts)
+            {
+                <span title="Local changes to push">↑@counts.Outgoing</span>
+                <span title="Remote changes to pull">↓@counts.Incoming</span>
+                @if (counts.Conflicts > 0)
+                {
+                    <span class="az-sync-status-conflicts" title="Conflicts">!@counts.Conflicts</span>
+                }
+            }
+        }
+        @if (_session?.TotalPending is > 0 and var pending)
+        {
+            <span class="az-sync-status-draft" title="Pending edits">● @pending</span>
+        }
+    </button>
+}
+
+@code {
+    private ProjectSession? _session;
+
+    protected override void OnInitialized()
+    {
+        Workspace.Changed += OnChanged;
+        Sessions.Changed += OnChanged;
+        Hook();
+    }
+
+    /// <summary>Counts of the cached Browse view of the active environment; null when it is not loaded.</summary>
+    private (int Outgoing, int Incoming, int Conflicts)? Counts(string active) =>
+        _session?.View is { IsRemoteOnly: false } view && string.Equals(view.Environment.Name, active, StringComparison.OrdinalIgnoreCase)
+            ? (view.Rows.Count(r => r.Status is DiffKind.LocalAdded or DiffKind.LocalModified or DiffKind.LocalDeleted),
+               view.Rows.Count(r => r.Status is DiffKind.RemoteAdded or DiffKind.RemoteModified or DiffKind.RemoteDeleted),
+               view.Rows.Count(r => r.Status == DiffKind.Conflict))
+            : null;
+
+    private void Hook()
+    {
+        var next = Workspace.SelectedProjectId is { } id && Sessions.TryGet(id, out var session) ? session : null;
+        if (next == _session)
+        {
+            return;
+        }
+
+        if (_session is not null)
+        {
+            _session.Changed -= OnChanged;
+        }
+
+        _session = next;
+        if (_session is not null)
+        {
+            _session.Changed += OnChanged;
+        }
+    }
+
+    private void OnChanged() => InvokeAsync(() =>
+    {
+        Hook();
+        StateHasChanged();
+    });
+
+    public void Dispose()
+    {
+        Workspace.Changed -= OnChanged;
+        Sessions.Changed -= OnChanged;
+        if (_session is not null)
+        {
+            _session.Changed -= OnChanged;
+        }
+    }
+}

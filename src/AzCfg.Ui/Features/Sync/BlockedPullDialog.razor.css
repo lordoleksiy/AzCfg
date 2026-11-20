@@ -1,0 +1,21 @@
+.az-blocked-pull p {
+    margin: 0 0 8px;
+}
+
+.az-blocked-keys {
+    max-height: 200px;
+    margin: 0 0 12px;
+    padding-left: 18px;
+    overflow-y: auto;
+    font-size: 12px;
+}
+
+.az-blocked-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.az-blocked-actions ::deep .az-danger {
+    color: var(--az-diff-deleted);
+}
