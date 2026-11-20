@@ -98,7 +98,10 @@ what is not verified (e.g. manual browser check).
 - One task = one branch `feature/ui-<id>-<slug>` from `origin/dev` = one PR into `dev`.
 - Skill `/feature` step 1 runs `git switch dev`, which fails inside a worktree; the brief replaces step 1 (G33).
 - A dependent task starts only after its dependencies are merged into `origin/dev` (never from another agent's branch).
-- There is no CI: the orchestrator verifies build/test locally (0.5).
+- There is no CI on PRs until X1 (the `master` publish workflow is the only one): the orchestrator verifies
+  build/test locally (0.5).
+- CLI releases 0.5.0/0.6.0 go `release/<ver>` → `master` first (`docs/mvp-plan.md`, «Гілки для етапів 8–10»); each is
+  merged into `dev` by M1/M2/M3 before the UI tasks that depend on it start. The UI reaches `master` only with R1.
 
 ### 0.5 PR checklist
 1. `gh pr diff <N> --name-only` — only the task's "Files" (+ its `[x]` line in this plan).
@@ -123,12 +126,12 @@ what is not verified (e.g. manual browser check).
 ### 0.7 Status
 | ID | Task | Depends on | Wave | Status |
 | --- | --- | --- | --- | --- |
-| F0 | Sync `dev` with `master`, package versions | — | W0 | [ ] |
-| D1 | ADR 0010, 0011 | F0 | W1 | [ ] |
-| C1 | Core: pure helpers (patch, selection, comparer) | F0 | W1 | [ ] |
-| C2 | Core: sync use cases (pull selected, resolve, read remote, base JSON, guard) | F0 | W1 | [ ] |
-| T1 | In-memory adapters → Infrastructure | F0 | W1 | [ ] |
-| F1 | UI scaffold, contracts, state, `AzureErrors`, spike | F0 | W1 | [ ] |
+| F0 | Sync `dev` with `master`, package versions | — | W0 | [x] |
+| D1 | ADR 0010, 0011 | F0 | W1 | [x] |
+| C1 | Core: pure helpers (patch, selection, comparer) | F0 | W1 | [x] |
+| C2 | Core: sync use cases (pull selected, resolve, read remote, base JSON, guard) | F0 | W1 | [x] |
+| T1 | In-memory adapters → Infrastructure | F0 | W1 | [x] |
+| F1 | UI scaffold, contracts, state, `AzureErrors`, spike | F0 | W1 | [x] |
 | I1 | Infrastructure: credential, state lock, scanner | F1 | W2 | [x] |
 | P1 | UI platform: theme, workbench, tree-grid, palette | F1 | W2 | [x] |
 | P2 | Host security + Monaco | F1 | W2 | [x] |
@@ -136,12 +139,17 @@ what is not verified (e.g. manual browser check).
 | S2 | Application: configuration, compare, local values, reveal | F1, T1, C1, C2 | W2 | [x] |
 | S3 | Application: sync workflow, drafts | F1, T1, C1, C2 | W2 | [x] |
 | DH | Demo mode | F1, T1 | W2 | [x] |
-| U1 | UI: workspace, environments, settings | P1, S1 | W3 | [ ] |
-| U2 | UI: project tab + Browse | P1, P2, S1, S2, S3 | W3 | [ ] |
-| U3 | UI: Compare | P1, P2, S1, S2 | W3 | [ ] |
-| U4 | UI: Sync + make active | P1, P2, S1, S3 | W3 | [ ] |
+| M1 | Merge CLI 0.4.0 into `dev`, Application delegates to Core | DH | W2.5 | [ ] |
+| U1 | UI: workspace, environments, settings | P1, S1, M2 | W3 | [ ] |
+| U2 | UI: project tab + Browse | P1, P2, S1, S2, S3, M1 | W3 | [ ] |
+| U3 | UI: Compare | P1, P2, S1, S2, M1 | W3 | [ ] |
+| U4 | UI: Sync + make active | P1, P2, S1, S3, M1 | W3 | [ ] |
+| M2 | Merge CLI 0.5.0 into `dev` (`HealthReport`, project settings) | M1, CLI 0.5.0 | W3 | [ ] |
+| X1 | Distribution: `azcfg ui` in the CLI tool, CI | M1 | W3 | [ ] |
+| M3 | Merge CLI 0.6.0 into `dev` | M2, CLI 0.6.0 | W5 | [ ] |
 | Q1 | Integration and security tests | I1, DH, U1–U4 | W4 | [ ] |
-| Q2 | Docs, polish, measurements, smoke checklist | Q1 | W5 | [ ] |
+| Q2 | Docs, polish, measurements, smoke checklist | Q1, X1 | W5 | [ ] |
+| R1 | UI reaches `master`: CLI 0.7.0 (UI preview) | Q2, M3 | W6 | [ ] |
 
 ---
 
@@ -170,7 +178,8 @@ explicit Reveal; protected environments read-only by default; demo mode without 
 
 **Non-goals (MVP):** promote UI (Compare "copy to right" is [S]), environment rename, writing `local.settings.json`,
 raw editing of local files in the UI, creating Key Vaults, vault ranking, light theme, remote/multi-user access,
-browser E2E (Playwright), packaging the UI as a dotnet tool, cross-process lock CLI ↔ UI.
+browser E2E (Playwright), a separate UI package or installer (the UI ships inside the `azcfg` tool as `azcfg ui` —
+X1), cross-process lock CLI ↔ UI.
 
 ### 1.3 Functional requirements
 **[MVP]** is part of the DoD; **[S]** — stretch.
@@ -1589,6 +1598,45 @@ complete list of allowed changes (plus the task's `[x]` line here).
     `dotnet run --project src/AzCfg.Ui -- --demo` opens the workbench with the sample workspace.
   - **Tests:** `tests/AzCfg.Ui.Tests/Demo/**`.
 
+- [ ] **M1 — Merge CLI 0.4.0 into `dev`, Application delegates to Core**
+  - **Goal:** the UI builds on the Core use cases shipped in CLI 0.4.0 (ADR 0013) instead of its own copies
+    (`docs/cli-roadmap.md` §2, §5).
+  - **Read:** `docs/adr/0013-cli-daily-workflow-status-diff-key-selection.md`, `docs/cli-roadmap.md` §2/§5, §5.2, §7.3, §9.
+  - **Scope:** (1) orchestrator: `git merge origin/master` into a branch from `origin/dev` (no fast-forward: `dev` is
+    ahead). Conflicts in Core files that came from C1/C2 (cherry-picked into 0.4.0 as `e2b3983`, `3ef4bfe`) → take
+    `master`; `docs/ui-mvp-plan.md` → take `dev`; `CHANGELOG.md`, `README.md`, Cli csproj → take `master`.
+    (2) Application delegates, behaviour unchanged: `Environments/EnvironmentRules` → removed, callers use
+    `AzCfg.Core.Environments.EnvironmentRules` (same semantics, CW2); `CompareService` → a row/JSON adapter over
+    `IConfigComparisonService` (CW4; Core comparison types replace UI duplicates);
+    `SyncWorkflowService.UnmanagedLocalKeysAsync` → `ISyncService.UnmanagedLocalKeysAsync`; change counts for the
+    project header / FR-S7 from `ISyncService.StatusAsync` (`SyncSummary`). §7.3 signatures stay; a signature that
+    must change → 0.6.
+  - **Files:** merge result; `src/AzCfg.Ui.Application/{Environments,Configuration,Sync}/**`, matching tests in
+    `tests/AzCfg.Ui.Tests/Application/**`; this file (status line).
+  - **Depends on:** DH; CLI 0.4.0 in `master` (done).
+  - **Acceptance:** build + all tests green on the merge (CLI, Core, UI suites); no type or rule duplicated between
+    `AzCfg.Ui.Application` and Core; `--demo` shows the same screens as before; `origin/dev..origin/master` empty.
+  - **Tests:** Application tests keep their intent; delete only tests of logic that moved to Core (Core has its own).
+
+- [ ] **M2 — Merge CLI 0.5.0 into `dev`**
+  - **Goal:** environment health and project settings come from Core (`HealthReport`, ADR 0014 project settings).
+  - **Read:** `docs/mvp-plan.md` stage 9, `docs/adr/0014-remote-providers-and-project-settings.md`, §7.3 (Environments, Workspace).
+  - **Scope:** merge `origin/master` after the 0.5.0 release (rules of M1); `AzureStatusService` per-environment probe →
+    `HealthReport` (FR-E6 states map from its checks; the account/token check stays in the UI); project settings for
+    U1 (service, values/secrets targets, vault per env) → `IProjectSettingsService`; `WorkspaceService.BindAsync` keeps
+    only what Core does not do (G5).
+  - **Files:** merge result; `src/AzCfg.Ui.Application/{Environments,Workspace}/**` + tests; §7.3 if a contract gains a
+    member (0.6 rule).
+  - **Depends on:** M1, CLI 0.5.0 in `master`.
+  - **Acceptance:** build + tests green; no access-probe or binding-edit rule left only in `AzCfg.Ui.Application`.
+
+- [ ] **M3 — Merge CLI 0.6.0 into `dev`**
+  - **Goal:** `dev` contains the provider refactor (PR0) and the manifest before the UI goes to `master`.
+  - **Scope:** merge only (rules of M1). ADR 0014 keeps `ISyncService` and port signatures, so no UI change is
+    expected; any needed change → 0.6. The UI does not show the manifest in the MVP.
+  - **Depends on:** M2, CLI 0.6.0 in `master`.
+  - **Acceptance:** build + tests green; `--demo` smoke unchanged.
+
 - [ ] **U1 — UI: workspace, environments, settings**
   - **Goal:** FR-W1…W6, FR-E1…E6 (UI), G15, G17, G30.
   - **Read:** §2.2, §2.3, §2.8 (1–3), §2.9, §4 (G15, G17, G30), §5 (AD-9, AD-10), §7.3 (Workspace, Environments),
@@ -1598,11 +1646,12 @@ complete list of allowed changes (plus the task's `[x]` line here).
     (`IBindingFlow`: wizard §FR-W5; after Bind → `WorkspaceState.UpdateBinding` and "Pull ‹env› now?" →
     `IActivationFlow`); `EnvironmentSetupWizard` (`FluentWizard`, FR-E1) and `SettingsTab` (`TabKind.Settings`: envs
     add/remove/edit endpoint/label/protected, mode, default label, gitignoreLocalFiles; no rename; warning when deleting
-    an env active in open projects; save → `WorkspaceState.SetEnvironments` + `ProjectSessions.InvalidateAll`);
+    an env active in open projects; save → `WorkspaceState.SetEnvironments` + `ProjectSessions.InvalidateAll`;
+    project settings via `IProjectSettingsService` — M2);
     `AccountStatusItem` (status bar, Retry); per-environment connection checks; commands `workspace.openFolder`,
     `workspace.refresh`, `project.bind`, `project.settings`, `env.setup`, `env.manage`.
   - **Files:** `src/AzCfg.Ui/Features/{Workspace,Environments}/**`, `tests/AzCfg.Ui.Tests/Features/{Workspace,Environments}/**`.
-  - **Depends on:** P1, S1.
+  - **Depends on:** P1, S1, M2.
   - **Acceptance:** (1) scanning a folder with 3 solutions and 20 projects runs through `IOperationRunner` (Read), the
     UI stays responsive, closing the dialog cancels; (2) unsafe targets are not offered for secrets (reason shown);
     after Bind the tree updates; re-bind keeps vaults; (3) environment wizard saves mode and labels; validation errors
@@ -1624,7 +1673,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     Commands `project.mode.*`, `project.refresh`, `project.unlock`, `project.lock`, `browse.*`, `draft.review`,
     `draft.discard`; quick-open contributions for keys.
   - **Files:** `src/AzCfg.Ui/Features/{Project,Browse}/**`, `tests/AzCfg.Ui.Tests/Features/{Project,Browse}/**`.
-  - **Depends on:** P1, P2, S1, S2, S3.
+  - **Depends on:** P1, P2, S1, S2, S3, M1.
   - **Acceptance:** (1) loads via the runner (Read) with skeleton rows, caches in the session, Refresh reloads;
     (2) remote-only for a non-active env with the Make-active bar; (3) the sentinel is absent from markup until Reveal
     and after hide / tab switch / 30 s; (4) edits create and extend the draft (bar count, tab dirty); protected and
@@ -1642,7 +1691,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     (both sides, Open in Browse), counts and ignored hint; caches in `ProjectSession.SetComparison`; [S] Copy to right
     (plain only) via `IDraftService.SetValue` on the right env's draft (protected → requires unlock).
   - **Files:** `src/AzCfg.Ui/Features/Compare/**`, `tests/AzCfg.Ui.Tests/Features/Compare/**`.
-  - **Depends on:** P1, P2, S1, S2.
+  - **Depends on:** P1, P2, S1, S2, M1.
   - **Acceptance:** (1) default sides per §2.6; swap; (2) counts and "differences only"; (3) secrets show names or
     same/different only — the sentinel never in markup; (4) the diff editor receives `LeftJson`/`RightJson`;
     (5) changing the selected env or a write invalidates the comparison; (6) *manual (demo)*: dev ↔ stage and local ↔ dev.
@@ -1662,7 +1711,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     cleared after a successful draft apply, `WorkspaceState.UpdateBinding` after pulls. Commands `sync.apply`,
     `sync.pullSelected`, `env.makeActive`.
   - **Files:** `src/AzCfg.Ui/Features/Sync/**`, `tests/AzCfg.Ui.Tests/Features/Sync/**`.
-  - **Depends on:** P1, P2, S1, S3.
+  - **Depends on:** P1, P2, S1, S3, M1.
   - **Acceptance:** (1) apply impossible with nothing selected, with `RequiresVaultChoice`, without the typed name for
     protected or without the global checkbox — buttons disabled while an operation runs; (2) a conflict blocks only its
     key; Keep local / Keep remote call the right service for local files vs drafts; (3) Push/Pull disabled for a
@@ -1691,19 +1740,45 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Depends on:** I1, DH, U1, U2, U3, U4.
   - **Acceptance:** the 10 scenarios and the invariants of §12.3 green, no network.
 
+- [ ] **X1 — Distribution: `azcfg ui` in the CLI tool, CI**
+  - **Goal:** the UI ships inside the `azcfg` dotnet tool (one package, one version, one user state); PRs get CI.
+  - **Read:** §5 (AD-1), §6, `.github/workflows/publish-cli.yml`, `docs/cli-roadmap.md` §1 (command budget).
+  - **Scope:** (1) ADR (next free number) «UI distribution»: `azcfg ui [--port N] [--no-browser] [--demo[=empty]]`
+    is a launcher, not a workflow command (+1 top-level command, accepted 2026-11-20); `--json` prints
+    `{ "url": … }` and keeps running. (2) Spike first, result recorded in the ADR: the packed tool contains `wwwroot`
+    and the static web assets of Fluent UI and BlazorMonaco (`_content/**`) and runs on the ASP.NET Core shared runtime
+    of the SDK. Expected shape: `AzCfg.Ui` exposes `UiHost.RunAsync(UiHostOptions, CancellationToken)` and keeps
+    `Program.cs` for `dotnet run`; `AzCfg.Cli` references `AzCfg.Ui` (switching the Cli project SDK to
+    `Microsoft.NET.Sdk.Web` only if static web assets require it). (3) `UiCommand` in `CliApp.Configure` via
+    `/add-cli-command`. (4) CI: `ci.yml` (PR build/test/format) and `--skip-duplicate` come with CLI 0.5.0 (task H0
+    of `docs/mvp-plan.md`, reaches `dev` by M2; if X1 starts earlier, cherry-pick H0). X1 adds a pack test to
+    `ci.yml` and `publish-cli.yml`: install the packed tool into a temp `--tool-path`, run
+    `azcfg ui --demo --no-browser --json`, `GET /login?t=` → 302, one `_content/` asset → 200.
+  - **Files:** `docs/adr/<n>-ui-distribution.md`, `CLAUDE.md` (ADR list line), `src/AzCfg.Ui/{UiHost.cs,Program.cs}`,
+    `src/AzCfg.Cli/**` (command + csproj), `tests/AzCfg.Cli.Tests/**`, `.github/workflows/**`.
+  - **Depends on:** M1.
+  - **Acceptance:** `dotnet pack src/AzCfg.Cli` → `dotnet tool install --tool-path <tmp> --add-source …` →
+    `azcfg ui --demo` opens the workbench with styles and Monaco, no CDN requests; CLI commands unchanged; CI green.
+
 - [ ] **Q2 — Docs, polish, measurements, smoke checklist**
   - **Goal:** MVP Definition of Done (§14).
   - **Read:** the whole plan; ADR 0010/0011.
   - **Scope:** `README.md` (UI section: run, `--demo`, `az login`, RBAC roles, localhost security, binding per `.csproj`
     folder — R9), `docs/architecture.md` (UI section), `CLAUDE.md` (commands `dotnet run --project src/AzCfg.Ui`,
-    `-- --demo`; structure with the new projects; UI layer rules from §9; `docs/ui-components.md` pointer),
+    `-- --demo`, `azcfg ui`; structure with the new projects; UI layer rules from §9; `docs/ui-components.md` pointer),
     `docs/ui-components.md` final; polish of empty/loading/error states, focus and keyboard; measurements §12.4 and the
     R3 decision; manual smoke checklist §12.5 + all "not verified" items in the PR (the smoke on real Azure is run by
     the **user**; the agent prepares the checklist and runs `--demo` locally).
   - **Files:** `docs/**`, `CLAUDE.md`, `README.md`, `src/AzCfg.Ui/**`, `src/AzCfg.Ui.Application/**` (polish only, no
     new features).
-  - **Depends on:** Q1.
+  - **Depends on:** Q1, X1.
   - **Acceptance:** §14 done except the smoke item (ticked by the user).
+
+- [ ] **R1 — UI reaches `master`: CLI 0.7.0 (UI preview)** — orchestrator
+  - `release/0.7.0` from `master`, merge `dev` into it; `<Version>` 0.7.0, `CHANGELOG.md` («`azcfg ui` — preview»),
+    README; one PR `release/0.7.0` → `master` (publishes the tool with the UI), then `master` → `dev`.
+  - **Depends on:** Q2, M3 (CLI 0.5.0 and 0.6.0 released — `docs/cli-roadmap.md` §6.2).
+  - **Acceptance:** CI green; the published tool passes the X1 pack test; smoke §12.5 ticked by the user.
 
 ---
 
@@ -1722,7 +1797,12 @@ graph LR
   S1 --> U1 & U2 & U3 & U4
   S2 --> U2 & U3
   S3 --> U2 & U4
+  DH --> M1 --> M2 --> M3
+  M1 --> U2 & U3 & U4 & X1
+  M2 --> U1
   I1 & DH & U1 & U2 & U3 & U4 --> Q1 --> Q2
+  X1 --> Q2
+  Q2 & M3 --> R1
 ```
 
 ### 11.2 Waves
@@ -1731,11 +1811,13 @@ graph LR
 | W0 | F0 (orchestrator) | 0 |
 | W1 | D1, C1, C2, T1, F1 | 5 |
 | W2 | I1, P1, P2, S1, S2, S3, DH | 7 |
-| W3 | U1, U2, U3, U4 | 4 |
+| W2.5 | M1 (orchestrator merge + 1 agent for the delegation) | 1 |
+| W3 | U2, U3, U4, X1; U1 and M2 once CLI 0.5.0 is released | 4–5 |
 | W4 | Q1 | 1 |
-| W5 | Q2 | 1 |
+| W5 | Q2; M3 once CLI 0.6.0 is released | 1 |
+| W6 | R1 (orchestrator) | 0 |
 
-Critical path: **F0 → F1 → P1 → U2/U4 → Q1 → Q2**. F1 and P1 are the largest tasks of their waves — start them first.
+Critical path: **M1 → U2/U4 → Q1 → Q2 → R1**; R1 also waits for CLI 0.6.0 (M3). F1 and P1 are the largest tasks of their waves — start them first.
 After W2 is merged, `--demo` works and every W3 agent can check its screens in a browser.
 
 ### 11.3 Shared files
