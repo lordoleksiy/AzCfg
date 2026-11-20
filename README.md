@@ -15,7 +15,7 @@ Configuration. Ships as the `azcfg` dotnet tool.
 Requires the .NET 10 SDK or runtime.
 
 ```bash
-dotnet tool install --global AzCfg --version 0.3.1
+dotnet tool install --global AzCfg
 azcfg --help
 ```
 
@@ -23,6 +23,12 @@ Update to the latest version:
 
 ```bash
 dotnet tool update --global AzCfg
+```
+
+Prereleases (e.g. `0.5.0-preview.1`) are installed only on request:
+
+```bash
+dotnet tool update --global AzCfg --prerelease
 ```
 
 Uninstall:
@@ -252,7 +258,9 @@ Architecture, decisions and the roadmap: [`docs/architecture.md`](docs/architect
 
 The CLI is published by `.github/workflows/publish-cli.yml` on every push to `master` that changes `src/**`
 or `Directory.*.props`. Bump `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj` before merging to `master`:
-nuget.org does not accept an already published version, so the run fails if it was not bumped.
+nuget.org does not accept an already published version; the push uses `--skip-duplicate`, so an unbumped version is
+skipped instead of failing. A SemVer suffix (`0.5.0-preview.1`) publishes a prerelease that `dotnet tool update`
+ignores unless `--prerelease` is passed; drop the suffix to release it as stable.
 
 The workflow runs the tests, packs `AzCfg` and pushes it to nuget.org. It authenticates via Trusted Publishing
 (OIDC) and requires the `NUGET_USER` repository secret (nuget.org profile name).

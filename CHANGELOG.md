@@ -9,7 +9,8 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
 ### Planned
 - 0.6.0 (ADR 0012, amended): project manifest `azcfg.json`, discovery, `azcfg adopt`.
 
-## [0.5.0]
+## [0.5.0-preview.1]
+Prerelease: install with `--prerelease` (or `--version 0.5.0-preview.1`). Not yet verified against real Azure.
 ### Added
 - `azcfg status --check`: Azure sign-in, access to each environment, git-ignored secrets/values targets, Key Vault
   references to missing secrets (metadata only, values are never read), keys missing in some environments, binding
