@@ -1,0 +1,103 @@
+.az-project-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    min-height: var(--az-header-h);
+    padding: 2px 12px;
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+    font-size: 13px;
+}
+
+.az-project-title {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.az-project-name {
+    font-weight: 600;
+}
+
+.az-project-service {
+    color: var(--colorNeutralForeground3);
+}
+
+.az-project-modes {
+    display: inline-flex;
+    gap: 2px;
+}
+
+.az-project-mode {
+    height: var(--az-tab-h);
+    padding: 0 10px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--colorNeutralForeground2);
+    font: inherit;
+    cursor: pointer;
+}
+
+.az-project-mode.selected {
+    border-bottom-color: var(--colorBrandStroke1);
+    color: var(--colorNeutralForeground1);
+}
+
+.az-project-summary {
+    display: inline-flex;
+    gap: 8px;
+    font-family: var(--az-font-mono);
+    font-size: 12px;
+}
+
+.az-project-local {
+    color: var(--az-diff-modified);
+}
+
+.az-project-remote {
+    color: var(--az-diff-remote);
+}
+
+.az-project-conflicts {
+    color: var(--az-diff-conflict);
+}
+
+.az-project-actions {
+    display: inline-flex;
+    align-items: center;
+    margin-left: auto;
+}
+
+.az-project-overflow {
+    position: relative;
+}
+
+.az-project-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 800;
+    display: flex;
+    flex-direction: column;
+    min-width: 180px;
+    padding: 4px 0;
+    border: 1px solid var(--colorNeutralStroke1);
+    border-radius: 4px;
+    background: var(--colorNeutralBackground3);
+    box-shadow: var(--shadow16);
+}
+
+.az-project-menu button {
+    padding: 6px 12px;
+    border: none;
+    background: transparent;
+    color: var(--colorNeutralForeground1);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.az-project-menu button:hover {
+    background: var(--colorNeutralBackground1Hover);
+}

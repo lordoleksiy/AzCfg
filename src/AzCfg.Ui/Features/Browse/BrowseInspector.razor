@@ -1,0 +1,250 @@
+@using AzCfg.Core.Model
+@using Microsoft.JSInterop
+@using AzCfg.Core.Sync
+@using AzCfg.Ui.Application.Configuration
+@using AzCfg.Ui.Application.Security
+@using AzCfg.Ui.Application.State
+@implements IDisposable
+@inject BrowseEditor Editor
+@inject IJSRuntime Js
+
+<InspectorPane Title="@(Row?.Key ?? "Browse")" Subtitle="@(Row is null ? null : BrowseRows.StatusText(Row.Status, Row.IsIgnored))">
+    @if (Row is not { } row)
+    {
+        <span class="az-bi-hint">Select a key to see its local and Azure values.</span>
+    }
+    else
+    {
+        <div class="az-bi-status">
+            <DiffBadge Kind="@(row.IsIgnored ? null : row.Status)" HasDraft="Pending is not null" />
+            <span>@BrowseRows.StatusText(row.Status, row.IsIgnored)</span>
+            <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="Copy key" OnClick="() => CopyAsync(row.Key)">
+                <FluentIcon Value="@(new Icons.Regular.Size16.Copy())" />
+            </FluentButton>
+        </div>
+        <InspectorSection Title="Key">
+            <div class="az-bi-line">Scope: @(BrowseRows.ScopeOf(row) == ConfigScope.Global ? "global" : "service")</div>
+            @if (row.Remote is { Label: { } label })
+            {
+                <div class="az-bi-line">Label: <span class="az-browse-badge">@label</span></div>
+            }
+            @if (row.Remote is { ShadowedGlobalValue: { } shadowed })
+            {
+                <div class="az-bi-line">Overrides global: <span class="az-mono">@shadowed</span></div>
+            }
+            @foreach (var warning in View.Warnings.Where(w => w.Key == row.Key))
+            {
+                <div class="az-bi-warning"><FluentIcon Value="@(new Icons.Regular.Size16.Warning())" /> @warning.Message</div>
+            }
+        </InspectorSection>
+        @if (!View.IsRemoteOnly)
+        {
+            <InspectorSection Title="Local">
+                @if (row.Local is not { } local)
+                {
+                    <div class="az-bi-line az-bi-muted">@(row.IsIgnored ? "Ignored locally." : "Not set locally.")</div>
+                }
+                else
+                {
+                    <div class="az-bi-value">
+                        @if (local.Masked)
+                        {
+                            <SecretValue @key="@($"local:{row.Key}")" OnReveal="ct => Editor.RevealLocalAsync(View, row.Key, ct)" />
+                        }
+                        else
+                        {
+                            <span class="az-mono">@local.Value</span>
+                        }
+                    </div>
+                    <div class="az-bi-line az-bi-muted">@BrowseRows.SourceName(local.Source)@(local.Scope == ConfigScope.Global ? " · //@global" : null)</div>
+                    @if (_localEdit)
+                    {
+                        <div class="az-bi-edit">
+                            <input class="az-input" aria-label="Local value" type="@(local.Masked ? "password" : "text")" value="@_text"
+                                   @oninput="e => _text = e.Value as string ?? string.Empty" @onkeydown:stopPropagation="true" />
+                            <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="() => SaveLocalAsync(row, local)">Save</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="CancelEdits">Cancel</FluentButton>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="az-bi-actions">
+                            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => StartLocalEdit(local)">Edit local</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small"
+                                          OnClick="() => Editor.SetLocalScopeAsync(Session, View, row.Key, local.Scope == ConfigScope.Global ? ConfigScope.Service : ConfigScope.Global)">@(local.Scope == ConfigScope.Global ? "Mark as service" : "Mark as global")</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Editor.RemoveLocalAsync(Session, View, row.Key)">Remove local</FluentButton>
+                        </div>
+                    }
+                }
+            </InspectorSection>
+        }
+        <InspectorSection Title="@($"Azure · {View.Environment.Name}")">
+            @if (row.Remote is { IsSecret: true } secret)
+            {
+                <div class="az-bi-value">
+                    <SecretValue @key="@($"remote:{row.Key}")" OnReveal="@(secret.SecretUri is { } uri ? (ct => Editor.RevealRemoteAsync(uri, row.Key, ct)) : null)" />
+                </div>
+                <div class="az-bi-line az-bi-muted az-mono">@BrowseRows.ReferenceText(secret)</div>
+            }
+            else if (row.Remote is { Value: { } value })
+            {
+                <div class="az-bi-value"><span class="az-mono">@value</span></div>
+            }
+            else
+            {
+                <div class="az-bi-line az-bi-muted">Not in Azure.</div>
+            }
+            @if (_azureEdit)
+            {
+                <div class="az-bi-edit">
+                    <input class="az-input" aria-label="Azure value" value="@_text" @oninput="e => _text = e.Value as string ?? string.Empty" @onkeydown:stopPropagation="true" />
+                    <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="() => SaveAzureAsync(row)">Save</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="CancelEdits">Cancel</FluentButton>
+                </div>
+            }
+            else if (_secretEdit)
+            {
+                <div class="az-bi-edit">
+                    <input class="az-input" aria-label="New secret value" type="password" autocomplete="off" value="@_text"
+                           @oninput="e => _text = e.Value as string ?? string.Empty" @onkeydown:stopPropagation="true" />
+                    <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="() => SaveSecretAsync(row)">Save secret</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="CancelEdits">Cancel</FluentButton>
+                </div>
+            }
+            else
+            {
+                var plain = BrowseRows.PlainRemote(row) is not null || Pending is { Removed: false, AfterIsSecret: false, After: not null };
+                <div class="az-bi-actions" title="@(Editable ? null : "Unlock editing to change Azure values")">
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@(!Editable || row.Remote is { IsSecret: true })" OnClick="() => StartAzureEdit(row)">Edit</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@(!Editable)" OnClick="StartSecretEdit">Set secret value</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@(!Editable || !plain)"
+                                  OnClick="() => Editor.MoveToKeyVaultAsync(Session, View, BrowseRows.DraftKeyOf(row))">Move to Key Vault</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@(!Editable)"
+                                  OnClick="() => Editor.DeleteAsync(Session, View, BrowseRows.DraftKeyOf(row))">Delete</FluentButton>
+                </div>
+            }
+        </InspectorSection>
+        @if (Pending is { } pending)
+        {
+            <InspectorSection Title="Pending edit">
+                <div class="az-bi-line">
+                    <span class="az-mono az-bi-before">@(pending.BeforeIsSecret ? SecretPolicy.Mask : pending.Before ?? "—")</span>
+                    →
+                    <span class="az-mono az-bi-after">@(pending.Removed ? "deleted" : pending.AfterIsSecret ? SecretPolicy.Mask : pending.After)</span>
+                </div>
+                <div class="az-bi-actions">
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@(!Editable)"
+                                  OnClick="() => Editor.RevertAsync(Session, View, BrowseRows.DraftKeyOf(row))">Revert</FluentButton>
+                </div>
+            </InspectorSection>
+        }
+    }
+</InspectorPane>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private string? _key;
+    private InspectorRequest? _handled;
+    private bool _localEdit;
+    private bool _azureEdit;
+    private bool _secretEdit;
+    private string _text = string.Empty;
+
+    /// <summary>The session of the project tab; edits go to its draft through <see cref="BrowseEditor"/>.</summary>
+    [Parameter, EditorRequired] public ProjectSession Session { get; set; } = default!;
+
+    [Parameter, EditorRequired] public ConfigurationView View { get; set; } = default!;
+
+    /// <summary>The selected key's row; null shows a hint.</summary>
+    [Parameter] public ConfigRow? Row { get; set; }
+
+    /// <summary>Azure edit actions are disabled when false (protected and locked).</summary>
+    [Parameter] public bool Editable { get; set; } = true;
+
+    /// <summary>The key's pending Azure edit, when the draft has one.</summary>
+    [Parameter] public PendingEdit? Pending { get; set; }
+
+    /// <summary>Opens an editor for the key once (handled by reference).</summary>
+    [Parameter] public InspectorRequest? Request { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (Row?.Key != _key)
+        {
+            _key = Row?.Key;
+            CancelEdits();
+        }
+
+        if (Request is { } request && !ReferenceEquals(request, _handled))
+        {
+            _handled = request;
+            if (request.Key == Row?.Key && Editable && request.Edit == InspectorEdit.AzureSecret)
+            {
+                StartSecretEdit();
+            }
+        }
+    }
+
+    private void CancelEdits()
+    {
+        _localEdit = _azureEdit = _secretEdit = false;
+        _text = string.Empty;
+    }
+
+    private void StartLocalEdit(LocalCell local)
+    {
+        CancelEdits();
+        _localEdit = true;
+        _text = local.Masked ? string.Empty : local.Value ?? string.Empty;
+    }
+
+    private void StartAzureEdit(ConfigRow row)
+    {
+        CancelEdits();
+        _azureEdit = true;
+        _text = Pending is { Removed: false, After: { } after } ? after : BrowseRows.PlainRemote(row) ?? string.Empty;
+    }
+
+    private void StartSecretEdit()
+    {
+        CancelEdits();
+        _secretEdit = true;
+    }
+
+    private async Task SaveLocalAsync(ConfigRow row, LocalCell local)
+    {
+        var text = _text;
+        CancelEdits();
+        if (local.Masked)
+        {
+            await Editor.SetLocalSecretAsync(Session, View, row.Key, new SecretString(text));
+        }
+        else
+        {
+            await Editor.SetLocalPlainAsync(Session, View, row.Key, text);
+        }
+    }
+
+    private async Task SaveAzureAsync(ConfigRow row)
+    {
+        var text = _text;
+        CancelEdits();
+        await Editor.SetValueAsync(Session, View, BrowseRows.DraftKeyOf(row), text, _cts.Token);
+    }
+
+    private async Task SaveSecretAsync(ConfigRow row)
+    {
+        var secret = new SecretString(_text);
+        CancelEdits();
+        await Editor.SetSecretAsync(Session, View, BrowseRows.DraftKeyOf(row), secret, _cts.Token);
+    }
+
+    private Task CopyAsync(string text) => Js.InvokeVoidAsync("navigator.clipboard.writeText", text).AsTask();
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        _text = string.Empty;
+    }
+}

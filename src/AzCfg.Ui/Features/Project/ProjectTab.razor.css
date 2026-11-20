@@ -1,0 +1,40 @@
+.az-project {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    border-top: 2px solid transparent;
+}
+
+.az-project.protected {
+    border-top-color: var(--az-env-prod);
+}
+
+.az-project-protected {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 12px;
+    background: var(--colorNeutralBackground3);
+    color: var(--az-env-prod);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.az-project-progress {
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--colorBrandBackground), transparent);
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    animation: az-project-progress 1.2s linear infinite;
+}
+
+@keyframes az-project-progress {
+    from { background-position: -40% 0; }
+    to { background-position: 140% 0; }
+}
+
+.az-project-body {
+    flex: 1;
+    min-height: 0;
+}

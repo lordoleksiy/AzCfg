@@ -1,0 +1,19 @@
+@using AzCfg.Ui.Application.State
+@inject DraftFlow Drafts
+
+@if (Session.PendingCount(Environment) is > 0 and var pending)
+{
+    <div class="az-draftbar" role="status">
+        <span class="az-draftbar-dot" aria-hidden="true">●</span>
+        <span class="az-draftbar-text">@pending pending edits to @Environment</span>
+        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Drafts.DiscardAsync(Session, Environment)">Discard</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="() => DraftFlow.Review(Session)">Review ▸</FluentButton>
+    </div>
+}
+
+@code {
+    /// <summary>Bottom bar of the selected environment's pending Azure edits (§2.4); renders nothing without edits.</summary>
+    [Parameter, EditorRequired] public ProjectSession Session { get; set; } = default!;
+
+    [Parameter, EditorRequired] public string Environment { get; set; } = string.Empty;
+}
