@@ -1,7 +1,7 @@
 # 0012. Project Configuration: manifest, convention profiles, discovery, `adopt`, `standardize`
 
-Status: accepted, **amended 2026-11-20** (see «Amendment» at the end): CLI 0.6.0, stage 10 of `docs/mvp-plan.md`,
-after ADR 0013 (0.4.0) and the health stage (0.5.0). Schema v1 remote source kinds are amended by ADR 0014.
+Status: accepted, **amended 2026-11-20 and 2026-11-21** (see «Amendment» and «Amendment 2» at the end): CLI 0.6.0
+ships only the minimal manifest of Amendment 2; most of the model below is deferred.
 
 ## Context
 - Today AzCfg is zero-config (ADR 0001): everything is auto-detected and the choice is remembered in user state
@@ -193,3 +193,58 @@ Decided with the owner after `docs/cli-roadmap.md`; supersedes the conflicting p
   `UserProfile.ConventionProfile`) and `azcfg standardize` / `MigrationPlan` / `IMigrationExecutor`. Drift is computed
   against the manifest only. The open question about `-S` is moot until `standardize` is scheduled.
 - Unchanged: manifest model and validation, discovery, value-free guarantees, CI/CD model as data only.
+
+## Amendment 2 (2026-11-21): minimal manifest, no `adopt`
+Decided with the owner after reviewing the remaining scope (`docs/cli-roadmap.md` §8). Supersedes the parts above that
+conflict with it; the value-free guarantees stay.
+
+**Why.** As amended, 0.6.0 would write a manifest that nothing reads except validation (manifest-driven resolution was a
+"later stage"), while shipping a large public schema (sources, tiers, keys, CI, deployments) without behaviour. The real
+user need is onboarding: a teammate clones the repo and `azcfg pull` works without the binding wizard.
+
+**Schema v1 (replaces the model above):**
+```jsonc
+// azcfg.json — git-tracked, value-free
+{
+  "schemaVersion": 1,
+  "service": "orders-api",
+  "values":  { "target": "appsettings-local", "project": "src/Orders.Api/Orders.Api.csproj" },
+  "secrets": { "target": "user-secrets",      "project": "src/Orders.Api/Orders.Api.csproj" },
+  "vaults":  { "dev": "https://orders-dev-kv.vault.azure.net/" }   // optional
+}
+```
+- Core `Manifest/`: `ProjectManifest(int SchemaVersion, string Service, ManifestTarget Values, ManifestTarget Secrets,
+  IReadOnlyDictionary<string, Uri>? Vaults)`, `ManifestTarget(string Target, string Project)`; `<target>` uses the
+  `config project.*` names (ADR 0014); `project` is relative to the manifest folder. `ManifestSerializer` (BCL
+  `System.Text.Json`, comments and trailing commas allowed) and `ManifestValidator`: strict schema (unknown property,
+  e.g. `value`/`password`, → error), `SchemaVersion` greater than supported → error with an upgrade hint, the secrets
+  target obeys the ADR 0006 safety rule.
+- Later fields are added by bumping `SchemaVersion`; a v1 file stays valid for every later version and is never rewritten
+  by an older tool. No migration is needed for additive versions.
+- Location: the nearest `azcfg.json` from the project path (`--project`, default: current directory; UI: the `.csproj`
+  folder) upwards, stopping at the git root. One file per service folder in a multi-service repo.
+- Port `IProjectManifestStore` (`FindAsync(path)`, `SaveAsync`; atomic write like `JsonUserStateStore`), Infrastructure
+  `FileProjectManifestStore`.
+
+**Shared vs per user.** The manifest holds the shared fields (service, values/secrets targets, vaults). The user state
+(`ProjectBinding`) keeps the per-user ones: `ActiveEnvironment`, `Ignore` (never in the repo, ADR 0008), snapshots.
+When a manifest exists its shared fields win:
+- `ProjectService.ResolveAsync`: no binding + manifest → the binding is created from the manifest without the wizard.
+  Binding + manifest with another service → the same rule as `config set project.service` (ADR 0014): active
+  environment reset and snapshots dropped, so the next `use`/`pull` asks the G20 confirmation.
+- `config set project.service|values|secrets|vault.<env>` writes `azcfg.json` (and the binding) when the file exists; the
+  result says "shared via azcfg.json — commit it".
+- New settable key `project.shared` (ADR 0014 table): `true` writes `azcfg.json` next to the project path from the current
+  binding; reading it tells whether a manifest is in effect (and its path). Unsharing = deleting the file.
+- First-run wizard of `pull`/`use` offers "save as azcfg.json for the team" (default no; `--json`/`--yes` never write it).
+
+**Health (`status --check`, ADR 0013 amendment).** New `HealthCheckKind` values:
+- `ManifestInvalid` (Error) — unreadable file, schema error, unsupported version.
+- `SecretLikeKeyInTrackedFile` (Warning) — a git-tracked `appsettings*.json` has a non-empty value under a key whose name
+  matches `password|secret|token|apikey|connectionstring` (case-insensitive). Values are read in memory only to test for
+  emptiness and dropped; the finding carries the file and key path. Fix hint: move it to user-secrets / Key Vault.
+
+**Dropped from this ADR** (back to "Поза MVP" until a user asks): `azcfg adopt` (replaced by the wizard and
+`project.shared`), discovery scanners (`IConfigSourceScanner`, `launchSettings`, `.env*`, `docker-compose*`),
+`DiscoveryReport`, `DriftComparer`/`DriftReport`, `ConfigSource`/`ConfigSourceKind`/`ConfigRole`, `SecretRef`/`SecretTier`,
+`KeySpec`, `CiConfig`/`DeploymentTarget`, convention profiles, `standardize`. Command budget: no new command (11 + `ui`).

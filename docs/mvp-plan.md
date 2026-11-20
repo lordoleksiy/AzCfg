@@ -1,14 +1,14 @@
 # MVP — план виконання
 
-Список маленьких задач для агентів. Одна задача = одна гілка = один PR у `dev` (етапи 1–7).
-**Етапи 8–10 — інакше:** гілки від `release/<версія>` (яка відгалужена від `master`), PR у `release/<версія>`,
-потім один PR `release/<версія>` → `master` (див. «Гілки для етапів 8–10»).
+Список маленьких задач для агентів. Одна задача = одна гілка = один PR. З сесії 0 (див. «Сесії оркестратора») —
+одна гілка `master`: задача = `feature/<id>-<slug>` від `origin/master` → PR у `master`; реліз = PR зі зміною `<Version>`.
 
-> **Статус:** етапи 1–7 виконано. Історія версій CLI: 0.1.0 — етапи 1–6 (MVP); 0.2.0 — ADR 0008 (режими
+> **Статус:** етапи 1–9 виконано. Історія версій CLI: 0.1.0 — етапи 1–6 (MVP); 0.2.0 — ADR 0008 (режими
 > середовищ store / label, читання всіх labels у store-режимі, локальний ігнор `azcfg ignore`, push за
 > замовчуванням — upsert, `--delete`, `azcfg config`, `pull/use --service`); 0.3.0 — етап 7, ADR 0009;
-> 0.3.1 — виявлення `appsettings*.json`; 0.4.0 — етап 8 (ADR 0013). Далі: 0.5.0 — етап 9 (+ налаштування проєкту,
-> ADR 0014), 0.6.0 — етап 10 (ADR 0012 скорочено + провайдери ADR 0014), етап 11 — App Service / Function App settings.
+> 0.3.1 — виявлення `appsettings*.json`; 0.4.0 — етап 8 (ADR 0013); 0.5.0 — етап 9 (`status --check`, `config project.*`).
+> Далі: 0.6.0 — етап 10 (мінімальний маніфест — ADR 0012, поправка 2; `local.settings.json`), 0.7.0 — UI (`azcfg ui`).
+> Етап 11 (провайдери, App Service / Function App settings — ADR 0014) — лише коли з'явиться користувач із цією потребою.
 > Де текст задачі етапів 1–6 розходиться з ADR 0008/0009 — правильний ADR. Аналіз і обґрунтування порядку —
 > `docs/cli-roadmap.md`.
 
@@ -285,22 +285,31 @@
   - Тести: увімкнений режим додає файл у `.gitignore` (без дублів), вимкнений — нічого не змінює.
   - Залежить від: —
 
-## Гілки для етапів 8–10 (CLI іде в `master` раніше за UI)
-`dev` містить незавершений UI (34 коміти поверх `master`), тож через `dev` CLI-реліз не випустити. Будь-який push у
-`master`, що змінює `src/**`, публікує NuGet — тому проміжні PR у `master` заборонені.
-1. `release/0.4.0` від `origin/master` (етап 9 — `release/0.5.0`, етап 10 — `release/0.6.0`, кожна від `master` після
-   попереднього релізу).
-2. Задача = гілка `feature/<id>-<slug>` від `release/<версія>` → PR у `release/<версія>`. `/feature` за замовчуванням
-   працює від `dev`: у брифі агента явно вказати базу `origin/release/<версія>` (як у брифі 0.3 `ui-mvp-plan.md`).
-3. Остання задача етапу (реліз) — `<Version>`, `CHANGELOG.md`, README → один PR `release/<версія>` → `master`.
-4. Одразу після злиття — `master` → `dev` (задача UI M1 у `docs/ui-mvp-plan.md`); конфлікти розв'язуються на боці `dev`.
-   Після 0.5.0 і 0.6.0 — так само (M2, M3).
-5. Документи етапу (ADR 0013, цей файл, `cli-roadmap.md`, `architecture.md`) потрапляють у `release/0.4.0` першим
-   комітом (R0), щоб `master` після релізу описував сам себе.
-6. UI не чекає на 0.5.0/0.6.0 — вони блокують лише потрапляння UI в `master`. Порядок на `dev`: M1 → U2–U4 паралельно
-   з етапом 9; U1 (стан середовищ FR-E6, налаштування проєкту) — після M2, щоб брати `HealthReport` і
-   `IProjectSettingsService` з Core, а не дублювати логіку в `AzCfg.Ui.Application`. Етап 10 іде паралельно з UI;
-   PR0 не змінює сигнатури `ISyncService`/портів (ADR 0014), тож UI на `dev` компілюється без змін.
+## Гілки
+**Етапи 8–9 (історія):** `release/<версія>` від `master`, задачі — PR у неї, потім один PR у `master`; UI жив на `dev`.
+Причина — будь-який push у `master` зі змінами `src/**` публікував NuGet.
+
+**З сесії 0 — одна гілка `master`:**
+1. H0 додав `dotnet nuget push --skip-duplicate`: push у `master` без зміни `<Version>` нічого не публікує. `AzCfg.Cli`
+   не посилається на `AzCfg.Ui`, тож незавершений UI не потрапляє в пакет, поки X1 не додасть `azcfg ui`.
+2. Задача = `feature/<id>-<slug>` від `origin/master` → PR у `master` (CI на PR — H0). `/feature` працює саме так.
+3. Реліз = окремий PR: `<Version>` + release notes у csproj, `CHANGELOG.md`, README. Публікує його злиття.
+4. `dev`, `release/*` і задачі-злиття M2/M3/R1 не потрібні; `dev` і `release/*` видаляються в сесії 0 після злиття.
+5. Паралельні агенти — у власних worktree; один оркестратор зливає їхні PR по черзі, після кожного — build + test.
+
+## Сесії оркестратора (з 2026-11-21)
+Одна сесія = один цілісний шматок (реліз або набір екранів UI), 2–4 агенти у worktree, у кінці — злиття і перевірка.
+Не дрібніше: оркестратор тримає контекст одного релізу, а не однієї задачі.
+
+| # | Сесія | Задачі | Агенти | Залежить від |
+|---|---|---|---|---|
+| 0 | Одна гілка + M1 | цей документ і ADR; PR `release/0.5.0` → `master` (реліз 0.5.0); `master` → `dev` + Application делегує в Core (UI M1, включно з колишнім M2: `HealthReport`, `IProjectSettingsService`); PR `dev` → `master` без зміни версії; видалити `dev`, `release/*`, старі worktree; CI лише на PR у `master` | 1–2 | — |
+| 1 | UI: основні екрани | U1 Workspace/Environments, U2 Browse, U3 Compare, U4 Sync — паралельно (`docs/ui-mvp-plan.md`) | 4 | 0 |
+| 2 | CLI 0.6.0 | PC1–PC4 ∥ LS1, потім PC5 (етап 10) | 2 → 1 | 0 (паралельно з 1) |
+| 3 | UI: доповнення + 0.7.0 | UX1 Problems, UX2 матриця + copy, UX3 `local.settings.json` + share, X1 `azcfg ui` ∥, потім Q1, Q2, R1 (`docs/ui-mvp-plan.md`) | 4 → 1 | 1, 2 |
+
+Сесії 1 і 2 не перетинаються за файлами (`src/AzCfg.Ui*` проти Core/Infrastructure/CLI); якщо сесії 2 треба змінити
+сигнатуру, яку вже використовує UI, — вона ж оновлює `AzCfg.Ui.Application` у тому самому PR.
 
 ## Етап 8. Щоденний workflow CLI (ADR 0013) — CLI 0.4.0, у `master` до UI
 
@@ -406,94 +415,78 @@
   `IProjectSettingsService` для налаштувань проєкту в U1).
   - Залежить від: H2, H4
 
-## Етап 10. Конфігурація проєкту (ADR 0012, скорочено) — CLI 0.6.0
+## Етап 10. Команда і Functions — CLI 0.6.0 (сесія 2)
 
-Після етапів 8–9. Гілка `release/0.6.0` від `master`. Скорочення (поправка ADR 0012): `validate` — частина
-`status --check`; профілі конвенцій (PC2) і `standardize` (PC8) відкладено. Маніфест, discovery і плани **ніколи не
-містять значень** (ні секретних, ні звичайних). GitHub Actions і автоматизація деплою — поза етапом (у моделі лише дані).
+Контракт — ADR 0012, поправка 2 (мінімальний маніфест, без `adopt`) і ADR 0014, поправка (провайдери — етап 11). Нових
+команд немає. Маніфест і перевірки **ніколи не містять значень** (ні секретних, ні звичайних). Два агенти паралельно:
+маніфест (PC1–PC4, послідовно) і `local.settings.json` (LS1); потім реліз PC5.
 
-- [x] **PC0. ADR 0012** — маніфест, профілі конвенцій, tier-и секретів, discovery, `adopt`, `standardize`, життєвий цикл, CI/CD-модель.
+- [x] **PC0. ADR 0012** (+ поправки 2026-11-20, 2026-11-21).
   - Залежить від: —
 
-- [ ] **PR0. Провайдери віддаленої конфігурації** (ADR 0014) — `IRemoteConfigProvider`, `RemoteKind`,
-  `RemoteCapabilities`, `RemoteLocation`, `AppConfigurationProvider(IConfigStore)`; `SyncService` працює через провайдери.
-  Без змін для користувача: усі наявні тести проходять без правок.
+- [ ] **PC1. Модель маніфесту** (`Core/Manifest`)
+  - `ProjectManifest(SchemaVersion, Service, ManifestTarget Values, ManifestTarget Secrets, Vaults?)`,
+    `ManifestTarget(Target, Project)`; назви цілей — як у `config project.*` (`user-secrets`, `appsettings-local`,
+    `local-settings`).
+  - `ManifestSerializer` (System.Text.Json; коментарі й trailing commas дозволені) + `ManifestValidator`: строга схема
+    (невідоме поле, зокрема `value`/`password`, → помилка з назвою поля), `SchemaVersion` > підтримуваної → помилка з
+    підказкою оновитися, `Project` — відносний шлях без виходу за корінь репо, vault — абсолютний https URI.
+  - Тести (TDD): round-trip, коментарі, кожне правило валідатора, канарковий `"value"` відхиляється.
   - Залежить від: —
 
-- [ ] **PC1. Модель маніфесту** (`Core/Manifest`, віддалені `ConfigSourceKind` — за ADR 0014)
-  - `ProjectManifest`, `ManifestEnvironment`, `ConfigSource`/`ConfigSourceKind`/`ConfigRole`, `SecretRef`, `SecretTier`,
-    `KeySpec`, `CiConfig`, `CiEnvironment`, `DeploymentTarget`; sealed immutable records.
-  - `ManifestSerializer` (System.Text.Json, коментарі й trailing commas дозволені) + `ManifestValidator`: строга
-    схема (невідомі поля, зокрема `value`/`password`, → помилка), `SchemaVersion`, відповідність tier ↔ тип джерела,
-    перехресні посилання (середовища, секрети, джерела), секрет не вказує на незігнорований файл.
-  - Тести (TDD): round-trip, відхилення поля-значення, невідома версія схеми, кожне правило валідатора, CI/Deployments
-    парсяться й валідуються без жодної автоматизації.
-  - Залежить від: PR0 (`RemoteKind` у схемі v1)
-
-- [ ] **PC2. Профілі конвенцій** (`Core/Profiles`, `Infrastructure/State`) — **відкладено** (поправка ADR 0012), не входить у 0.6.0
-  - `ConventionProfile` (Naming, Layout, Environments, Secrets, Providers), `BuiltInProfiles.Default` (`azcfg-default` =
-    поточні ADR 0004/0006/0008/0009), порт `IConventionProfileStore`, `JsonConventionProfileStore` (`profiles/<name>.json`
-    або шлях до файлу; атомарний запис), `UserProfile.ConventionProfile = "azcfg-default"` (старий `profile.json` читається),
-    `azcfg config set profile <name>`.
-  - Тести: round-trip, `azcfg-default` відповідає чинним конвенціям, відсутнє поле в старому `profile.json`.
+- [ ] **PC2. Сховище маніфесту** (`Infrastructure/Project`)
+  - Порт `IProjectManifestStore` (`FindAsync(path)` → `(ProjectManifest, string FilePath)?` — найближчий `azcfg.json`
+    від `path` угору до кореня git; `SaveAsync(filePath, manifest)`); `FileProjectManifestStore` (атомарний запис як
+    `JsonUserStateStore`, пошкоджений файл → зрозуміла помилка з шляхом). DI в `AddAzCfg()`.
+  - Тести: temp-репо, пошук із вкладеної теки, зупинка на корені git, round-trip.
   - Залежить від: PC1
 
-- [ ] **PC3. Сховище маніфесту** (`Infrastructure/Project`)
-  - Порт `IProjectManifestStore`; `FileProjectManifestStore` (`azcfg.json` у корені репо, атомарний запис, відсутній файл → `null`).
-  - Тести: temp-папка, round-trip, коментарі у файлі, пошкоджений файл → зрозуміла помилка.
-  - Залежить від: PC1
+- [ ] **PC3. Маніфест у прив'язці** (Core + CLI)
+  - `ProjectService.ResolveAsync`: немає binding + є маніфест → binding з маніфесту без майстра; binding з іншим сервісом →
+    правило `config set project.service` (скинути активне середовище і снапшоти). `ActiveEnvironment`, `Ignore`, снапшоти
+    лишаються в стані користувача.
+  - `ProjectSettingsService`: є маніфест → `project.service|values|secrets|vault.<env>` пишуть і маніфест, підказка
+    «shared via azcfg.json — commit it»; новий ключ `project.shared` (лише `true`: записати `azcfg.json` з binding;
+    читання → `true` + шлях / `false`).
+  - CLI: майстер першого `pull`/`use` пропонує «save as azcfg.json for the team» (за замовчуванням ні; `--yes`/`--json`
+    ніколи не пишуть); `config list` показує `project.shared`.
+  - Тести: Core на fakes (кожне правило); сценарій `/cli-scenario-test`: розробник A → `config set project.shared true`;
+    розробник B (порожній стан користувача) → `pull` без майстра, ті самі цілі.
+  - Залежить від: PC2
 
-- [ ] **PC4. Discovery: Core** (`Core/Discovery`, `ProjectConfigService.DiscoverAsync`)
-  - `DiscoveryReport`, `DiscoveredSource` (лише `KeyPaths`), `DiscoveredEnvironment`, `DiscoveryFinding`; порт
-    `IConfigSourceScanner`; об'єднання з `IProjectDetector`, `IResourceDiscovery`, `ListServicePrefixesAsync`;
-    зіставлення сервісу — спільна логіка з `ProjectService`.
-  - Тести на fakes: джерела з різних сканерів, finding `SecretLikeKeyInTrackedFile`, відсутність значень у серіалізованому JSON.
-  - Залежить від: PC1
+- [ ] **PC4. Перевірки в `status --check`**
+  - `HealthCheckKind.ManifestInvalid` (Error): нечитабельний файл, помилка схеми, непідтримувана версія.
+  - `HealthCheckKind.SecretLikeKeyInTrackedFile` (Warning): новий порт `ITrackedSettingsReader.ReadKeysAsync(repoPath)` →
+    `TrackedSettingKey(File, Key, bool HasValue)` для git-tracked `appsettings*.json` (Infrastructure: `git ls-files`,
+    значення лише в пам'яті для `HasValue`); Core відбирає ключі, назва яких містить
+    `password|secret|token|apikey|connectionstring` (без регістру) і `HasValue`.
+  - Тести: кожна перевірка; канарковий секрет відсутній у `HealthReport` JSON; поза git → перевірка пропускається.
+  - Залежить від: PC1 (ManifestInvalid), H1
 
-- [ ] **PC5. Discovery: Infrastructure** (`FileConfigSourceScanner`)
-  - `appsettings*.json`, `local.settings.json`, user-secrets (через `UserSecretsTarget`), `launchSettings.json`
-    (`environmentVariables`), `.env*`, `docker-compose*` (`environment:`); значення читаються лише в памʼяті для
-    переліку шляхів і одразу відкидаються; `IsGitTracked` через `git ls-files`.
-  - Не скануємо змінні середовища машини та `.github/workflows`.
-  - Тести: temp-репо з кількома файлами; у результаті жодного значення (перевірка на «канарковому» секреті).
-  - Залежить від: PC4
+- [ ] **LS1. `LocalSettingsTarget`** (через `/add-local-target`, ADR 0006)
+  - `local.settings.json` поруч із `.csproj` Azure Functions: читання/запис лише секції `Values` (`FlatDictionary`, ключі
+    `A:B` як є, без вкладення); інші секції (`IsEncrypted`, `Host`, `ConnectionStrings`) зберігаються як були; відсутній
+    файл → створити `{ "IsEncrypted": false, "Values": {} }`. Безпека — як `AppSettingsLocalTarget` (git-ignored і
+    не tracked).
+  - `ProjectService` пропонує ціль для проєктів з `IsAzureFunctions`; `config set project.values|secrets local-settings`
+    приймається.
+  - `//@global` (ADR 0009) у `Values` — лише якщо Azure Functions Core Tools приймає коментарі в `local.settings.json`
+    (перевірити вручну й записати в PR); інакше позначки не пишуться, scope — з remote/base, як до ADR 0009.
+  - Тести: round-trip, збереження інших секцій, safety у temp git-репо.
+  - Залежить від: —
 
-- [ ] **PC6. `azcfg adopt`** (через `/add-cli-command`)
-  - `ProjectConfigService.PlanAdoptAsync` (маніфест + binding + `Questions` для неоднозначностей) / `ApplyAdoptAsync`
-    (лише `azcfg.json` і стан користувача; файли проєкту не чіпає); ідемпотентність (merge із наявним маніфестом, показ diff).
-  - CLI: discovery → питання → превʼю → підтвердження; `--yes`, `--json` (AdoptPlan як є).
-  - Тести: Core на fakes; CLI-команда; сценарій `/cli-scenario-test` — незнайомий проєкт → `adopt` → `pull` працює.
-  - Залежить від: PC3, PC5, L3
-
-- [ ] **PC7. Валідація маніфесту в `status --check`** (без окремої команди `validate`)
-  - `DriftComparer` (static): бажане (маніфест; без профілю — його відкладено) vs фактичне (discovery) → `DriftReport`
-    (`Missing`/`Unexpected`/`Mismatch`); `ProjectConfigService.ValidateAsync`/`CompareAsync`; результати додаються в
-    `HealthReport` (етап 9) → `status --check`, exit code ≠ 0 при помилках.
-  - Тести: кожен `DriftKind`, проєкт без розбіжностей → порожній звіт.
-  - Залежить від: PC6, H2
-
-- [ ] **PC8. `azcfg standardize`** (через `/add-cli-command`) — **відкладено** (поправка ADR 0012), не входить у 0.6.0
-  - `StandardizePlanner` (static, pure, TDD): actual vs профіль → `MigrationPlan` (`UpdateManifest`, `CreateFile`,
-    `EnsureGitIgnored`, `CopyKeys`, `RenameKeys`, `SetEnvironmentMode`; кроки без значень, з `IsDestructive`).
-    Проєкт, що вже відповідає профілю → порожній план.
-  - Порт `IMigrationExecutor` + `FileMigrationExecutor` (через `ILocalTarget`; значення лише в памʼяті; копіювання з
-    перевіркою повторним читанням; без видалень; секрети лише в ігноровані цілі).
-  - CLI: `standardize [--profile <name|path>] [-S]`: превʼю завжди; без підтвердження застосувати неможливо; `--yes`
-    пропускає запит; `--json` друкує план без застосування; `-S` — вибір кроків (див. відкрите питання ADR 0012).
-  - Тести: планувальник (кожен крок), executor у temp-репо (секрет не потрапляє в tracked-файл і в plan/лог), CLI.
-  - Залежить від: PC2, PC3, PC7
-
-- [ ] **PC9. Випуск 0.6.0**
-  - README: `adopt`, маніфест, перевірки маніфесту в `status --check`; `<Version>` 0.6.0; `CHANGELOG.md`;
-    PR `release/0.6.0` → `master`, потім `master` → `dev` (UI M3).
-  - Залежить від: PR0, PC6, PC7
+- [ ] **PC5. Випуск 0.6.0**
+  - README (`azcfg.json`, `project.shared`, нові перевірки, `local.settings.json`), `CHANGELOG.md`, `<Version>` 0.6.0 +
+    release notes; PR у `master`.
+  - Залежить від: PC3, PC4, LS1
 
 ## Поза MVP
-Проєктна конфігурація (поза етапом 10): профілі конвенцій і `standardize` (PC2, PC8), `pull`/`push` через маніфест,
-віддалена частина стандартизації, дискавері `.github/workflows`, генерація GitHub Actions environments і автоматизація
-деплою. `promote --key/--changed`, `LocalSettingsTarget` (local.settings.json), git remote як сигнал для зіставлення
-сервісу, ранжування vault-ів з Resource Graph, створення Key Vault. (`diff` і `doctor` → етапи 8–9: `diff`,
-`status --check`.)
-(`LabelResolver` реалізовано в 0.2.0 — ADR 0008.)
-Етап 11 (ADR 0014): `AppServiceSettingsProvider` + порт `IAppSettingsStore`, `config set project.remote.<name>.<env>`,
-`--remote <name>`, `LocalSettingsTarget`.
+Без конкретного користувача з потребою не плануються:
+- Етап 11 (ADR 0014): провайдери (`IRemoteConfigProvider`, `RemoteKind`, …), `AppServiceSettingsProvider` + порт
+  `IAppSettingsStore`, `config set project.remote.<name>.<env>`, `--remote <name>`.
+- З ADR 0012 (поправка 2): `adopt`, discovery-сканери (`launchSettings`, `.env*`, `docker-compose*`, `.github/workflows`),
+  drift-звіт, джерела/tier-и секретів/`KeySpec` у маніфесті, профілі конвенцій і `standardize`, CI/CD-модель і
+  генерація GitHub Actions, `pull`/`push` за повним маніфестом.
+- `promote --key/--changed`, git remote як сигнал для зіставлення сервісу, ранжування vault-ів з Resource Graph,
+  створення Key Vault.
+(`LabelResolver` реалізовано в 0.2.0 — ADR 0008; `diff` і `status --check` — етапи 8–9.)
