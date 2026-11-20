@@ -27,18 +27,32 @@ Source of truth for the task: `docs/ui-mvp-plan.md` §10 block **M1**, `docs/mvp
    `Sync.CompareSide {Local, Environment(Env)}`; kept because §7.3 / `ProjectSession` / tests use the UI type. Ask the
    user whether to switch §7.3 to the Core type (touches `ComparisonView`, `ICompareService`, `ProjectSession`, tests).
 
-Test counts after step 4: Core 729, Cli 266, Infrastructure 198, Ui 403.
+5. `WorkspaceService.SetVaultAsync` → `IProjectSettingsService.SetAsync(repo, "project.vault.<env>", uri)` then reloads
+   the binding (gains Core validation: https vault root, canonical env name). Test now saves the binding first (Core
+   requires a bound project — the UI always has one).
+
+Test counts after step 5: Core 729, Cli 266, Infrastructure 198, Ui 403.
 
 ## Remaining (M1 scope (2), §7.3 signatures stay; a signature that must change → plan §0.6)
 - [x] `Configuration/CompareService` → adapter over `IConfigComparisonService` (see step 4; `CompareSide` question open).
-- [ ] FR-S7 counts (project header summary) → `ISyncService.StatusAsync` (`SyncSummary`). Find where the UI computes counts
-      (`grep -rn "Summary\|Count" src/AzCfg.Ui.Application/Sync src/AzCfg.Ui.Application/Configuration`).
-- [ ] `Environments/AzureStatusService.CheckEnvironmentAsync` (per-env probe) → Core `IHealthService` (H1/H2);
-      the account/token check (`CheckAccountAsync`, `JwtClaims`) may stay.
-- [ ] Project settings (service, values/secrets targets, vault per env) → `IProjectSettingsService`
-      (`ListAsync/GetAsync/SetAsync(repoPath, key, value)`, keys `project.*`, ADR 0014);
-      `WorkspaceService.BindAsync` keeps only what Core does not do (G5); `SetVaultAsync` likely →
-      `SetAsync(repo, "project.vault.<env>", uri)`.
+- [x] FR-S7 counts: Application computes none yet (header is U2) → nothing to delegate. **Add to U2 brief:** header
+      summary must come from `ISyncService.StatusAsync` (`SyncSummary`), not from UI code.
+- [ ] `Environments/AzureStatusService.CheckEnvironmentAsync` (per-env probe) → Core. **Needs a Core decision:** Core's
+      env check is private inside `HealthService.CheckAsync(repoPath)` (whole report, needs a profile) and returns
+      `EnvironmentCheck(Name, bool Reachable, string? Error)` — it loses Auth/Forbidden/Unreachable that the UI shows.
+      Recommended: additive Core API (TDD) `IHealthService.CheckEnvironmentAsync(ConfigEnvironment env, string? service, ct)`
+      → `EnvironmentCheck` extended with an access kind (e.g. `EnvironmentAccess { Ok, AuthRequired, Forbidden, Unreachable }`;
+      the CLI `--json` gains a field — mention in CHANGELOG), `HealthService.CheckAsync` reuses it; UI keeps cache, events,
+      `ConnectionState` mapping and `CheckAccountAsync`/`JwtClaims`. Classification must move from `AzureErrors` (UI) to
+      Core via exception-type-free rule → probably an Infrastructure port method or a classified exception. Ask the user.
+- [x] `SetVaultAsync` → `IProjectSettingsService` (step 5).
+- [ ] `WorkspaceService.BindAsync` re-bind: UI restores vaults + **ActiveEnvironment** + ignore after Core `BindAsync`
+      (which builds a fresh binding). **Rule divergence:** Core `project.service` change resets ActiveEnvironment and deletes
+      snapshots; the UI re-bind with a different service keeps ActiveEnvironment and snapshots. Fix: for an existing binding,
+      re-bind through `IProjectSettingsService.SetAsync` (`project.service`, `project.values`, `project.secrets` —
+      target names `user-secrets`/`appsettings-local`, Core resolves the csproj; check how a `LocalTargetBinding` from
+      the UI maps to a name + project) and keep `projects.BindAsync` only for the first bind. Add a UI test:
+      re-bind with a new service → ActiveEnvironment null, snapshots gone.
 - [ ] Final grep: no type/rule duplicated between `AzCfg.Ui.Application` and Core (access probe, binding edit).
 - [ ] `dotnet run --project src/AzCfg.Ui -- --demo` — screens unchanged (manual; if not possible → "not verified").
 - [ ] Tick M1 in `docs/ui-mvp-plan.md` §0.7 and §10; tick session 0 in `docs/mvp-plan.md` if it tracks it.

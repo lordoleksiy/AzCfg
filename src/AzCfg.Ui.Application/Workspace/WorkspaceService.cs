@@ -15,6 +15,7 @@ public sealed class WorkspaceService(
     IWorkspaceRegistry registry,
     BindingLocator locator,
     IProjectService projects,
+    IProjectSettingsService settings,
     IUserStateStore state,
     IConfigStore store,
     IEnvironmentResolver resolver,
@@ -77,19 +78,11 @@ public sealed class WorkspaceService(
         return restored;
     }
 
+    /// <summary>Through Core <c>project.vault.&lt;env&gt;</c> (ADR 0014): same validation and env-name rules as the CLI.</summary>
     public async Task<ProjectBinding> SetVaultAsync(ProjectBinding binding, string environment, Uri? vault, CancellationToken ct)
     {
-        var vaults = binding.VaultByEnvironment
-            .Where(v => !v.Key.Equals(environment, StringComparison.OrdinalIgnoreCase))
-            .ToDictionary(v => v.Key, v => v.Value);
-        if (vault is not null)
-        {
-            vaults[environment] = vault;
-        }
-
-        var updated = binding with { VaultByEnvironment = vaults };
-        await state.SaveBindingAsync(updated, ct);
-        return updated;
+        await settings.SetAsync(binding.RepoPath, ProjectSettingKeys.VaultPrefix + environment, vault?.OriginalString, ct);
+        return await state.LoadBindingAsync(binding.RepoPath, ct) ?? throw new InvalidOperationException("The project binding disappeared.");
     }
 
     public Task<ProjectBinding> AddIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) =>

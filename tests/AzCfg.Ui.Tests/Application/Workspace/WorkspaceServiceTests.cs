@@ -138,6 +138,7 @@ public sealed class WorkspaceServiceTests : IDisposable
     public async Task SetVaultAsync_SetsReplacesAndRemoves()
     {
         var binding = new ProjectBinding(_w.Root, "crm", _w.Target(_crm), _w.Target(_crm), new Dictionary<string, Uri>());
+        await _w.World.State.SaveBindingAsync(binding, default);
 
         var set = await Service.SetVaultAsync(binding, "dev", new Uri("https://a.vault.azure.net"), default);
         var replaced = await Service.SetVaultAsync(set, "DEV", new Uri("https://b.vault.azure.net"), default);
