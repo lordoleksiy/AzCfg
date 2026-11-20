@@ -212,7 +212,7 @@
                 @if (_editingKey == item.Key)
                 {
                     <input class="az-input az-browse-edit" aria-label="@($"Value of {item.Key}")" @ref="_editInput" value="@_editText"
-                           @oninput="e => _editText = e.Value as string ?? string.Empty"
+                           @oninput="OnEditInput"
                            @onkeydown="e => EditKeyDownAsync(e, item, view)" @onkeydown:stopPropagation="true"
                            @onblur="CancelEdit" @onclick:stopPropagation="true" />
                 }

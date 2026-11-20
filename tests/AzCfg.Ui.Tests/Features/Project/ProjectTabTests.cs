@@ -161,6 +161,46 @@ public sealed class ProjectTabTests : BrowseContext
     }
 
     [Fact]
+    public void InlineEdit_InsideTheTab_KeepsHeaderGridAndDraftBarRendered()
+    {
+        var session = Seed(Rows());
+        var cut = Open(session);
+        ClickRow(cut, "Db:Host");
+        Press(cut, "Db:Host", "Enter");
+        var input = cut.Find("input[aria-label=\"Value of Db:Host\"]");
+        input.Input("h2");
+        input.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".az-draftbar")));
+        Assert.NotEmpty(cut.FindAll(".az-project-header"));
+        Assert.NotEmpty(cut.FindAll("[role=treegrid] [data-path=\"Db:Host\"]"));
+        Assert.Contains("1 pending edits to dev", cut.Find(".az-draftbar").TextContent);
+        Assert.True(Tabs.Tabs.Single().IsDirty);
+    }
+
+    [Fact]
+    public void InlineEdit_FocusesTheInputWhenTheEditStarts()
+    {
+        var cut = Open(Seed(Rows()));
+        ClickRow(cut, "Db:Host");
+        Press(cut, "Db:Host", "Enter");
+        cut.WaitForAssertion(() => Assert.NotEmpty(JSInterop.Invocations["Blazor._internal.domWrapper.focus"]));
+    }
+
+    [Fact]
+    public void ProjectCss_FillsTheTabHostInsteadOfUsingAPercentageHeight()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "AzCfg.slnx")))
+        {
+            dir = dir.Parent;
+        }
+
+        var css = File.ReadAllText(Path.Combine(dir!.FullName, "src", "AzCfg.Ui", "Features", "Project", "ProjectTab.razor.css"));
+        Assert.Contains("position: absolute", css);
+        Assert.DoesNotContain("height: 100%", css);
+    }
+
+    [Fact]
     public void DraftBar_OnlyShowsEditsOfTheSelectedEnvironment()
     {
         var session = Seed(Rows());

@@ -427,11 +427,17 @@ public sealed partial class BrowseView : IDisposable
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_focusEdit)
+        if (_focusEdit && _editingKey is not null && _editInput.Id is not null)
         {
-            _focusEdit = false;
             await _editInput.FocusAsync();
         }
+    }
+
+    /// <summary>Keeps the inline input focused after every render until the user types (a later click on the row must not steal it).</summary>
+    private void OnEditInput(ChangeEventArgs e)
+    {
+        _focusEdit = false;
+        _editText = e.Value as string ?? string.Empty;
     }
 
     public void Dispose()
