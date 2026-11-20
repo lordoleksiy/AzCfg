@@ -74,6 +74,22 @@ azcfg config set env.dev.label Development   # fix a setting without re-running 
 Settings are per user (not stored in the repo): `mode`, `defaultLabel`, `gitignoreLocalFiles`,
 `env.<name>.endpoint`, `env.<name>.label`, `env.<name>.protected`.
 
+Project settings (the binding created by the first `pull`/`use`, also per user) are `project.*` keys, shown by
+`config list` inside a bound project:
+
+```bash
+azcfg config set project.service orders-api                  # rebind to another service (clears the active env)
+azcfg config set project.values appsettings-local            # <target>[:<project path>]
+azcfg config set project.secrets user-secrets:src/Api/Api.csproj
+azcfg config set project.vault.dev https://my-kv.vault.azure.net/
+azcfg config set project.vault.dev ""                        # unset
+```
+
+Targets: `user-secrets`, `appsettings-local`. Changing a target does not move data: run `azcfg pull --force` to fill
+the new one. A secrets target must be git-ignored. `project.active` and `project.ignore` are read-only (use `azcfg use`
+and `azcfg ignore`). `pull`/`use --service X` on a project bound to another service fails with the
+`config set project.service` command to run.
+
 ### 2. Get the config of an environment
 
 ```bash
@@ -148,6 +164,15 @@ azcfg diff --missing --all         # keys missing in some environments; exit cod
 ```
 
 Secret values are never shown: only their names and whether they are the same or different.
+
+```bash
+azcfg status --check               # configuration health; exit code 1 on errors (usable in CI)
+```
+
+`status --check` verifies the Azure sign-in, access to every environment, that the secrets target is git-ignored
+(and warns about the values target), Key Vault references that point to missing secrets, keys missing in some
+environments and a binding that no longer matches reality. Each finding comes with the command that fixes it.
+Secrets are checked by metadata only; their values are never read.
 
 ### 8. Protected environments
 
