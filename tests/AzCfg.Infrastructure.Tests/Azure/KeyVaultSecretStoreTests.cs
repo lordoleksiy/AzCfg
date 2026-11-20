@@ -46,6 +46,28 @@ public sealed class KeyVaultSecretStoreTests
         Assert.Equal(("db--pass", "s3cret"), Assert.Single(clients[vault].Sets));
     }
 
+    [Theory]
+    [InlineData("https://v1.vault.azure.net/secrets/db--pass", true)]
+    [InlineData("https://v1.vault.azure.net/secrets/db--pass/v1", true)]
+    [InlineData("https://v1.vault.azure.net/secrets/db--pass/old", false)]
+    [InlineData("https://v1.vault.azure.net/secrets/none", false)]
+    public async Task ExistsAsync_ListsVersionPropertiesOnly(string uri, bool expected)
+    {
+        var (store, clients) = Create();
+
+        Assert.Equal(expected, await store.ExistsAsync(new(uri), default));
+
+        Assert.Empty(clients.Values.Single().Gets);
+    }
+
+    [Fact]
+    public async Task ExistsAsync_Other_failures_propagate()
+    {
+        var (store, _) = Create();
+
+        await Assert.ThrowsAsync<RequestFailedException>(() => store.ExistsAsync(new("https://v1.vault.azure.net/secrets/forbidden"), default));
+    }
+
     private static (KeyVaultSecretStore Store, Dictionary<Uri, FakeSecretClient> Clients) Create()
     {
         Dictionary<Uri, FakeSecretClient> clients = [];
@@ -61,6 +83,22 @@ public sealed class KeyVaultSecretStoreTests
         {
             Gets.Add((name, version));
             return Task.FromResult(Response.FromValue(Secret(name, "v1", "value"), null!));
+        }
+
+        public override AsyncPageable<SecretProperties> GetPropertiesOfSecretVersionsAsync(string name, CancellationToken cancellationToken = default)
+        {
+            if (name == "forbidden")
+            {
+                throw new RequestFailedException(403, "denied");
+            }
+
+            if (name == "none")
+            {
+                throw new RequestFailedException(404, "not found");
+            }
+
+            var versions = new List<SecretProperties> { SecretModelFactory.SecretProperties(new($"{vault}secrets/{name}/v1"), vault, name, "v1") };
+            return AsyncPageable<SecretProperties>.FromPages([Page<SecretProperties>.FromValues(versions, null, null!)]);
         }
 
         public override Task<Response<KeyVaultSecret>> SetSecretAsync(string name, string value, CancellationToken cancellationToken = default)

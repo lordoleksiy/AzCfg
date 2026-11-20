@@ -3,6 +3,7 @@ using AzCfg.Cli;
 using AzCfg.Cli.Commands;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Environments;
+using AzCfg.Core.Health;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
 using AzCfg.Core.UseCases;
@@ -22,6 +23,17 @@ public sealed class StatusCommandTests
         public ProjectBinding? Existing { get; init; } = Binding("dev");
         public Func<ConfigEnvironment, SyncSummary> SummaryFor { get; init; } = e => new(e.Name, true, 0, 0, [], [], [], 0);
         public List<(ProjectBinding Binding, ConfigEnvironment Env)> Asked { get; } = [];
+        public HealthReport Report { get; init; } = new(new(true, "dev@contoso.com", null), [new("dev", true, null), new("prod", true, null)], []);
+        public List<string> Checked { get; } = [];
+    }
+
+    private sealed class StubHealth(Stubs s) : IHealthService
+    {
+        public Task<HealthReport> CheckAsync(string repoPath, CancellationToken ct)
+        {
+            s.Checked.Add(repoPath);
+            return Task.FromResult(s.Report);
+        }
     }
 
     private sealed class StubState(Stubs s) : IUserStateStore
@@ -76,6 +88,7 @@ public sealed class StatusCommandTests
             .AddSingleton<IUserStateStore>(new StubState(s))
             .AddSingleton<IProjectService>(new StubProjects(s))
             .AddSingleton<ISyncService>(new StubSync(s))
+            .AddSingleton<IHealthService>(new StubHealth(s))
             .AddSingleton<IEnvironmentResolver, SeparateStoresResolver>();
         var app = new CommandApp(new TypeRegistrar(services));
         app.Configure(c =>
@@ -186,5 +199,69 @@ public sealed class StatusCommandTests
         var summary = JsonDocument.Parse(output).RootElement.GetProperty("summary");
         Assert.False(summary.GetProperty("isActive").GetBoolean());
         Assert.Equal("prod", summary.GetProperty("environment").GetString());
+    }
+
+    private static readonly HealthReport Broken = new(
+        new(true, "dev@contoso.com", null),
+        [new("dev", true, null), new("prod", false, "UnauthorizedAccessException")],
+        [
+            new(HealthCheckKind.KeyMissingInEnvironments, HealthSeverity.Warning, "Key 'Feature:X' is missing in prod.", "prod", "Feature:X", "azcfg promote dev prod"),
+            new(HealthCheckKind.EnvironmentAccess, HealthSeverity.Error, "Environment 'prod' is not reachable (UnauthorizedAccessException).", "prod"),
+        ]);
+
+    [Fact]
+    public async Task Check_renders_sign_in_environments_and_findings_by_severity_and_exits_1_on_errors()
+    {
+        var s = new Stubs { Report = Broken };
+
+        var (exit, output) = await Run(s, "--check");
+
+        Assert.Equal(1, exit);
+        Assert.Contains("✓ Azure: signed in as dev@contoso.com", output);
+        Assert.Contains("✓ dev: reachable", output);
+        Assert.Contains("✗ prod: not reachable (UnauthorizedAccessException)", output);
+        Assert.True(output.IndexOf("Errors:", StringComparison.Ordinal) < output.IndexOf("Warnings:", StringComparison.Ordinal));
+        Assert.Contains("fix: azcfg promote dev prod", output);
+        Assert.Empty(s.Asked);
+    }
+
+    [Fact]
+    public async Task Check_with_only_warnings_or_nothing_exits_0()
+    {
+        var warnings = new Stubs { Report = Broken with { Findings = [Broken.Findings[0]] } };
+
+        Assert.Equal(0, (await Run(warnings, "--check")).Exit);
+
+        var (exit, output) = await Run(new Stubs(), "--check");
+        Assert.Equal(0, exit);
+        Assert.Contains("No problems found.", output);
+    }
+
+    [Fact]
+    public async Task Check_ignores_env_and_does_not_need_a_binding_in_the_command()
+    {
+        var s = new Stubs { Existing = null };
+
+        var (exit, _) = await Run(s, "--check", "--env", "nope", "--project", "/r");
+
+        Assert.Equal(0, exit);
+        Assert.Equal(Path.GetFullPath("/r"), Assert.Single(s.Checked));
+    }
+
+    [Fact]
+    public async Task Check_json_prints_the_report_as_is()
+    {
+        var (exit, output) = await Run(new Stubs { Report = Broken }, "--check", "--json");
+
+        Assert.Equal(1, exit);
+        var root = JsonDocument.Parse(output).RootElement;
+        Assert.True(root.GetProperty("account").GetProperty("signedIn").GetBoolean());
+        Assert.False(root.GetProperty("environments")[1].GetProperty("reachable").GetBoolean());
+        Assert.True(root.GetProperty("hasErrors").GetBoolean());
+        var finding = root.GetProperty("findings")[0];
+        Assert.Equal("keyMissingInEnvironments", finding.GetProperty("kind").GetString());
+        Assert.Equal("warning", finding.GetProperty("severity").GetString());
+        Assert.Equal("Feature:X", finding.GetProperty("key").GetString());
+        Assert.Equal("azcfg promote dev prod", finding.GetProperty("fix").GetString());
     }
 }

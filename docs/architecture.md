@@ -151,18 +151,20 @@ src/
     Sync/                 PushSource, StateValue, StateItem, ConfigState, DiffKind, DiffItem, ConfigDiff,
                           ThreeWayDiff, IgnoreRules, SyncPlan, Change, Conflict, PullResult, SyncWarning
     Security/             HmacSecretFingerprinter
+    Health/               HealthService (IHealthService), HealthReport, AzureAccountCheck, EnvironmentCheck,
+                          HealthFinding, HealthSeverity, HealthCheckKind (ADR 0013, поправка 0.5.0)
     Manifest/             ProjectManifest, ManifestEnvironment, ConfigSource, SecretRef, SecretTier, KeySpec,
                           CiConfig, DeploymentTarget, ManifestValidator (ADR 0012)
     Profiles/             ConventionProfile, BuiltInProfiles (azcfg-default)
     Discovery/            DiscoveryReport, DiscoveredSource, DiscoveryFinding
     Standardize/          AdoptPlan, MigrationPlan, MigrationStep, StandardizePlanner, DriftReport, DriftComparer
     Abstractions/         IConfigStore, ISecretStore, IResourceDiscovery, ILocalTarget, IProjectDetector,
-                          IEnvironmentResolver, IUserStateStore, ISecretFingerprinter,
+                          IEnvironmentResolver, IUserStateStore, ISecretFingerprinter, IAzureAccountProbe,
                           IProjectManifestStore, IConfigSourceScanner, IConventionProfileStore, IMigrationExecutor
     UseCases/             SetupService, ProjectService, SyncService, UserSettingsService, LocalTargetOption,
                           ProjectConfigService (discover/adopt/standardize/validate/compare)
   AzCfg.Infrastructure/
-    Azure/                AppConfigStore, KeyVaultSecretStore, ResourceGraphDiscovery
+    Azure/                AppConfigStore, KeyVaultSecretStore, ResourceGraphDiscovery, AzureAccountProbe
     Local/                JsonFileTarget, UserSecretsTarget, AppSettingsLocalTarget, CsprojDetector
                           (LocalSettingsTarget — пізніше)
     State/                JsonUserStateStore, JsonConventionProfileStore
@@ -239,6 +241,11 @@ public interface ISecretStore
 {
     Task<string> GetAsync(Uri secretUri, CancellationToken ct);
     Task<Uri> SetAsync(Uri vaultUri, string name, string value, CancellationToken ct);
+    Task<bool> ExistsAsync(Uri secretUri, CancellationToken ct);   // лише властивості секрету, ніколи значення; 404 → false
+}
+public interface IAzureAccountProbe
+{
+    Task<AzureAccountCheck> CheckAsync(CancellationToken ct);      // токен для management scope; ім'я акаунта з claims, токен не зберігається
 }
 public interface IResourceDiscovery
 {
@@ -318,6 +325,10 @@ MigrationPlan mig = await config.PlanStandardizeAsync(repoPath, profile, ct);
 await config.ApplyStandardizeAsync(repoPath, mig, selectedStepIds, ct); // лише локально, без видалень
 ValidationReport v = await config.ValidateAsync(repoPath, ct);
 DriftReport drift = await config.CompareAsync(repoPath, profile, ct);
+```
+```csharp
+// ADR 0013 (поправка 0.5.0): `status --check`; кожна невдала перевірка — finding, не виняток; лише ключі й імена, без значень
+HealthReport health = await healthService.CheckAsync(repoPath, ct);   // Account, Environments, Findings, HasErrors
 ```
 - Прогрес: `IProgress<SyncProgress>`; логування: `ILogger<T>`.
 - `SyncPlan` — record: CLI малює таблицю, `--json` серіалізує як є, UI показує diff.
