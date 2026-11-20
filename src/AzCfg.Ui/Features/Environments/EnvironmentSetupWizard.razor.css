@@ -1,0 +1,64 @@
+.az-env-wizard {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 560px;
+}
+
+.az-wiz-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 8px 0;
+}
+
+.az-wiz-choice {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.az-wiz-choice span {
+    display: flex;
+    flex-direction: column;
+}
+
+.az-wiz-sub {
+    font-size: 12px;
+    color: var(--colorNeutralForeground3);
+}
+
+.az-wiz-store {
+    display: flex;
+    gap: 8px;
+}
+
+.az-wiz-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.az-wiz-review {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.az-wiz-review li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+}
+
+.az-wiz-issue {
+    color: var(--az-diff-deleted);
+    font-size: 12px;
+}
+
+.az-wiz-footer {
+    display: flex;
+    justify-content: flex-start;
+}

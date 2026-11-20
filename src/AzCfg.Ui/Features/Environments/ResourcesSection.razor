@@ -1,0 +1,125 @@
+@implements IDisposable
+@inject WorkspaceState Workspace
+@inject TabsState Tabs
+@inject IWorkspaceService WorkspaceService
+@inject IOperationRunner Runner
+@inject IDialogService Dialogs
+@inject INotificationService Notifications
+@inject IJSRuntime JS
+
+<div class="az-resources">
+    @foreach (var env in Environments)
+    {
+        <div class="az-res-env" data-env="@env.Name">
+            <div class="az-res-row">
+                <span class="az-res-env-name">@env.Name</span>
+                <span class="az-mono az-res-host" title="@env.StoreEndpoint">@env.StoreEndpoint.Host</span>
+                <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="@($"Copy store endpoint of {env.Name}")"
+                              OnClick="() => CopyAsync(env.StoreEndpoint.ToString())">
+                    <FluentIcon Value="@(new Icons.Regular.Size16.Copy())" />
+                </FluentButton>
+            </div>
+            @if (Binding is { } binding)
+            {
+                <div class="az-res-row az-res-vault">
+                    <FluentIcon Value="@(new Icons.Regular.Size16.Key())" Title="Key Vault for new secrets" />
+                    @if (binding.VaultByEnvironment.TryGetValue(env.Name, out var vault))
+                    {
+                        <span class="az-mono az-res-host" title="@vault">@vault.Host</span>
+                        <button type="button" class="az-link" @onclick="() => ChooseAsync(env)">Change</button>
+                        <button type="button" class="az-link" @onclick="() => ClearAsync(env)">Clear</button>
+                    }
+                    else
+                    {
+                        <span class="az-res-muted">not set —</span>
+                        <button type="button" class="az-link" @onclick="() => ChooseAsync(env)">Choose…</button>
+                    }
+                </div>
+            }
+        </div>
+    }
+    @if (Environments.Count == 0)
+    {
+        <div class="az-res-muted az-res-pad">No environments yet</div>
+    }
+    @if (Binding is null && Environments.Count > 0)
+    {
+        <div class="az-res-muted az-res-pad">Select a bound project to set the Key Vault for new secrets.</div>
+    }
+    <div class="az-res-pad">
+        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="DiscoverAsync">Discover in Azure…</FluentButton>
+    </div>
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+
+    private IReadOnlyList<ConfigEnvironment> Environments => Workspace.Environments?.Environments ?? [];
+
+    private string? ProjectId => ActiveProject.IdOf(Tabs, Workspace);
+
+    private ProjectBinding? Binding => ProjectId is { } id ? Workspace.FindProject(id)?.Binding : null;
+
+    protected override void OnInitialized()
+    {
+        Workspace.Changed += OnChanged;
+        Tabs.Changed += OnChanged;
+    }
+
+    private async Task ChooseAsync(ConfigEnvironment env)
+    {
+        var result = await Dialogs.ShowDialogAsync<VaultChooserDialog>(o =>
+        {
+            o.Header.Title = $"Key Vault for new secrets in {env.Name}";
+            o.Width = "480px";
+        });
+        if (!result.Cancelled && result.GetValue<AzureResource>() is { } vault)
+        {
+            await SetVaultAsync(env, vault.Endpoint);
+        }
+    }
+
+    private Task ClearAsync(ConfigEnvironment env) => SetVaultAsync(env, null);
+
+    private async Task SetVaultAsync(ConfigEnvironment env, Uri? vault)
+    {
+        if (ProjectId is not { } id || Binding is not { } binding)
+        {
+            return;
+        }
+
+        var result = await Runner.RunAsync($"Set the Key Vault of {env.Name}", OperationKind.Write, ct => WorkspaceService.SetVaultAsync(binding, env.Name, vault, ct), CancellationToken.None);
+        switch (result)
+        {
+            case OperationResult<ProjectBinding>.Success success:
+                Workspace.UpdateBinding(id, success.Value);
+                break;
+            case OperationResult<ProjectBinding>.Failed failed:
+                await Notifications.ToastAsync($"Could not set the Key Vault: {failed.Message}", ToastIntent.Error);
+                break;
+        }
+    }
+
+    private Task DiscoverAsync() =>
+        Dialogs.ShowDialogAsync<DiscoverDialog>(o =>
+        {
+            o.Header.Title = "Discover in Azure";
+            o.Width = "560px";
+        });
+
+    private async Task CopyAsync(string text)
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+        await Notifications.ToastAsync("Copied", ToastIntent.Info);
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Workspace.Changed -= OnChanged;
+        Tabs.Changed -= OnChanged;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

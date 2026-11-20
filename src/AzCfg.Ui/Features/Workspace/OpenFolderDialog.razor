@@ -1,0 +1,205 @@
+@implements IDisposable
+@inject IDirectoryBrowser Browser
+@inject IWorkspaceRegistry Registry
+@inject IWorkspaceService Workspaces
+@inject IOperationRunner Runner
+
+<div class="az-open-folder">
+    <div class="az-of-path">
+        <input class="az-input az-mono" aria-label="Folder path" list="az-of-completions" placeholder="Type or paste a folder path" spellcheck="false" autocomplete="off"
+               value="@_path" @oninput="OnPathInput" @onkeydown="OnPathKeyDown" />
+        <datalist id="az-of-completions">
+            @foreach (var completion in _completions)
+            {
+                <option value="@completion"></option>
+            }
+        </datalist>
+        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="_scanning" OnClick="() => GoAsync(_path)">Go</FluentButton>
+    </div>
+
+    @if (_error is not null)
+    {
+        <ErrorBar Message="@_error" />
+    }
+
+    <ul class="az-of-list" aria-label="Folders">
+        @if (_listing?.Parent is { } parent)
+        {
+            <li><button type="button" class="az-of-item" @onclick="() => GoAsync(parent)"><FluentIcon Value="@(new Icons.Regular.Size16.Folder())" /><span>..</span></button></li>
+        }
+        @foreach (var item in _listing?.Items ?? [])
+        {
+            <li>
+                <button type="button" class="az-of-item" title="@item.FullPath" @onclick="() => GoAsync(item.FullPath)">
+                    <FluentIcon Value="@(new Icons.Regular.Size16.Folder())" />
+                    <span class="az-of-name">@item.Name</span>
+                    @if (item.HasDotNetProjects)
+                    {
+                        <span class="az-of-net" title="Contains .sln, .slnx or .csproj files">.NET</span>
+                    }
+                </button>
+            </li>
+        }
+        @if (_listing is { Items.Count: 0 })
+        {
+            <li class="az-of-empty">No subfolders</li>
+        }
+    </ul>
+
+    @if (_recent.Count > 0)
+    {
+        <h4 class="az-of-sub">Recent and pinned</h4>
+        <ul class="az-of-list az-of-recent" aria-label="Recent folders">
+            @foreach (var entry in _recent)
+            {
+                <li class="az-of-recent-row">
+                    <button type="button" class="az-of-item" title="@entry.RootPath" disabled="@_scanning" @onclick="() => OpenAsync(entry.RootPath)">
+                        <span class="az-of-name">@entry.DisplayName</span>
+                        <span class="az-of-path-hint">@entry.RootPath</span>
+                    </button>
+                    <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="@(entry.Pinned ? $"Unpin {entry.DisplayName}" : $"Pin {entry.DisplayName}")"
+                                  OnClick="() => PinAsync(entry)">
+                        <FluentIcon Value="@(new Icons.Regular.Size16.Pin())" />
+                    </FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="@($"Remove {entry.DisplayName} from the list")"
+                                  OnClick="() => RemoveAsync(entry)">
+                        <FluentIcon Value="@(new Icons.Regular.Size16.Dismiss())" />
+                    </FluentButton>
+                </li>
+            }
+        </ul>
+    }
+
+    @if (_scanning)
+    {
+        <div class="az-of-scan" role="status">Scanning @_scanPath…<FluentProgressBar /></div>
+    }
+
+    <div class="az-of-actions">
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" OnClick="CancelAsync">Cancel</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" Disabled="@(_scanning || string.IsNullOrWhiteSpace(_path))" OnClick="() => OpenAsync(_path)">Open</FluentButton>
+    </div>
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource? _scan;
+    private DirectoryListing? _listing;
+    private IReadOnlyList<WorkspaceEntry> _recent = [];
+    private IReadOnlyList<string> _completions = [];
+    private string _path = string.Empty;
+    private string? _scanPath;
+    private string? _error;
+    private bool _scanning;
+
+    [CascadingParameter] public IDialogInstance? Dialog { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadRecentAsync();
+        await ListAsync(null);
+    }
+
+    private async Task ReloadRecentAsync()
+    {
+        if (await Runner.RunAsync("Read recent folders", OperationKind.Read, Registry.ListAsync, _cts.Token) is OperationResult<IReadOnlyList<WorkspaceEntry>>.Success success)
+        {
+            _recent = success.Value;
+        }
+    }
+
+    private async Task ListAsync(string? path)
+    {
+        switch (await Runner.RunAsync("List folders", OperationKind.Read, ct => Browser.ListAsync(path, ct), _cts.Token))
+        {
+            case OperationResult<DirectoryListing>.Success success:
+                _listing = success.Value;
+                _path = success.Value.Path ?? string.Empty;
+                _error = null;
+                break;
+            case OperationResult<DirectoryListing>.Failed failed:
+                _error = failed.Message;
+                break;
+        }
+    }
+
+    private Task GoAsync(string? path) => ListAsync(string.IsNullOrWhiteSpace(path) ? null : path.Trim());
+
+    private void OnPathInput(ChangeEventArgs e)
+    {
+        _path = e.Value?.ToString() ?? string.Empty;
+        _completions = Browser.Complete(_path);
+    }
+
+    private async Task OnPathKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_path))
+        {
+            await OpenAsync(_path);
+        }
+    }
+
+    /// <summary>
+    /// Scans <paramref name="path"/> through the runner as a Read bound to this dialog: Cancel or closing the dialog cancels the scan.
+    /// A successful scan closes the dialog with the <see cref="WorkspaceTree"/>.
+    /// </summary>
+    private async Task OpenAsync(string path)
+    {
+        if (_scanning || string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        _scan = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        _scanning = true;
+        var root = path.Trim();
+        _scanPath = root;
+        _error = null;
+        var scan = _scan;
+        var result = await Runner.RunAsync($"Open {root}", OperationKind.Read, ct => Workspaces.OpenAsync(root, ct), scan.Token);
+        _scanning = false;
+        _scan = null;
+        scan.Dispose();
+        switch (result)
+        {
+            case OperationResult<WorkspaceTree>.Success success when Dialog is not null:
+                await Dialog.CloseAsync(success.Value);
+                break;
+            case OperationResult<WorkspaceTree>.Failed failed:
+                _error = failed.Message;
+                break;
+        }
+    }
+
+    private async Task PinAsync(WorkspaceEntry entry)
+    {
+        await Runner.RunAsync("Pin folder", OperationKind.Write, ct => Registry.SetPinnedAsync(entry.RootPath, !entry.Pinned, ct), _cts.Token);
+        await ReloadRecentAsync();
+    }
+
+    private async Task RemoveAsync(WorkspaceEntry entry)
+    {
+        await Runner.RunAsync("Remove folder from the list", OperationKind.Write, ct => Registry.RemoveAsync(entry.RootPath, ct), _cts.Token);
+        await ReloadRecentAsync();
+    }
+
+    private async Task CancelAsync()
+    {
+        if (_scan is { } scan)
+        {
+            await scan.CancelAsync();
+            return;
+        }
+
+        if (Dialog is not null)
+        {
+            await Dialog.CancelAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

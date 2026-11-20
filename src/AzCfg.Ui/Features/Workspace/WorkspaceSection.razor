@@ -1,0 +1,83 @@
+<div class="az-ws">
+    <div class="az-ws-header">
+        <span class="az-ws-root" title="@(Workspace.Tree?.RootPath ?? "No folder open")">@RootName</span>
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="Open folder"
+                      OnClick="() => Commands.ExecuteAsync(CommandIds.WorkspaceOpenFolder)">
+            <FluentIcon Value="@(new Icons.Regular.Size16.Folder())" />
+        </FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="Refresh" Disabled="@(Workspace.Tree is null)"
+                      OnClick="() => Commands.ExecuteAsync(CommandIds.WorkspaceRefresh)">
+            <FluentIcon Value="@(new Icons.Regular.Size16.ArrowClockwise())" />
+        </FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="Collapse all" Disabled="@(Workspace.Tree is null)"
+                      OnClick="CollapseAll">
+            <FluentIcon Value="@(new Icons.Regular.Size16.ChevronRight())" />
+        </FluentButton>
+    </div>
+
+    @if (Workspace.Tree is not { } tree)
+    {
+        <EmptyState Text="Open a folder to start" ActionText="Open…" OnAction="() => Commands.ExecuteAsync(CommandIds.WorkspaceOpenFolder)" />
+    }
+    else if (tree.Solutions.Count == 0 && tree.LooseProjects.Count == 0)
+    {
+        <EmptyState Text="No .NET projects in this folder" />
+    }
+    else
+    {
+        <FluentTreeView @key="_generation">
+            @foreach (var solution in tree.Solutions)
+            {
+                var id = $"sln:{solution.Solution.Path}";
+                <FluentTreeItem Text="@solution.Solution.Name" IconStart="@(new Icons.Regular.Size16.Cube())" title="@solution.Solution.Path"
+                                Expanded="IsOpen(id)" ExpandedChanged="e => SetOpen(id, e)">
+                    @foreach (var node in solution.Projects)
+                    {
+                        @ProjectItem(id, node)
+                    }
+                </FluentTreeItem>
+            }
+            @if (tree.LooseProjects.Count > 0)
+            {
+                <FluentTreeItem Text="Projects" IconStart="@(new Icons.Regular.Size16.Folder())" Expanded="IsOpen(LooseId)" ExpandedChanged="e => SetOpen(LooseId, e)">
+                    @foreach (var node in tree.LooseProjects)
+                    {
+                        @ProjectItem(LooseId, node)
+                    }
+                </FluentTreeItem>
+            }
+        </FluentTreeView>
+    }
+
+    @if (SelectedNode is { } selected)
+    {
+        <div class="az-ws-selected">
+            <span class="az-ws-selected-name" title="@selected.Project.Project.CsprojPath">@selected.Project.Project.Name</span>
+            @if (selected.Project.Project.IsLibrary)
+            {
+                <span class="az-ws-muted">Library or test project: nothing to bind</span>
+            }
+            else
+            {
+                <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Commands.ExecuteAsync(CommandIds.ProjectBind)">
+                    @(selected.Binding is null ? "Bind…" : "Binding settings…")
+                </FluentButton>
+            }
+
+            <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" OnClick="() => CopyPathAsync(selected)">Copy path</FluentButton>
+        </div>
+    }
+</div>
+
+@code {
+    private RenderFragment ProjectItem(string parent, ProjectNode node) =>
+        @<FluentTreeItem Text="@ProjectText(node)" IconStart="@(new Icons.Regular.Size16.Document())" title="@ProjectTip(node)"
+                         Class="@(node.Project.Project.IsLibrary ? "az-ws-dim" : null)"
+                         Expanded="IsOpen(Key(parent, node))" ExpandedChanged="e => SetOpen(Key(parent, node), e)"
+                         SelectedChanged="selected => OnProjectSelected(node, selected)">
+            @foreach (var file in node.Project.ConfigFiles)
+            {
+                <FluentTreeItem Text="@FileText(node, file)" IconStart="@FileIcon(file)" title="@FileTip(file)" Class="@(IsReadOnly(file) ? "az-ws-readonly" : null)" />
+            }
+        </FluentTreeItem>;
+}

@@ -1,0 +1,36 @@
+@implements IDisposable
+@inject IAzureStatusService Status
+@inject IOperationRunner Runner
+
+@if (Status.Account.State is ConnectionState.AuthRequired or ConnectionState.Forbidden or ConnectionState.Unreachable)
+{
+    <button type="button" class="az-account-retry" title="@(Status.Account.Message ?? "Check the Azure account again")" @onclick="RetryAsync">
+        <FluentIcon Value="@(new Icons.Regular.Size16.ArrowClockwise())" />
+        <span>@Text</span>
+    </button>
+}
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+
+    private string Text => Status.Account.State switch
+    {
+        ConnectionState.AuthRequired => "Sign-in required · Retry",
+        ConnectionState.Forbidden => "No access · Retry",
+        _ => "Azure unreachable · Retry",
+    };
+
+    protected override void OnInitialized() => Status.Changed += OnChanged;
+
+    private Task RetryAsync() =>
+        Runner.RunAsync("Check Azure account", OperationKind.Read, ct => Status.CheckAccountAsync(ct), _cts.Token);
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Status.Changed -= OnChanged;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}
