@@ -60,6 +60,21 @@ public sealed class KeyVaultSecretStoreTests
         Assert.Empty(clients.Values.Single().Gets);
     }
 
+    [Theory]
+    [InlineData("https://v1.vault.azure.net/secrets/off", false)]
+    [InlineData("https://v1.vault.azure.net/secrets/off/V1", false)]
+    [InlineData("https://v1.vault.azure.net/secrets/newestoff", false)]
+    [InlineData("https://v1.vault.azure.net/secrets/newestoff/v1", true)]
+    [InlineData("https://v1.vault.azure.net/secrets/newestoff/V2", false)]
+    [InlineData("https://v1.vault.azure.net/secrets/newestoffon", true)]
+    [InlineData("https://v1.vault.azure.net/secrets/db--pass/V1", true)]
+    public async Task ExistsAsync_DisabledVersionsDoNotCount(string uri, bool expected)
+    {
+        var (store, _) = Create();
+
+        Assert.Equal(expected, await store.ExistsAsync(new(uri), default));
+    }
+
     [Fact]
     public async Task ExistsAsync_Other_failures_propagate()
     {
@@ -97,7 +112,22 @@ public sealed class KeyVaultSecretStoreTests
                 throw new RequestFailedException(404, "not found");
             }
 
-            var versions = new List<SecretProperties> { SecretModelFactory.SecretProperties(new($"{vault}secrets/{name}/v1"), vault, name, "v1") };
+            var t0 = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            SecretProperties Version(string v, bool enabled, int day)
+            {
+                var props = SecretModelFactory.SecretProperties(new($"{vault}secrets/{name}/{v}"), vault, name, v, createdOn: t0.AddDays(day));
+                props.Enabled = enabled;
+                return props;
+            }
+
+            var versions = name switch
+            {
+                "off" => [Version("v1", false, 0)],
+                // The newest version is listed first in one case and last in the other, so list order must not matter.
+                "newestoff" => [Version("v2", false, 1), Version("v1", true, 0)],
+                "newestoffon" => [Version("v1", false, 0), Version("v2", true, 1)],
+                _ => new List<SecretProperties> { SecretModelFactory.SecretProperties(new($"{vault}secrets/{name}/v1"), vault, name, "v1") },
+            };
             return AsyncPageable<SecretProperties>.FromPages([Page<SecretProperties>.FromValues(versions, null, null!)]);
         }
 
