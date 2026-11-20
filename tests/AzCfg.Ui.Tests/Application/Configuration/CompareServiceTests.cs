@@ -127,7 +127,8 @@ public sealed class CompareServiceTests
         var view = await world.Compare.CompareAsync(world.Binding, Local, Dev, default);
 
         Assert.Equal(["Db:Port"], view.Rows.Select(r => r.Key));
-        Assert.Equal(2, view.IgnoredCount);
+        // Core counts ignored keys of the remote side only (local-only "Only:Local" is not counted).
+        Assert.Equal(1, view.IgnoredCount);
         Assert.DoesNotContain("Host", view.LeftJson);
         Assert.DoesNotContain("Only", view.LeftJson);
     }

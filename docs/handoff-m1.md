@@ -19,11 +19,18 @@ Source of truth for the task: `docs/ui-mvp-plan.md` §10 block **M1**, `docs/mvp
 3. `f90e700` — `SyncWorkflowService.UnmanagedLocalKeysAsync` → `ISyncService.UnmanagedLocalKeysAsync`; ctor no longer
    takes `IEnumerable<ILocalTarget>`.
 
-Test counts after step 3: Core 729, Cli 266, Infrastructure 198, Ui 403.
+4. CompareService → adapter over Core `IConfigComparisonService` (Same/Different + ignored count from Core; UI only adds
+   scope/label/secret name and JSON). `ISecretFingerprinter`/`SecretPolicy` no longer used there.
+   **Deviation:** ignored count now follows Core = remote-side ignored keys only (test `IgnoredKeys_ExcludedAndCounted`
+   expects 1, was 2); Remote↔Remote now honours ignore rules (Core does). Cost: remote config is read twice (Core + adapter).
+   **Open (contract, plan §0.6):** UI `Configuration.CompareSide {Local, Remote(Environment)}` duplicates Core
+   `Sync.CompareSide {Local, Environment(Env)}`; kept because §7.3 / `ProjectSession` / tests use the UI type. Ask the
+   user whether to switch §7.3 to the Core type (touches `ComparisonView`, `ICompareService`, `ProjectSession`, tests).
+
+Test counts after step 4: Core 729, Cli 266, Infrastructure 198, Ui 403.
 
 ## Remaining (M1 scope (2), §7.3 signatures stay; a signature that must change → plan §0.6)
-- [ ] `Configuration/CompareService` (116 lines) → row/JSON adapter over Core `IConfigComparisonService.CompareAsync`
-      (CW4; Core already has `CompareSide`?) — check for duplicated `CompareSide` type between UI and Core.
+- [x] `Configuration/CompareService` → adapter over `IConfigComparisonService` (see step 4; `CompareSide` question open).
 - [ ] FR-S7 counts (project header summary) → `ISyncService.StatusAsync` (`SyncSummary`). Find where the UI computes counts
       (`grep -rn "Summary\|Count" src/AzCfg.Ui.Application/Sync src/AzCfg.Ui.Application/Configuration`).
 - [ ] `Environments/AzureStatusService.CheckEnvironmentAsync` (per-env probe) → Core `IHealthService` (H1/H2);

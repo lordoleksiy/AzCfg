@@ -1,96 +1,59 @@
-using AzCfg.Core.Abstractions;
 using AzCfg.Core.Mapping;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
 using AzCfg.Core.UseCases;
-using AzCfg.Ui.Application.Security;
+using CoreSide = AzCfg.Core.Sync.CompareSide;
 
 namespace AzCfg.Ui.Application.Configuration;
 
 /// <summary>
-/// Compare backend (FR-C1…C4). Remote↔Remote matches Key Vault secrets by name; Local↔Remote compares a local value with a
-/// remote secret by fingerprint, so no secret value is ever read into a view or JSON.
+/// Compare backend (FR-C1…C4): a row/JSON adapter over Core <see cref="IConfigComparisonService"/>, which decides
+/// Same/Different (secrets by name between environments, by fingerprint against local files) and the ignored count.
+/// This adapter only adds what the view shows on top: scope, label and secret name of each cell, and the JSON texts.
+/// No secret value is ever read into a view or JSON.
 /// </summary>
-internal sealed class CompareService(ISyncService sync, LocalTargetAccess local, ISecretFingerprinter fingerprinter, TimeProvider time) : ICompareService
+internal sealed class CompareService(IConfigComparisonService comparison, ISyncService sync, LocalTargetAccess local, TimeProvider time) : ICompareService
 {
-    public async Task<ComparisonView> CompareAsync(ProjectBinding binding, CompareSide left, CompareSide right, CancellationToken ct) => (left, right) switch
+    public async Task<ComparisonView> CompareAsync(ProjectBinding binding, CompareSide left, CompareSide right, CancellationToken ct)
     {
-        (CompareSide.Remote l, CompareSide.Remote r) => await RemoteRemoteAsync(binding, left, right, l, r, ct),
-        (CompareSide.Local, CompareSide.Remote r) => await LocalRemoteAsync(binding, left, right, r.Environment, localIsLeft: true, ct),
-        (CompareSide.Remote l, CompareSide.Local) => await LocalRemoteAsync(binding, left, right, l.Environment, localIsLeft: false, ct),
-        _ => throw new ArgumentException("Comparing local with local is not supported."),
-    };
-
-    private async Task<ComparisonView> RemoteRemoteAsync(ProjectBinding binding, CompareSide left, CompareSide right, CompareSide.Remote l, CompareSide.Remote r, CancellationToken ct)
-    {
-        var leftConfig = await sync.ReadRemoteConfigAsync(binding, l.Environment, ct);
-        var rightConfig = await sync.ReadRemoteConfigAsync(binding, r.Environment, ct);
-        var rows = EnvironmentComparer.Compare(leftConfig.Entries, rightConfig.Entries)
-            .Select(i => new CompareRow(i.Key, Result(i.Kind), i.Left is null ? null : Cell(i.Left), i.Right is null ? null : Cell(i.Right)))
+        var result = await comparison.CompareAsync(binding, ToCore(left), ToCore(right), ct);
+        var leftSide = await ReadSideAsync(binding, left, ct);
+        var rightSide = await ReadSideAsync(binding, right, ct);
+        var rows = result.Items
+            .Select(i => new CompareRow(i.Key, Result(i.Kind), Cell(i.Key, i.Left, leftSide, rightSide), Cell(i.Key, i.Right, rightSide, leftSide)))
             .ToList();
-        return new(binding, left, right, rows, 0, ConfigJson.Remote(leftConfig.Entries), ConfigJson.Remote(rightConfig.Entries), time.GetUtcNow());
+        return new(binding, left, right, rows, result.IgnoredCount, leftSide.Json(rows, isLeft: true), rightSide.Json(rows, isLeft: false), time.GetUtcNow());
     }
 
-    private async Task<ComparisonView> LocalRemoteAsync(ProjectBinding binding, CompareSide left, CompareSide right, ConfigEnvironment env, bool localIsLeft, CancellationToken ct)
+    private async Task<Side> ReadSideAsync(ProjectBinding binding, CompareSide side, CancellationToken ct) => side switch
     {
-        var diff = (await sync.DiffAsync(binding, env, ct)).Items.ToDictionary(i => i.Key, StringComparer.Ordinal);
-        var remote = (await sync.ReadRemoteConfigAsync(binding, env, ct)).Entries.ToDictionary(e => e.Key, StringComparer.Ordinal);
-        var locals = LocalTargetAccess.ByKey(await local.ReadAllAsync(binding, ct));
-        var rows = new List<CompareRow>();
-        List<(LocalValue Value, bool Masked)> localJson = [];
-        List<ConfigEntry> remoteJson = [];
-        foreach (var (key, item) in diff.OrderBy(d => d.Key, StringComparer.Ordinal))
+        CompareSide.Remote r => new Side(null, (await sync.ReadRemoteConfigAsync(binding, r.Environment, ct)).Entries
+            .GroupBy(e => e.Key, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal)),
+        _ => new Side(LocalTargetAccess.ByKey(await local.ReadAllAsync(binding, ct)), null),
+    };
+
+    private static CompareCell? Cell(string key, ComparisonValue? value, Side own, Side other)
+    {
+        if (value is null)
         {
-            var entry = remote.GetValueOrDefault(key);
-            var value = locals.GetValueOrDefault(key);
-            if (entry is null && value is null)
-            {
-                continue;
-            }
-
-            var secret = SecretPolicy.IsSecret(item, entry, value?.Source, binding);
-            var localCell = value is null ? null : new CompareCell(secret ? null : value.Value.Value, secret, entry is null ? null : SecretName(entry), value.Value.Scope, null);
-            var remoteCell = entry is null ? null : Cell(entry);
-            if (value is not null)
-            {
-                localJson.Add((value.Value, secret));
-            }
-
-            if (entry is not null)
-            {
-                remoteJson.Add(entry);
-            }
-
-            var result = (value, entry) switch
-            {
-                (null, _) => CompareResult.OnlyRight,
-                (_, null) => CompareResult.OnlyLeft,
-                _ => AreSame(item, value.Value.Value) ? CompareResult.Same : CompareResult.Different,
-            };
-            rows.Add(localIsLeft
-                ? new(key, result, localCell, remoteCell)
-                : new(key, Swap(result), remoteCell, localCell));
+            return null;
         }
 
-        var ignored = locals.Keys.Concat(remote.Keys).Distinct(StringComparer.Ordinal).Count(k => !diff.ContainsKey(k));
-        var (localText, remoteText) = (ConfigJson.Local(localJson), ConfigJson.Remote(remoteJson));
-        return localIsLeft
-            ? new(binding, left, right, rows, ignored, localText, remoteText, time.GetUtcNow())
-            : new(binding, left, right, rows, ignored, remoteText, localText, time.GetUtcNow());
+        if (own.Remote?.GetValueOrDefault(key) is { } entry)
+        {
+            return new(value.IsSecret ? null : value.Plain, value.IsSecret, SecretName(entry), entry.Scope, entry.Label);
+        }
+
+        // Local cell: the secret name comes from the remote entry of the other side (if any).
+        var local = own.Local?.GetValueOrDefault(key);
+        var remote = other.Remote?.GetValueOrDefault(key);
+        return new(value.IsSecret ? null : value.Plain, value.IsSecret, remote is null ? null : SecretName(remote), local?.Value.Scope ?? ConfigScope.Service, null);
     }
 
-    private bool AreSame(DiffItem item, string localValue) => item.Remote?.Value switch
+    private static CoreSide ToCore(CompareSide side) => side switch
     {
-        StateValue.Secret secret => fingerprinter.Fingerprint(new SecretString(localValue)) == secret.Fingerprint,
-        StateValue.Plain plain => string.Equals(plain.Value, localValue, StringComparison.Ordinal),
-        _ => false,
-    };
-
-    private static CompareResult Swap(CompareResult result) => result switch
-    {
-        CompareResult.OnlyLeft => CompareResult.OnlyRight,
-        CompareResult.OnlyRight => CompareResult.OnlyLeft,
-        _ => result,
+        CompareSide.Remote r => new CoreSide.Environment(r.Environment),
+        _ => new CoreSide.Local(),
     };
 
     private static CompareResult Result(ComparisonKind kind) => kind switch
@@ -108,9 +71,16 @@ internal sealed class CompareService(ISyncService sync, LocalTargetAccess local,
         _ => null,
     };
 
-    private static CompareCell Cell(ConfigEntry entry) => entry.Value switch
+    /// <summary>What one side holds: local values or remote entries, by key.</summary>
+    private sealed record Side(Dictionary<string, SourcedLocalValue>? Local, Dictionary<string, ConfigEntry>? Remote)
     {
-        ConfigValue.Plain p => new(p.Value, false, null, entry.Scope, entry.Label),
-        _ => new(null, true, SecretName(entry), entry.Scope, entry.Label),
-    };
+        /// <summary>JSON of the keys present on this side in <paramref name="rows"/>; local secrets masked.</summary>
+        public string Json(IReadOnlyList<CompareRow> rows, bool isLeft)
+        {
+            var cells = rows.Select(r => (r.Key, Cell: isLeft ? r.Left : r.Right)).Where(c => c.Cell is not null).ToList();
+            return Remote is not null
+                ? ConfigJson.Remote(cells.Select(c => Remote[c.Key]))
+                : ConfigJson.Local(cells.Where(c => Local!.ContainsKey(c.Key)).Select(c => (Local![c.Key].Value, c.Cell!.IsSecret)));
+        }
+    }
 }
