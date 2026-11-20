@@ -12,8 +12,7 @@ namespace AzCfg.Ui.Application.Sync;
 public sealed class SyncWorkflowService(
     ISyncService sync,
     IDraftService drafts,
-    IResourceDiscovery discovery,
-    IEnumerable<ILocalTarget> targets) : ISyncWorkflowService
+    IResourceDiscovery discovery) : ISyncWorkflowService
 {
     public async Task<PushPreview> PreviewPushAsync(ProjectBinding binding, ConfigEnvironment env, bool includeDeletes, CancellationToken ct)
     {
@@ -54,21 +53,8 @@ public sealed class SyncWorkflowService(
         return PlanRows.Pull(binding, env, await sync.DiffAsync(binding, env, ct));
     }
 
-    public async Task<IReadOnlyList<string>> UnmanagedLocalKeysAsync(ProjectBinding binding, CancellationToken ct)
-    {
-        if (binding.ActiveEnvironment is not null)
-        {
-            return [];
-        }
-
-        var keys = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var target in new[] { binding.ValuesTarget, binding.SecretsTarget }.Distinct())
-        {
-            keys.UnionWith((await targets.First(t => t.Kind == target.Kind).ReadAsync(target, ct)).Select(v => v.Key));
-        }
-
-        return [.. keys.Order(StringComparer.Ordinal)];
-    }
+    public Task<IReadOnlyList<string>> UnmanagedLocalKeysAsync(ProjectBinding binding, CancellationToken ct) =>
+        sync.UnmanagedLocalKeysAsync(binding, ct);
 
     public Task<PullResult> PullAsync(ProjectBinding binding, ConfigEnvironment env, bool force, CancellationToken ct) =>
         sync.PullAsync(binding, env, null, force, ct);
