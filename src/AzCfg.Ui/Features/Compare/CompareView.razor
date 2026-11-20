@@ -1,0 +1,106 @@
+@using AzCfg.Core.Sync
+@using AzCfg.Ui.Application.Configuration
+@using AzCfg.Ui.Components.Editors
+@using AzCfg.Ui.Components.KeyTree
+@implements IDisposable
+
+<div class="az-compare">
+    <div class="az-compare-toolbar" role="toolbar" aria-label="Compare">
+        @if (Sides is { } sides)
+        {
+            <select class="az-input az-compare-side" aria-label="Left side" @onchange="SetLeft">@Options(sides.Left)</select>
+            <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small" Title="Swap sides" OnClick="Swap">⇄</FluentButton>
+            <select class="az-input az-compare-side" aria-label="Right side" @onchange="SetRight">@Options(sides.Right)</select>
+        }
+        <FluentButton Appearance="@(_differencesOnly ? ButtonAppearance.Primary : ButtonAppearance.Outline)" Size="ButtonSize.Small"
+                      aria-pressed="@(_differencesOnly ? "true" : "false")" OnClick="ToggleDifferences">Differences only</FluentButton>
+        <input class="az-input az-compare-search" type="search" placeholder="Filter keys…" aria-label="Filter keys"
+               value="@Session.Filter.Text" @oninput="Search" @onkeydown="ClearOnEscape" />
+        @if (Session.Comparison is { } counted)
+        {
+            <span class="az-compare-counts">
+                @Counts(counted)
+                @if (counted.IgnoredCount > 0)
+                {
+                    <span class="az-compare-ignored" title="Ignored keys are not compared"> · @counted.IgnoredCount ignored</span>
+                }
+            </span>
+        }
+        <span class="az-compare-viewswitch" role="group" aria-label="View">
+            <FluentButton Appearance="@(Session.JsonView ? ButtonAppearance.Subtle : ButtonAppearance.Primary)" Size="ButtonSize.Small"
+                          OnClick="() => Session.SetJsonView(false)">Tree</FluentButton>
+            <FluentButton Appearance="@(Session.JsonView ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" Size="ButtonSize.Small"
+                          OnClick="() => Session.SetJsonView(true)">JSON diff</FluentButton>
+        </span>
+    </div>
+    @if (_loading is { } loading)
+    {
+        <div class="az-compare-progress" role="status">
+            <FluentSpinner Size="SpinnerSize.Tiny" />
+            <span>@(loading.Left is CompareSide.Local || loading.Right is CompareSide.Local ? "Reading secrets…" : "Comparing…")</span>
+        </div>
+    }
+    @if (_error is { } error)
+    {
+        <ErrorBar Message="@($"Compare failed: {error.Message}")" Details="@($"{error.Kind}: {error.Message}")" OnRetry="RetryAsync" />
+    }
+    <div class="az-compare-body">
+        @if (Binding is null)
+        {
+            <EmptyState Text="Bind this project to a service" />
+        }
+        else if (Sides is null)
+        {
+            <EmptyState Text="Set up environments" />
+        }
+        else if (Sides is { Left: CompareSide.Local, Right: CompareSide.Local })
+        {
+            <EmptyState Text="Choose an environment on at least one side" />
+        }
+        else if (Session.Comparison is { } view)
+        {
+            <div class="az-compare-main">
+                @if (Session.JsonView)
+                {
+                    <DiffEditor Original="@view.LeftJson" Modified="@view.RightJson" />
+                }
+                else if (Model(view) is { TotalCount: > 0 } model)
+                {
+                    <KeyTreeGrid TRow="CompareRow" Model="model" Columns="Columns(view)" AriaLabel="Compared keys"
+                                 SelectedPath="@Session.SelectedKey" SelectedPathChanged="Session.Select" HighlightText="@Session.Filter.Text" />
+                }
+                else
+                {
+                    <EmptyState Text="@(string.IsNullOrEmpty(Session.Filter.Text) ? "No differences" : $"No keys match ‘{Session.Filter.Text}’")" />
+                }
+            </div>
+            <CompareInspector View="view" Row="SelectedRow(view)" OnOpenInBrowse="OpenInBrowse" />
+        }
+    </div>
+</div>
+
+@code {
+    private RenderFragment Options(CompareSide side) =>
+        @<text>
+            <option value="" selected="@(side is CompareSide.Local)">Local</option>
+            @foreach (var env in Environments)
+            {
+                <option value="@env.Name" selected="@(side is CompareSide.Environment e && e.Env.Name == env.Name)">@env.Name</option>
+            }
+        </text>;
+
+    private static IReadOnlyList<KeyTreeColumn<CompareRow>> Columns(ComparisonView view) =>
+    [
+        new(CompareSides.Name(view.Left), "minmax(160px, 1fr)", row => @<CompareCellValue Cell="row.Item?.Left" />),
+        new(CompareSides.Name(view.Right), "minmax(160px, 1fr)", row => @<CompareCellValue Cell="row.Item?.Right" />),
+        new("Result", "64px", row => Result(row.Item, view)),
+    ];
+
+    private static RenderFragment Result(CompareRow? row, ComparisonView view) =>
+        @<text>
+            @if (row is not null)
+            {
+                <span class="az-compare-result @ResultClass(row.Result)" title="@CompareSides.Describe(row, view.Left, view.Right)">@Glyph(row.Result)</span>
+            }
+        </text>;
+}
