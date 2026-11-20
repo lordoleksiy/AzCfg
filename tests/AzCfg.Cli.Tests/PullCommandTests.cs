@@ -209,7 +209,7 @@ public sealed class PullCommandTests
     {
         var s = Bound();
 
-        await Run(s, "--service", "Orders");
+        await Run(s, "--service", "orders");
 
         Assert.Null(s.Bound);
         Assert.Equal("orders", s.Pulled!.Value.Binding.Service);

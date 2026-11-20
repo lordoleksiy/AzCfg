@@ -22,7 +22,7 @@ public static class ProjectSettingKeys
     {
         if (key.Equals(Service, StringComparison.OrdinalIgnoreCase))
         {
-            return "The active environment was cleared. Run 'azcfg use <ENV>' to pull the new service.";
+            return "The active environment was cleared. Run 'azcfg use <ENV>' (or 'azcfg pull --force') to pull the new service before 'azcfg push': until then the local files still hold the previous service's keys.";
         }
 
         return key.Equals(Values, StringComparison.OrdinalIgnoreCase) || key.Equals(Secrets, StringComparison.OrdinalIgnoreCase)

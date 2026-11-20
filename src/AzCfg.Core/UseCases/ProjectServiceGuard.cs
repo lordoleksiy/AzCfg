@@ -6,12 +6,12 @@ namespace AzCfg.Core.UseCases;
 public static class ProjectServiceGuard
 {
     /// <summary>
-    /// A <paramref name="requested"/> service equal to the binding's (ignoring case) or none is fine; another service throws
+    /// A <paramref name="requested"/> service equal to the binding's (ordinal: App Configuration prefixes are case-sensitive) or none is fine; another service throws
     /// <see cref="InvalidOperationException"/> naming the current service and <c>azcfg config set project.service</c>.
     /// </summary>
     public static void EnsureSameService(ProjectBinding existing, string? requested)
     {
-        if (requested is null || requested.Equals(existing.Service, StringComparison.OrdinalIgnoreCase))
+        if (requested is null || requested.Equals(existing.Service, StringComparison.Ordinal))
         {
             return;
         }
