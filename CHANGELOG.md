@@ -12,7 +12,11 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
   instead of the exception type name.
 
 ### Planned
-- 0.6.0 (ADR 0012, amended): project manifest `azcfg.json`, discovery, `azcfg adopt`.
+- 0.6.0 (ADR 0012, amendment 2): minimal project manifest `azcfg.json`, `project.shared`, manifest and secret-like-key
+  checks in `status --check`, `local.settings.json` target.
+- 0.7.0: UI (`azcfg ui`).
+- 0.8.0 (ADR 0014): App Service / Function App settings as remotes (`--remote`, `env@remote`, `promote --key`).
+- 0.9.0 (ADR 0015): manifest v2 — team environments, key layout, custom JSON target file.
 
 ## [0.5.0-preview.1]
 Prerelease: install with `--prerelease` (or `--version 0.5.0-preview.1`). Not yet verified against real Azure.
