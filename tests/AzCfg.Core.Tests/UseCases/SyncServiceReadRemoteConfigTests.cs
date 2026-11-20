@@ -40,6 +40,8 @@ public sealed class SyncServiceReadRemoteConfigTests
         }
 
         public Task<Uri> SetAsync(Uri vaultUri, string name, string value, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<bool> ExistsAsync(Uri secretUri, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private static (SyncService Service, CountingSecretStore Secrets) Create()
