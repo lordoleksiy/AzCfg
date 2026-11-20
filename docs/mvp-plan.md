@@ -303,7 +303,7 @@
 
 | # | Сесія | Задачі | Агенти | Залежить від |
 |---|---|---|---|---|
-| 0 | Одна гілка + M1 | цей документ і ADR; PR `release/0.5.0` → `master` (реліз 0.5.0); `master` → `dev` + Application делегує в Core (UI M1, включно з колишнім M2: `HealthReport`, `IProjectSettingsService`); PR `dev` → `master` без зміни версії; видалити `dev`, `release/*`, старі worktree; CI лише на PR у `master` | 1–2 | — |
+| 0 ✅ | Одна гілка + M1 (виконано 2026-11-20; лишилось: злиття PR `dev` → `master` і прибирання гілок — `docs/ui-mvp-plan.md` §0.8) | цей документ і ADR; PR `release/0.5.0` → `master` (реліз 0.5.0); `master` → `dev` + Application делегує в Core (UI M1, включно з колишнім M2: `HealthReport`, `IProjectSettingsService`); PR `dev` → `master` без зміни версії; видалити `dev`, `release/*`, старі worktree; CI лише на PR у `master` | 1–2 | — |
 | 1 | UI: основні екрани | U1 Workspace/Environments, U2 Browse, U3 Compare, U4 Sync — паралельно (`docs/ui-mvp-plan.md`) | 4 | 0 |
 | 2 | CLI 0.6.0 | PC1–PC4 ∥ LS1, потім PC5 (етап 10) | 2 → 1 | 0 (паралельно з 1) |
 | 3 | UI: доповнення + 0.7.0 | UX1 Problems, UX2 матриця + copy, UX3 `local.settings.json` + share, X1 `azcfg ui` ∥, потім Q1, Q2, R1 (`docs/ui-mvp-plan.md`) | 4 → 1 | 1, 2 |

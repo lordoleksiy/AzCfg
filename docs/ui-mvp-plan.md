@@ -149,7 +149,7 @@ what is not verified (e.g. manual browser check).
 | S2 | Application: configuration, compare, local values, reveal | F1, T1, C1, C2 | W2 | [x] |
 | S3 | Application: sync workflow, drafts | F1, T1, C1, C2 | W2 | [x] |
 | DH | Demo mode | F1, T1 | W2 | [x] |
-| M1 | One trunk: `dev` ↔ `master` (CLI 0.4.0 + 0.5.0), Application delegates to Core | DH | W2.5 | [ ] |
+| M1 | One trunk: `dev` ↔ `master` (CLI 0.4.0 + 0.5.0), Application delegates to Core | DH | W2.5 | [x] |
 | U1 | UI: workspace, environments, settings | P1, S1, M1 | W3 | [ ] |
 | U2 | UI: project tab + Browse | P1, P2, S1, S2, S3, M1 | W3 | [ ] |
 | U3 | UI: Compare | P1, P2, S1, S2, M1 | W3 | [ ] |
@@ -161,6 +161,18 @@ what is not verified (e.g. manual browser check).
 | Q1 | Integration and security tests | I1, DH, U1–U4, UX1–UX3 | W4 | [ ] |
 | Q2 | Docs, polish, measurements, smoke checklist | Q1, X1 | W5 | [ ] |
 | R1 | Release CLI 0.7.0 (`azcfg ui` preview) | Q2, CLI 0.6.0 | W6 | [ ] |
+
+### 0.8 Next steps (after M1, 2026-11-20)
+1. **Merge M1** — PR `dev` → `master` (no `<Version>` change, nothing is published). From then on every task branches
+   from `origin/master` and PRs into `master` (§0.4).
+2. **Clean-up (user's OK)** — delete `dev`, `release/*` (local + origin), `git worktree prune`, stale `worktree-agent-*`
+   branches, merged `.claude/worktrees/*`, `../AzCfg-m1`, `../AzCfg-dev-docs`.
+3. **Session 1 (W3)** — U1, U2, U3, U4 in parallel, one worktree agent each (`docs/mvp-plan.md` «Сесії оркестратора»).
+   Today `--demo` shows only Welcome: opening a folder leaves the Explorer empty and "Set up environments" unticked —
+   that is U1 work (sidebar sections, environment wizard), not a bug.
+4. **Session 2 (CLI 0.6.0)** in parallel with session 1 — `docs/mvp-plan.md` stage 10 (PC1–PC5, LS1). No UI files.
+5. **Session 3 (W4–W6)** — UX1, UX2, X1 in parallel, UX3 after CLI 0.6.0; then Q1 → Q2 → R1 (release 0.7.0).
+Critical path: M1 → U1–U4 → UX1–UX3 → Q1 → Q2 → R1.
 
 ---
 
@@ -203,8 +215,8 @@ Workspace
   `local.settings.json` (read-only until UX3 makes it a target, CLI 0.6.0); badges "values"/"secrets" on bound targets.
 - FR-W4 [MVP] Project status: unbound / bound (service, active env); change counters once a view is loaded.
 - FR-W5 [MVP] Bind / re-bind wizard: service (candidates, confident one preselected, free text), values target,
-  secrets target (only `IsSafeForSecrets`, disabled ones with the reason); re-bind keeps vaults, active env and
-  ignore patterns (G5, G19).
+  secrets target (only `IsSafeForSecrets`, disabled ones with the reason); re-bind keeps vaults and ignore
+  patterns; a new service clears the active env and snapshots, as `config set project.service` (G5, G19, M1).
 - FR-W6 [MVP] Recent folders: remove (bindings untouched), pin.
 - FR-W7 [MVP] Share the binding with the team: write `azcfg.json` (`project.shared`), "shared" badge; a project with a
   manifest opens bound without the wizard (UX3, ADR 0012 amendment 2).
@@ -534,7 +546,7 @@ AzCfg.Cli             Spectre.Console.Cli; composition of scenarios and prompts 
 | G2 | `CsprojDetector` descends into `.git`, `node_modules`, … | Skip `.git`, `.vs`, `.idea`, `node_modules`, `bin`, `obj`, dot-folders | I1 |
 | G3 | No list of opened folders | `<state-root>/ui/workspaces.json` | S1 |
 | G4 | Binding keyed by `RepoPath`; a workspace has many projects | New binding: `RepoPath` = folder of the `.csproj`. Lookup: that folder, then ancestors up to the workspace root; an ancestor binding is accepted only if its `ValuesTarget.ProjectPath` or `SecretsTarget.ProjectPath` equals this `.csproj`; an accepted binding is used as is (its `RepoPath` keys the snapshots shared with the CLI) | S1 |
-| G5 | `BindAsync` resets vaults/active/ignore | `WorkspaceService.BindAsync` re-saves the old `VaultByEnvironment`, `ActiveEnvironment`, `Ignore` | S1 |
+| G5 | `BindAsync` resets vaults/active/ignore | Re-bind goes through `IProjectSettingsService` (M1): vaults and ignore kept, a new service clears the active env | S1, M1 |
 | G6 | Pull is all-or-nothing | Core `ISyncService.PullSelectedAsync` | C2 |
 | G7 | Selecting part of a push plan | Core `PlanSelection.Select` | C1 |
 | G8 | `PushSource.EditedJson/Promote.ToString()` prints JSON that may hold secret values | `PrintMembers` → `Json = ***` | C2 |
@@ -887,8 +899,8 @@ public interface IWorkspaceService
     Task<WorkspaceTree> OpenAsync(string rootPath, CancellationToken ct);
     /// IProjectService.ResolveAsync(folder of the .csproj) + G19 for a bound project.
     Task<ProjectSetupProposal> ProposeSetupAsync(ProjectNode project, CancellationToken ct);
-    /// New binding: RepoPath = folder of the .csproj. Existing (project.Binding): its RepoPath; VaultByEnvironment,
-    /// ActiveEnvironment and Ignore are kept (G5).
+    /// New binding: RepoPath = folder of the .csproj. Existing (project.Binding): its RepoPath, changed keys go through
+    /// IProjectSettingsService (vaults and ignore kept; a new service clears ActiveEnvironment and snapshots — G5, M1).
     Task<ProjectBinding> BindAsync(ProjectNode project, string service, LocalTargetBinding values, LocalTargetBinding secrets, CancellationToken ct);
     Task<ProjectBinding> SetVaultAsync(ProjectBinding binding, string environment, Uri? vault, CancellationToken ct); // null removes
     Task<ProjectBinding> AddIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct);              // IProjectService
@@ -1612,7 +1624,16 @@ complete list of allowed changes (plus the task's `[x]` line here).
     `dotnet run --project src/AzCfg.Ui -- --demo` opens the workbench with the sample workspace.
   - **Tests:** `tests/AzCfg.Ui.Tests/Demo/**`.
 
-- [ ] **M1 — One trunk: `dev` ↔ `master`, Application delegates to Core** (session 0)
+- [x] **M1 — One trunk: `dev` ↔ `master`, Application delegates to Core** (session 0)
+  - **Done (2026-11-20):** merge of `master` (CLI 0.4.0 + 0.5.0) into `dev`; UI uses Core `EnvironmentRules`,
+    `ISyncService.UnmanagedLocalKeysAsync`, `IConfigComparisonService` (CompareService is a row/JSON adapter),
+    `IProjectSettingsService` (vaults and re-bind: a new service clears the active environment and snapshots, as in the
+    CLI), Core `CompareSide` (UI copy deleted, §7.3 updated), Core `IHealthService.CheckEnvironmentAsync` with
+    `EnvironmentAccess` (new port `IAccessErrorClassifier`; CLI `status --check --json` gains `environments[].access`).
+    Deviations: compare ignored-count follows Core (remote-side ignored keys only); Remote↔Remote honours ignore rules.
+    Kept in the UI on purpose: `DraftService` typed-secret walk (moves `"value"` next to `"@kv"` into the pending
+    secrets — draft-only behaviour, no Core equivalent) and `SecretPolicy` (masking, AD-6). `--demo` compared with
+    `dev` before M1: same screens.
   - **Goal:** the UI builds on the Core use cases of CLI 0.4.0 and 0.5.0 (ADR 0013 + amendment, ADR 0014) instead of its
     own copies, and `dev` stops existing (`docs/cli-roadmap.md` §8).
   - **Read:** `docs/adr/0013-cli-daily-workflow-status-diff-key-selection.md`, `docs/adr/0014-remote-providers-and-project-settings.md`,
@@ -1654,7 +1675,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Depends on:** P1, S1, M1.
   - **Acceptance:** (1) scanning a folder with 3 solutions and 20 projects runs through `IOperationRunner` (Read), the
     UI stays responsive, closing the dialog cancels; (2) unsafe targets are not offered for secrets (reason shown);
-    after Bind the tree updates; re-bind keeps vaults; (3) environment wizard saves mode and labels; validation errors
+    after Bind the tree updates; re-bind keeps vaults and ignore, a new service clears the active env (Core rule, M1); (3) environment wizard saves mode and labels; validation errors
     shown inline; (4) saving environments invalidates sessions; protected environments marked everywhere;
     (5) `local.settings.json` read-only with tooltip; libraries dimmed; (6) *manual (demo `empty` and `full`)*.
   - **Tests:** bUnit with fakes of Application interfaces (`tests/AzCfg.Ui.Tests/Features/<X>/Fakes`).
@@ -1671,7 +1692,8 @@ complete list of allowed changes (plus the task's `[x]` line here).
     `BrowseInspector` (§2.5). Draft actions → `IDraftService` + `ProjectSession.SetDraft`; local actions →
     `ILocalValuesService` (Write) + invalidate; ignore → `IWorkspaceService.AddIgnoreAsync`/`RemoveIgnoreAsync`.
     Commands `project.mode.*`, `project.refresh`, `project.unlock`, `project.lock`, `browse.*`, `draft.review`,
-    `draft.discard`; quick-open contributions for keys.
+    `draft.discard`; quick-open contributions for keys. The header summary (FR-S7 counts) comes from
+    `ISyncService.StatusAsync` (`SyncSummary`), never from UI code (M1).
   - **Files:** `src/AzCfg.Ui/Features/{Project,Browse}/**`, `tests/AzCfg.Ui.Tests/Features/{Project,Browse}/**`.
   - **Depends on:** P1, P2, S1, S2, S3, M1.
   - **Acceptance:** (1) loads via the runner (Read) with skeleton rows, caches in the session, Refresh reloads;
@@ -1777,7 +1799,8 @@ complete list of allowed changes (plus the task's `[x]` line here).
     `Workbench`). Scenarios: (1) first run → environment wizard → open folder → bind → make active (G20 confirm) →
     Browse; (2) local edit → Sync › Push → apply 1 of 2 → snapshot updated only for it; (3) draft with a new secret →
     vault choice → apply (KV before App Config); (4) local-files conflict Keep remote / Keep local; (5) protected:
-    unlock → draft → typed confirmation; impossible without it; (6) pull blocked → Discard; (7) draft + concurrent
+    unlock → draft → typed confirmation; impossible without it; (5a) `DraftService.Validate` reads the key out of Core
+    error messages by regex (`KeyIn`) — cover it against the real Core messages so a wording change fails a test; (6) pull blocked → Discard; (7) draft + concurrent
     remote change of an untouched key → not reverted; same key → conflict; (8) 412 → Refresh plan; (9) auth required
     → bar → Retry; (10) compare dev ↔ stage and local ↔ dev; (11) matrix → copy a missing plain key to stage → apply;
     (12) Problems shows a dead reference and a missing key; (13) share → a fresh user state opens the project bound. Security: the sentinel in KV and local secrets — walk all
