@@ -12,13 +12,6 @@ namespace AzCfg.Core.UseCases;
 /// </summary>
 public sealed class ProjectSettingsService(IUserStateStore state, IProjectDetector detector, IEnumerable<ILocalTarget> targets) : IProjectSettingsService
 {
-    private static readonly (string Name, LocalTargetKind Kind)[] KindNames =
-    [
-        ("user-secrets", LocalTargetKind.UserSecrets),
-        ("appsettings-local", LocalTargetKind.AppSettingsLocal),
-        ("local-settings", LocalTargetKind.LocalSettings),
-    ];
-
     public async Task<IReadOnlyList<UserSetting>> ListAsync(string repoPath, CancellationToken ct) =>
         await state.LoadBindingAsync(repoPath, ct) is { } binding ? List(binding, await state.LoadProfileAsync(ct)) : [];
 
@@ -154,7 +147,7 @@ public sealed class ProjectSettingsService(IUserStateStore state, IProjectDetect
         var kindName = colon < 0 ? text : text[..colon];
         var path = colon < 0 ? "" : text[(colon + 1)..].Trim();
 
-        var kind = KindNames.FirstOrDefault(k => k.Name.Equals(kindName, StringComparison.OrdinalIgnoreCase));
+        var kind = ProjectLookup.KindNames.FirstOrDefault(k => k.Name.Equals(kindName, StringComparison.OrdinalIgnoreCase));
         if (kind.Name is null)
         {
             throw Invalid(key, value, "<target>[:<project path>] with target user-secrets, appsettings-local or local-settings");
@@ -164,10 +157,8 @@ public sealed class ProjectSettingsService(IUserStateStore state, IProjectDetect
             ?? throw new ArgumentException($"Invalid value '{value}' for '{key}': target '{kind.Name}' is not supported yet.");
 
         var shown = path.Length > 0 ? path : current.ProjectPath;
-        var wanted = Full(binding.RepoPath, shown);
         var projects = await detector.DetectAsync(binding.RepoPath, ct);
-        var project = projects.FirstOrDefault(p => SamePath(Full(binding.RepoPath, p.CsprojPath), wanted))
-            ?? OnlyIn(projects, binding.RepoPath, wanted)
+        var project = ProjectLookup.Find(projects, binding.RepoPath, shown)
             ?? throw new ArgumentException($"Invalid value '{value}' for '{key}': no .csproj found at '{shown}' under the repository.");
 
         if (!local.CanHandle(project))
@@ -178,18 +169,6 @@ public sealed class ProjectSettingsService(IUserStateStore state, IProjectDetect
         var format = kind.Kind == LocalTargetKind.LocalSettings ? LocalFileFormat.FlatDictionary : LocalFileFormat.NestedJson;
         return new(kind.Kind, project.CsprojPath, format);
     }
-
-    /// <summary>The single detected project in directory <paramref name="directory"/>, if there is exactly one.</summary>
-    private static ProjectInfo? OnlyIn(IReadOnlyList<ProjectInfo> projects, string repoPath, string directory) =>
-        projects.Where(p => SamePath(Full(repoPath, Path.GetDirectoryName(p.CsprojPath) ?? ""), directory)).ToList() is [var only] ? only : null;
-
-    private static string Full(string repoPath, string path) => Path.GetFullPath(path, Path.GetFullPath(repoPath));
-
-    private static bool SamePath(string a, string b) =>
-        string.Equals(
-            a.TrimEnd(Path.DirectorySeparatorChar),
-            b.TrimEnd(Path.DirectorySeparatorChar),
-            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private async Task<ProjectBinding> LoadAsync(string repoPath, CancellationToken ct) =>
         await state.LoadBindingAsync(repoPath, ct) ?? throw new InvalidOperationException("This project is not bound yet. Run 'azcfg pull' first.");
@@ -214,7 +193,7 @@ public sealed class ProjectSettingsService(IUserStateStore state, IProjectDetect
     }
 
     private static string Describe(LocalTargetBinding target) =>
-        $"{KindNames.First(k => k.Kind == target.Kind).Name}:{target.ProjectPath}";
+        $"{ProjectLookup.KindNames.First(k => k.Kind == target.Kind).Name}:{target.ProjectPath}";
 
     private static UserSetting Find(List<UserSetting> settings, string key) =>
         settings.Find(s => s.Key.Equals(key, StringComparison.OrdinalIgnoreCase)) ?? throw UnknownKey(key, settings);

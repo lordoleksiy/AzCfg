@@ -227,6 +227,19 @@ public sealed class StatusCommandTests
     }
 
     [Fact]
+    public async Task Check_shows_the_fix_command_of_a_binding_mismatch()
+    {
+        var mismatch = new HealthFinding(HealthCheckKind.BindingMismatch, HealthSeverity.Warning, "Service 'billing' has no keys in any reachable environment.", Fix: "azcfg config set project.service orders");
+        var s = new Stubs { Report = Broken with { Findings = [mismatch] } };
+
+        var (exit, output) = await Run(s, "--check");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("Service 'billing' has no keys in any reachable environment.", output);
+        Assert.Contains("fix: azcfg config set project.service orders", output);
+    }
+
+    [Fact]
     public async Task Check_with_only_warnings_or_nothing_exits_0()
     {
         var warnings = new Stubs { Report = Broken with { Findings = [Broken.Findings[0]] } };

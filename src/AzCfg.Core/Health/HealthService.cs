@@ -19,6 +19,7 @@ public sealed class HealthService(
     ISecretStore secrets,
     IAzureAccountProbe account,
     IEnumerable<ILocalTarget> targets,
+    IProjectDetector detector,
     ILogger<HealthService>? logger = null) : IHealthService
 {
     private const string GitIgnoreFix = "azcfg config set gitignoreLocalFiles true";
@@ -54,6 +55,7 @@ public sealed class HealthService(
             var reachable = environments.Where(e => checks.First(c => c.Name == e.Name).Reachable).ToList();
             await CheckTargetsAsync(binding, findings, ct);
             await CheckRemoteAsync(binding, reachable, findings, ct);
+            await CheckBindingAsync(binding, environments, reachable, findings, ct);
         }
 
         return new(who, checks, findings);
@@ -181,6 +183,80 @@ public sealed class HealthService(
             }
         }
     }
+
+    /// <summary>The binding no longer matches reality: the service has no keys, a target's project is gone, a vault names an unknown environment.</summary>
+    private async Task CheckBindingAsync(
+        ProjectBinding binding,
+        IReadOnlyList<ConfigEnvironment> environments,
+        IReadOnlyList<ConfigEnvironment> reachable,
+        List<HealthFinding> findings,
+        CancellationToken ct)
+    {
+        await CheckServiceAsync(binding, reachable, findings, ct);
+        await CheckTargetProjectsAsync(binding, findings, ct);
+
+        foreach (var name in binding.VaultByEnvironment.Keys.Where(n => !environments.Any(e => e.Name.Equals(n, StringComparison.OrdinalIgnoreCase))))
+        {
+            findings.Add(new(HealthCheckKind.BindingMismatch, HealthSeverity.Warning, $"A Key Vault is bound to environment '{name}', which is not configured.", name, Fix: $"azcfg config set project.vault.{name} \"\""));
+        }
+    }
+
+    private async Task CheckServiceAsync(ProjectBinding binding, IReadOnlyList<ConfigEnvironment> reachable, List<HealthFinding> findings, CancellationToken ct)
+    {
+        try
+        {
+            if (reachable.Count == 0)
+            {
+                return;
+            }
+
+            HashSet<string> others = [];
+            foreach (var env in reachable)
+            {
+                var prefixes = await store.ListServicePrefixesAsync(env, ct).ToListAsync(ct);
+                if (prefixes.Contains(binding.Service, StringComparer.Ordinal))
+                {
+                    return;
+                }
+
+                others.UnionWith(prefixes);
+            }
+
+            var suggestion = others.Count == 1 ? others.Single() : "<SERVICE>";
+            findings.Add(new(HealthCheckKind.BindingMismatch, HealthSeverity.Warning, $"Service '{binding.Service}' has no keys in any reachable environment.", Fix: $"azcfg config set project.service {suggestion}"));
+        }
+        catch (Exception ex) when (Handled(ex, ct, "service check"))
+        {
+        }
+    }
+
+    private async Task CheckTargetProjectsAsync(ProjectBinding binding, List<HealthFinding> findings, CancellationToken ct)
+    {
+        try
+        {
+            var projects = await detector.DetectAsync(binding.RepoPath, ct);
+            var checkValues = binding.ValuesTarget != binding.SecretsTarget;
+            if (ProjectLookup.Find(projects, binding.RepoPath, binding.SecretsTarget.ProjectPath) is null)
+            {
+                findings.Add(MissingProject(binding.SecretsTarget, "project.secrets"));
+            }
+
+            if (checkValues && ProjectLookup.Find(projects, binding.RepoPath, binding.ValuesTarget.ProjectPath) is null)
+            {
+                findings.Add(MissingProject(binding.ValuesTarget, "project.values"));
+            }
+        }
+        catch (Exception ex) when (Handled(ex, ct, "project check"))
+        {
+        }
+    }
+
+    private static HealthFinding MissingProject(LocalTargetBinding target, string setting) =>
+        new(
+            HealthCheckKind.BindingMismatch,
+            HealthSeverity.Error,
+            $"The project of the {setting[8..]} target ({target.Kind}) no longer exists: {target.ProjectPath}.",
+            Fix: $"azcfg config set {setting} {ProjectLookup.KindNames.First(k => k.Kind == target.Kind).Name}:<PATH>");
 
     /// <summary><c>null</c> when existence could not be verified.</summary>
     private async Task<bool?> ExistsAsync(Uri uri, CancellationToken ct)
