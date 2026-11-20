@@ -1705,7 +1705,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     Set secret value produce the right `IDraftService` calls (fakes); (10) *manual (demo)*.
   - **Tests:** bUnit + fakes (`IConfigurationService`, `IDraftService`, `ILocalValuesService`, `IActivationFlow`, …).
 
-- [ ] **U3 — UI: Compare**
+- [x] **U3 — UI: Compare**
   - **Goal:** FR-C1…C4.
   - **Read:** §2.6, §2.9–§2.12, §7.3 (Configuration: compare), §7.4, §7.5, §9, `docs/ui-components.md`.
   - **Scope:** `CompareView` (`ProjectMode.Compare`): side pickers (Local + every env), swap, differences only, search,

@@ -1,0 +1,26 @@
+@using AzCfg.Ui.Application.Configuration
+@using AzCfg.Ui.Application.Security
+
+@if (Cell is null)
+{
+    <span class="az-compare-missing">@MissingText</span>
+}
+else if (Cell.IsSecret)
+{
+    <span class="az-compare-secret" title="@(Cell.SecretName is null ? "Secret" : $"Key Vault secret {Cell.SecretName}")">
+        <FluentIcon Value="@(new Icons.Regular.Size16.Key())" Title="Secret" />
+        <span class="az-mono">@(Cell.SecretName ?? SecretPolicy.Mask)</span>
+    </span>
+}
+else
+{
+    <span class="az-mono az-compare-plain" title="@Cell.Value">@Cell.Value</span>
+}
+
+@code {
+    /// <summary>One side of a key; a secret shows its Key Vault name or the mask, never a value.</summary>
+    [Parameter] public CompareCell? Cell { get; set; }
+
+    /// <summary>Shown when the key is absent on this side.</summary>
+    [Parameter] public string MissingText { get; set; } = string.Empty;
+}

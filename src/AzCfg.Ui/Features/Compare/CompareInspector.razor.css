@@ -1,0 +1,19 @@
+.az-compare-hint,
+.az-compare-meta {
+    font-size: 11px;
+    color: var(--colorNeutralForeground3);
+}
+
+.az-compare-side-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    word-break: break-all;
+}
+
+.az-compare-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}

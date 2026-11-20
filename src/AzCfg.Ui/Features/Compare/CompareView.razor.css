@@ -1,0 +1,90 @@
+.az-compare {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    font-size: 13px;
+}
+
+.az-compare-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    padding: 2px 8px;
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+}
+
+.az-compare-side {
+    width: auto;
+    min-width: 96px;
+    height: 24px;
+}
+
+.az-compare-search {
+    width: 200px;
+    height: 24px;
+}
+
+.az-compare-counts {
+    color: var(--colorNeutralForeground3);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.az-compare-viewswitch {
+    display: inline-flex;
+    margin-left: auto;
+}
+
+.az-compare-progress {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    color: var(--colorNeutralForeground3);
+    font-size: 12px;
+}
+
+.az-compare-body {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.az-compare-main {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+}
+
+.az-compare-body ::deep .az-inspector {
+    width: var(--az-inspector-w);
+    flex-shrink: 0;
+}
+
+.az-compare-result {
+    font-family: var(--az-font-mono);
+    font-weight: 600;
+}
+
+.az-compare-result.same {
+    color: var(--colorNeutralForeground4);
+}
+
+.az-compare-result.different {
+    color: var(--az-diff-modified);
+}
+
+.az-compare-result.only-left,
+.az-compare-result.only-right {
+    color: var(--az-diff-remote);
+}
+
+@media (max-width: 767px) {
+    .az-compare-search {
+        width: 100%;
+    }
+}
