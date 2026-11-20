@@ -66,3 +66,39 @@ Status: accepted (CLI 0.4.0, stage 8 of `docs/mvp-plan.md`; ships to `master` **
   delegates to the new Core services (UI task M1 in `docs/ui-mvp-plan.md`) instead of keeping its own copies.
 - ADR 0012 moves to later releases (0.5.0 health, 0.6.0 project configuration) and is reduced (see its amendment).
 - No new packages, no new ports.
+
+## Amendment (CLI 0.5.0): `status --check` — configuration health
+Replaces the rejected `doctor`/`validate` commands (stage 9 of `docs/mvp-plan.md`). No new top-level command.
+
+### Core
+- `IHealthService.CheckAsync(string repoPath, CancellationToken ct) → HealthReport` (`Core/Health`, DI in `AddAzCfg()`).
+  Needs a profile (none → `InvalidOperationException`, like the other use cases). Never prompts, never throws for a failed
+  check: every failure becomes a finding. Keys and names only, never values (plain or secret).
+- Model (sealed records / enums in `Core/Health`):
+  - `HealthReport(AzureAccountCheck Account, IReadOnlyList<EnvironmentCheck> Environments, IReadOnlyList<HealthFinding>
+    Findings)` with computed `bool HasErrors` (any finding with `Severity == Error`).
+  - `AzureAccountCheck(bool SignedIn, string? Account, string? Error)`.
+  - `EnvironmentCheck(string Name, bool Reachable, string? Error)` — one per configured environment, profile order.
+  - `HealthFinding(HealthCheckKind Kind, HealthSeverity Severity, string Message, string? Environment = null,
+    string? Key = null, string? Fix = null)`; `Fix` is a ready-to-run `azcfg …` command when one exists.
+  - `HealthSeverity { Warning, Error }`; `HealthCheckKind { AzureSignIn, EnvironmentAccess, SecretsTargetNotIgnored,
+    ValuesTargetNotIgnored, DeadSecretReference, SecretNotVerified, KeyMissingInEnvironments, BindingMismatch }`.
+- Checks:
+  | Check | How | Severity |
+  |---|---|---|
+  | Azure sign-in | new port `IAzureAccountProbe.CheckAsync(ct) → AzureAccountCheck` (Infrastructure: `DefaultAzureCredential` token for the management scope; claims read for the account name, the token is never stored or logged) | Error |
+  | Environment access | first item of `IConfigStore.ReadAsync(env, binding.Service)` (no binding: `ListServicePrefixesAsync(env)`) — same probe as the UI `AzureStatusService`. Skipped (unreachable, no finding per env) when sign-in failed | Error |
+  | Secrets target safe | `ILocalTarget.InspectAsync(binding.SecretsTarget).IsSafeForSecrets == false` | Error |
+  | Values target ignored | values target (≠ secrets target) not safe → warn, fix: `azcfg config set gitignoreLocalFiles true` | Warning |
+  | Dead KV references | for each reachable env, each `ConfigValue.KeyVaultRef` of `ReadRemoteConfigAsync`: `ISecretStore.ExistsAsync(secretUri)` = false → Error; the call throws (e.g. no permission) → `SecretNotVerified` Warning. Distinct URIs are checked once | Error / Warning |
+  | Missing keys | `MissingKeysReport.Compute` over the reachable environments (≥ 2), one finding per key, `Environment` = comma-separated `MissingIn` | Warning |
+  | Binding mismatch (after editable project settings, ADR 0014) | service has no keys in any reachable env; a target's project path no longer exists; `VaultByEnvironment` names an env the profile does not have. `Fix` = `azcfg config set project.…` | Warning / Error |
+  Without a binding only sign-in and environment access run.
+- New port method: `ISecretStore.ExistsAsync(Uri secretUri, CancellationToken ct) → bool` — reads secret **properties**
+  only (Infrastructure: `SecretClient` properties of the referenced version / latest; 404 → `false`), never the value.
+  It is the only port change of 0.5.0; the UI on `dev` adds the method to its fakes when merging `master` (M2).
+
+### CLI
+- `azcfg status --check [--project <PATH>]`: sign-in line, one line per environment (✓ / ✗ + error), findings grouped by
+  severity with the fix command. `--json` = `HealthReport` as-is. Exit code 1 when `HasErrors`, else 0 (warnings do not
+  fail). `--check` ignores `--env`.
