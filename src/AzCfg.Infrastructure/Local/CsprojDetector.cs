@@ -5,8 +5,8 @@ using AzCfg.Core.Model;
 namespace AzCfg.Infrastructure.Local;
 
 /// <summary>
-/// Finds .NET projects by searching for <c>*.csproj</c> files under a repository path, skipping
-/// <c>bin</c>/<c>obj</c> output directories entirely (they are not descended into).
+/// Finds .NET projects by searching for <c>*.csproj</c> files under a repository path, never descending into
+/// <c>bin</c>, <c>obj</c>, <c>node_modules</c>, <c>.git</c>, <c>.vs</c>, <c>.idea</c> and other dot-folders.
 /// </summary>
 public sealed class CsprojDetector : IProjectDetector
 {
@@ -49,7 +49,7 @@ public sealed class CsprojDetector : IProjectDetector
             foreach (var subDir in Directory.EnumerateDirectories(dir))
             {
                 var name = Path.GetFileName(subDir);
-                if (IsBuildOutputDirectory(name))
+                if (IsSkippedDirectory(name))
                 {
                     continue;
                 }
@@ -59,9 +59,11 @@ public sealed class CsprojDetector : IProjectDetector
         }
     }
 
-    private static bool IsBuildOutputDirectory(string directoryName) =>
-        string.Equals(directoryName, "bin", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(directoryName, "obj", StringComparison.OrdinalIgnoreCase);
+    internal static bool IsSkippedDirectory(string directoryName) =>
+        directoryName.StartsWith('.')
+        || string.Equals(directoryName, "bin", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(directoryName, "obj", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(directoryName, "node_modules", StringComparison.OrdinalIgnoreCase);
 
     private static ProjectInfo ParseProject(string repoPath, string csprojPath)
     {

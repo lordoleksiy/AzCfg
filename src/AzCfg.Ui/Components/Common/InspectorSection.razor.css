@@ -1,0 +1,20 @@
+.az-inspector-section {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--colorNeutralStroke3);
+}
+
+.az-inspector-section-title {
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--colorNeutralForeground3);
+}
+
+.az-inspector-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+}

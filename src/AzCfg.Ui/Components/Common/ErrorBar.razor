@@ -1,0 +1,28 @@
+@inject IJSRuntime JS
+
+<FluentMessageBar Intent="MessageBarIntent.Error" Layout="MessageBarLayout.SingleLine" AllowDismiss="false">
+    <ChildContent>@Message</ChildContent>
+    <ActionsTemplate>
+        @if (OnRetry.HasDelegate)
+        {
+            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="OnRetry">Retry</FluentButton>
+        }
+        @if (Details is { Length: > 0 })
+        {
+            <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" OnClick="CopyAsync">Copy details</FluentButton>
+        }
+    </ActionsTemplate>
+</FluentMessageBar>
+
+@code {
+    /// <summary>What went wrong; Core messages never contain values.</summary>
+    [Parameter, EditorRequired] public string Message { get; set; } = string.Empty;
+
+    /// <summary>Exception type and message for "Copy details"; never secret values.</summary>
+    [Parameter] public string? Details { get; set; }
+
+    /// <summary>Shows the Retry button when set.</summary>
+    [Parameter] public EventCallback OnRetry { get; set; }
+
+    private async Task CopyAsync() => await JS.InvokeVoidAsync("navigator.clipboard.writeText", Details);
+}

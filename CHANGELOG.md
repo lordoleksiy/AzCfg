@@ -6,6 +6,11 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
 
 ## [Unreleased]
 
+### Changed
+- `status --check`: each environment in `--json` gains `access` (`ok`, `authRequired`, `forbidden`, `unreachable`);
+  `reachable` stays. A sign-in, 403 or network failure is described with the fix (`az login`, the required role)
+  instead of the exception type name.
+
 ### Planned
 - 0.6.0 (ADR 0012, amended): project manifest `azcfg.json`, discovery, `azcfg adopt`.
 

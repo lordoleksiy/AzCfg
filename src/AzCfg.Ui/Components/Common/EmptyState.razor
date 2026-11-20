@@ -1,0 +1,16 @@
+<div class="az-empty">
+    <span class="az-empty-text">@Text</span>
+    @if (ActionText is not null)
+    {
+        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="OnAction">@ActionText</FluentButton>
+    }
+</div>
+
+@code {
+    /// <summary>One line, e.g. "Open a folder to start".</summary>
+    [Parameter, EditorRequired] public string Text { get; set; } = string.Empty;
+
+    [Parameter] public string? ActionText { get; set; }
+
+    [Parameter] public EventCallback OnAction { get; set; }
+}

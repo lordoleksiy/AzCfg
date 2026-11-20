@@ -1,0 +1,15 @@
+<div class="az-code-editor">
+    @if (_tooLarge)
+    {
+        <div class="az-code-editor-limit" role="alert">
+            This document is larger than 1 MB and cannot be shown in the editor.
+        </div>
+    }
+    else if (_ready)
+    {
+        <StandaloneCodeEditor @ref="_editor" Id="@_id" CssClass="az-code-editor-host"
+                              ConstructionOptions="BuildOptions"
+                              OnDidInit="InitializedAsync"
+                              OnDidChangeModelContent="ContentChangedAsync" />
+    }
+</div>

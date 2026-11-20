@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "azcfg://schemas/edit-json.schema.json",
+  "title": "AzCfg App Configuration JSON",
+  "description": "Nested JSON edited by the AzCfg UI. Leaves are strings, numbers or booleans; { \"@kv\": \"secret-name\" } references a Key Vault secret; \"@global\" holds the global scope.",
+  "type": "object",
+  "properties": {
+    "@global": {
+      "description": "Keys of the global scope (global:<Key:Path>).",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/node" }
+    }
+  },
+  "additionalProperties": { "$ref": "#/definitions/node" },
+  "definitions": {
+    "node": {
+      "anyOf": [
+        { "$ref": "#/definitions/kv" },
+        { "$ref": "#/definitions/section" },
+        { "type": [ "string", "number", "boolean" ] }
+      ]
+    },
+    "kv": {
+      "description": "Key Vault reference; with \"value\" the secret is created or updated.",
+      "type": "object",
+      "required": [ "@kv" ],
+      "properties": {
+        "@kv": { "description": "Key Vault secret name.", "type": "string" },
+        "value": { "description": "New secret value; null keeps the existing secret.", "type": [ "string", "null" ] }
+      },
+      "additionalProperties": false
+    },
+    "section": {
+      "type": "object",
+      "not": { "required": [ "@kv" ] },
+      "additionalProperties": { "$ref": "#/definitions/node" }
+    }
+  }
+}

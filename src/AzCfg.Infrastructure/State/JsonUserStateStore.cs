@@ -11,10 +11,13 @@ namespace AzCfg.Infrastructure.State;
 /// <summary>
 /// File-based <see cref="IUserStateStore"/> under <paramref name="root"/>: profile.json, projects.json (keyed by
 /// full repo path), snapshots/&lt;repo-hash&gt;/&lt;env&gt;.json and fingerprint.key. Missing files load as <c>null</c>;
-/// writes go through a temp file and an atomic move.
+/// writes go through a temp file and an atomic move. Writes and the read-modify-write of bindings are serialized
+/// in-process by a lock; concurrent processes are not coordinated.
 /// </summary>
 public sealed class JsonUserStateStore(string root) : IUserStateStore
 {
+    private readonly SemaphoreSlim _gate = new(1, 1);
+
     private static readonly StringComparer PathComparer =
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
@@ -30,23 +33,31 @@ public sealed class JsonUserStateStore(string root) : IUserStateStore
     public Task<UserProfile?> LoadProfileAsync(CancellationToken ct) => ReadAsync<UserProfile>(Path.Combine(root, "profile.json"), ct);
 
     public Task SaveProfileAsync(UserProfile profile, CancellationToken ct) =>
-        WriteAsync(Path.Combine(root, "profile.json"), JsonSerializer.SerializeToUtf8Bytes(profile, Options), ct);
+        LockedWriteAsync(Path.Combine(root, "profile.json"), JsonSerializer.SerializeToUtf8Bytes(profile, Options), ct);
 
     public async Task<ProjectBinding?> LoadBindingAsync(string repoPath, CancellationToken ct) =>
         (await LoadBindingsAsync(ct)).GetValueOrDefault(Path.GetFullPath(repoPath));
 
     public async Task SaveBindingAsync(ProjectBinding binding, CancellationToken ct)
     {
-        var bindings = await LoadBindingsAsync(ct);
-        bindings[Path.GetFullPath(binding.RepoPath)] = binding;
-        await WriteAsync(Path.Combine(root, "projects.json"), JsonSerializer.SerializeToUtf8Bytes(bindings, Options), ct);
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var bindings = await LoadBindingsAsync(ct);
+            bindings[Path.GetFullPath(binding.RepoPath)] = binding;
+            await WriteAsync(Path.Combine(root, "projects.json"), JsonSerializer.SerializeToUtf8Bytes(bindings, Options), ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public Task<ConfigState?> LoadSnapshotAsync(string repoPath, string environment, CancellationToken ct) =>
         ReadAsync<ConfigState>(SnapshotPath(repoPath, environment), ct);
 
     public Task SaveSnapshotAsync(string repoPath, string environment, ConfigState state, CancellationToken ct) =>
-        WriteAsync(SnapshotPath(repoPath, environment), JsonSerializer.SerializeToUtf8Bytes(state, Options), ct);
+        LockedWriteAsync(SnapshotPath(repoPath, environment), JsonSerializer.SerializeToUtf8Bytes(state, Options), ct);
 
     public Task DeleteSnapshotsAsync(string repoPath, CancellationToken ct)
     {
@@ -67,9 +78,35 @@ public sealed class JsonUserStateStore(string root) : IUserStateStore
             return await File.ReadAllBytesAsync(path, ct);
         }
 
-        var key = RandomNumberGenerator.GetBytes(32);
-        await WriteAsync(path, key, ct);
-        return key;
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (File.Exists(path))
+            {
+                return await File.ReadAllBytesAsync(path, ct);
+            }
+
+            var key = RandomNumberGenerator.GetBytes(32);
+            await WriteAsync(path, key, ct);
+            return key;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task LockedWriteAsync(string path, byte[] content, CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            await WriteAsync(path, content, ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     private async Task<Dictionary<string, ProjectBinding>> LoadBindingsAsync(CancellationToken ct) =>

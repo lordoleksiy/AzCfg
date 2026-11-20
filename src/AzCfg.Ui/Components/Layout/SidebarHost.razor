@@ -1,0 +1,38 @@
+@using AzCfg.Ui.Shared
+@inject IEnumerable<SidebarSectionRegistration> Registrations
+
+<div class="az-sidebar">
+    <div class="az-sidebar-title">EXPLORER</div>
+    @foreach (var section in _sections)
+    {
+        var open = !_collapsed.Contains(section.Id);
+        <section class="az-sidebar-section" data-section="@section.Id">
+            <button type="button" class="az-sidebar-section-header" aria-expanded="@(open ? "true" : "false")" @onclick="() => Toggle(section.Id)">
+                <FluentIcon Value="@(open ? (Icon)new Icons.Regular.Size16.ChevronDown() : new Icons.Regular.Size16.ChevronRight())" />
+                <span>@section.Title.ToUpperInvariant()</span>
+            </button>
+            @if (open)
+            {
+                <div class="az-sidebar-section-body">
+                    <DynamicComponent Type="section.Component" />
+                </div>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
+    private IReadOnlyList<SidebarSectionRegistration> _sections = [];
+
+    protected override void OnInitialized() =>
+        _sections = [.. Registrations.OrderBy(r => r.Order).ThenBy(r => r.Title, StringComparer.Ordinal)];
+
+    private void Toggle(string id)
+    {
+        if (!_collapsed.Remove(id))
+        {
+            _collapsed.Add(id);
+        }
+    }
+}

@@ -1,0 +1,38 @@
+@using AzCfg.Ui.Application.Environments
+@using AzCfg.Ui.Components.Common
+@using AzCfg.Ui.Shared
+@implements IDisposable
+@inject IEnumerable<StatusBarItemRegistration> Registrations
+@inject IAzureStatusService AzureStatus
+
+<footer class="az-statusbar">
+    <div class="az-statusbar-side left">
+        <span class="az-statusbar-item" title="@(AzureStatus.Account.Message ?? "Azure account")">
+            <StatusDot State="AzureStatus.Account.State" Detail="@AzureStatus.Account.Message" />
+            <span>@(AzureStatus.Account.Account ?? "Not signed in")</span>
+        </span>
+        @foreach (var item in Items(StatusBarAlignment.Left))
+        {
+            <span class="az-statusbar-item"><DynamicComponent Type="item.Component" /></span>
+        }
+        <OperationsIndicator />
+    </div>
+    <div class="az-statusbar-side right">
+        @foreach (var item in Items(StatusBarAlignment.Right))
+        {
+            <span class="az-statusbar-item"><DynamicComponent Type="item.Component" /></span>
+        }
+        <span class="az-statusbar-item az-statusbar-hint">Ctrl+K</span>
+    </div>
+</footer>
+
+@code {
+    private IEnumerable<StatusBarItemRegistration> Items(StatusBarAlignment alignment) =>
+        Registrations.Where(r => r.Alignment == alignment).OrderBy(r => r.Order);
+
+    protected override void OnInitialized() => AzureStatus.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => AzureStatus.Changed -= OnChanged;
+}

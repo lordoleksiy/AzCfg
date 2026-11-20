@@ -1,0 +1,11 @@
+.az-status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--colorNeutralForeground3);
+}
+
+.az-status-dot.ok { background: var(--az-diff-added); }
+.az-status-dot.busy { background: var(--az-diff-modified); }
+.az-status-dot.bad { background: var(--az-diff-deleted); }

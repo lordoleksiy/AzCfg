@@ -1,0 +1,32 @@
+@using AzCfg.Ui.Application.Environments
+@using AzCfg.Ui.Application.State
+@using AzCfg.Ui.Components.Common
+@using AzCfg.Ui.Features.Platform
+@using AzCfg.Ui.Shared
+@implements IDisposable
+@inject LayoutState Layout
+@inject ICommandRegistry Commands
+@inject WorkbenchNavigator Navigator
+@inject IAzureStatusService AzureStatus
+
+<nav class="az-activitybar" aria-label="Activity bar">
+    <FluentAppBar Orientation="Orientation.Vertical" HideActiveIndicator="false">
+        <FluentAppBarItem Text="" Tooltip="Explorer (Ctrl+B)" IconRest="@(new Icons.Regular.Size20.Folder())" OnClick="Layout.ToggleSidebar" />
+        <FluentAppBarItem Text="" Tooltip="Search (Ctrl+K)" IconRest="@(new Icons.Regular.Size20.Search())" OnClick="() => Commands.ExecuteAsync(CommandIds.Palette)" />
+        <FluentAppBarItem Text="" Tooltip="Settings" IconRest="@(new Icons.Regular.Size20.Settings())" OnClick="Navigator.OpenSettings" />
+    </FluentAppBar>
+    <div class="az-activitybar-account" title="@AccountTitle">
+        <FluentIcon Value="@(new Icons.Regular.Size20.Person())" />
+        <StatusDot State="AzureStatus.Account.State" />
+    </div>
+</nav>
+
+@code {
+    private string AccountTitle => AzureStatus.Account.Account ?? "Azure account";
+
+    protected override void OnInitialized() => AzureStatus.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => AzureStatus.Changed -= OnChanged;
+}

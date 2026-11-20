@@ -1,0 +1,18 @@
+.az-code-editor {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 160px;
+}
+
+.az-code-editor ::deep .az-code-editor-host {
+    flex: 1;
+    min-height: 160px;
+}
+
+.az-code-editor-limit {
+    padding: 12px 16px;
+    border: 1px solid var(--colorNeutralStroke2);
+    border-radius: 4px;
+    color: var(--colorNeutralForeground2);
+}

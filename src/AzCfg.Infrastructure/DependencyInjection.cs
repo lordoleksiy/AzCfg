@@ -18,18 +18,20 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddAzCfg(this IServiceCollection services)
     {
+        services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
         services.AddSingleton<IProjectDetector, CsprojDetector>();
+        services.AddSingleton<IWorkspaceScanner, WorkspaceScanner>();
         services.AddSingleton<ILocalTarget, AppSettingsLocalTarget>();
         services.AddSingleton<IUserStateStore>(_ => new JsonUserStateStore(JsonUserStateStore.DefaultRoot));
-        services.AddSingleton<ISecretStore>(_ =>
+        services.AddSingleton<ISecretStore>(sp =>
         {
-            var credential = new DefaultAzureCredential();
+            var credential = sp.GetRequiredService<TokenCredential>();
             return new KeyVaultSecretStore(vault => new SecretClient(vault, credential));
         });
         services.AddSingleton<ILocalTarget, UserSecretsTarget>();
-        services.AddSingleton(_ => new ArmClient(new DefaultAzureCredential()));
+        services.AddSingleton(sp => new ArmClient(sp.GetRequiredService<TokenCredential>()));
         services.AddSingleton<IResourceDiscovery, ResourceGraphDiscovery>();
-        services.AddSingleton<IConfigStore>(_ => new AppConfigStore(new DefaultAzureCredential()));
+        services.AddSingleton<IConfigStore>(sp => new AppConfigStore(sp.GetRequiredService<TokenCredential>()));
         services.AddSingleton<ISetupService, SetupService>();
         services.AddSingleton<IUserSettingsService, UserSettingsService>();
         services.AddSingleton<IProjectSettingsService, ProjectSettingsService>();
@@ -39,8 +41,8 @@ public static class DependencyInjection
         services.AddSingleton<IProjectService, ProjectService>();
         services.AddSingleton<ISyncService, SyncService>();
         services.AddSingleton<IConfigComparisonService, ConfigComparisonService>();
-        services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
         services.AddSingleton<IAzureAccountProbe, AzureAccountProbe>();
+        services.AddSingleton<IAccessErrorClassifier, AzureAccessErrorClassifier>();
         services.AddSingleton<IHealthService, HealthService>();
         return services;
     }

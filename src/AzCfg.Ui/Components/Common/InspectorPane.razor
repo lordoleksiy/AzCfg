@@ -1,0 +1,38 @@
+@using AzCfg.Ui.Features.Platform
+@implements IDisposable
+@inject LayoutState Layout
+
+<aside class="az-inspector @(Layout.InspectorVisible ? "" : "wide-hidden") @(Layout.InspectorOverlayOpen ? "overlay-open" : "")" aria-label="Inspector">
+    <header class="az-inspector-header">
+        <div class="az-inspector-title">
+            <span class="az-inspector-heading az-mono" title="@Title">@Title</span>
+            @if (Subtitle is not null)
+            {
+                <span class="az-inspector-sub">@Subtitle</span>
+            }
+        </div>
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="Hide inspector (Alt+I)"
+                      OnClick="Layout.ToggleInspector">
+            <FluentIcon Value="@(new Icons.Regular.Size16.Dismiss())" />
+        </FluentButton>
+    </header>
+    <div class="az-inspector-body">
+        @ChildContent
+    </div>
+</aside>
+
+@code {
+    /// <summary>Usually the selected key path.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Sections, usually <see cref="InspectorSection"/>.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override void OnInitialized() => Layout.Changed += OnLayoutChanged;
+
+    private void OnLayoutChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Layout.Changed -= OnLayoutChanged;
+}

@@ -1,0 +1,14 @@
+.az-tabhost {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+.az-tabpanel {
+    height: 100%;
+    overflow: auto;
+}
+
+.az-tabpanel[hidden] {
+    display: none;
+}

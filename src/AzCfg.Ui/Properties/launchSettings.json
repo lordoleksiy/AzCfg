@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "AzCfg.Ui": {
+      "commandName": "Project",
+      "commandLineArgs": "--no-browser --port 5180",
+      "launchBrowser": false,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "AzCfg.Ui (demo)": {
+      "commandName": "Project",
+      "commandLineArgs": "--demo --no-browser --port 5181",
+      "launchBrowser": false,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
