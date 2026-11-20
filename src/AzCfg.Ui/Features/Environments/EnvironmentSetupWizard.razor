@@ -1,0 +1,267 @@
+@implements IDisposable
+@inject IEnvironmentService EnvService
+@inject IOperationRunner Runner
+@inject EnvironmentLoader Loader
+@inject WorkspaceState Workspace
+@inject INotificationService Notifications
+
+<div class="az-env-wizard">
+    <FluentWizard @bind-Value="_step" OnFinish="SaveAsync" Width="100%" Height="480px">
+        <Steps>
+            <FluentWizardStep Label="Mode" Summary="How environments are separated">
+                <div class="az-wiz-body">
+                    <label class="az-wiz-choice">
+                        <input type="radio" name="az-env-mode" checked="@(Draft.Mode == EnvironmentMode.StorePerEnvironment)"
+                               @onchange="() => SetMode(EnvironmentMode.StorePerEnvironment)" />
+                        <span><strong>One store per environment</strong><span class="az-wiz-sub">dev, stage and prod are separate App Configuration stores</span></span>
+                    </label>
+                    <label class="az-wiz-choice">
+                        <input type="radio" name="az-env-mode" checked="@(Draft.Mode == EnvironmentMode.LabelPerEnvironment)"
+                               @onchange="() => SetMode(EnvironmentMode.LabelPerEnvironment)" />
+                        <span><strong>One store, a label per environment</strong><span class="az-wiz-sub">environments share one store and are told apart by label</span></span>
+                    </label>
+                    @if (Workspace.Environments?.Profile is not null)
+                    {
+                        <p class="az-wiz-sub">Saving replaces the environments that are configured now.</p>
+                    }
+                </div>
+            </FluentWizardStep>
+            <FluentWizardStep Label="Stores" Summary="Names, labels, protection" OnChange="OnStepChange">
+                <div class="az-wiz-body">
+                    @if (_discoveryError is not null)
+                    {
+                        <ErrorBar Message="@_discoveryError" OnRetry="DiscoverAsync" />
+                    }
+                    else if (_candidates is null)
+                    {
+                        <FluentProgressBar />
+                    }
+
+                    @if (Draft.Mode == EnvironmentMode.LabelPerEnvironment)
+                    {
+                        <div class="az-wiz-store">
+                            <input class="az-input az-mono" aria-label="Shared store" list="az-wiz-stores" placeholder="https://name.azconfig.io" spellcheck="false"
+                                   value="@_sharedStore" @oninput="e => _sharedStore = e.Value?.ToString() ?? string.Empty" />
+                            <datalist id="az-wiz-stores">
+                                @foreach (var store in Stores)
+                                {
+                                    <option value="@store.Endpoint">@store.Name</option>
+                                }
+                            </datalist>
+                            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@(_busy || string.IsNullOrWhiteSpace(_sharedStore))"
+                                          OnClick="LoadLabelsAsync">Load labels</FluentButton>
+                        </div>
+                    }
+
+                    <EnvironmentRowsEditor Draft="Draft" Issues="Shown" ShowInclude="true" OnChanged="Revalidate" />
+                    @foreach (var issue in Shown.Where(i => i.Row is null))
+                    {
+                        <div class="az-wiz-issue" role="alert">@issue.Message</div>
+                    }
+
+                    <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" OnClick="AddManual">Add manually</FluentButton>
+                </div>
+            </FluentWizardStep>
+            <FluentWizardStep Label="Review" Summary="Check and save">
+                <div class="az-wiz-body">
+                    <ul class="az-wiz-review">
+                        @foreach (var row in Draft.Rows.Where(r => r.Included))
+                        {
+                            <li>
+                                <strong>@row.Name</strong>
+                                @if (row.IsProtected)
+                                {
+                                    <FluentIcon Value="@(new Icons.Regular.Size16.LockClosed())" Title="Protected" />
+                                }
+                                <span class="az-mono">@row.Endpoint</span>
+                                @if (!string.IsNullOrWhiteSpace(row.Label))
+                                {
+                                    <span class="az-wiz-sub">label @row.Label</span>
+                                }
+                            </li>
+                        }
+                    </ul>
+                    @if (Draft.Mode == EnvironmentMode.StorePerEnvironment)
+                    {
+                        <label class="az-wiz-field">Label for new keys (optional)
+                            <input class="az-input" aria-label="Default label" value="@Draft.DefaultLabel" @oninput="e => Draft.DefaultLabel = e.Value?.ToString()" />
+                        </label>
+                    }
+
+                    @foreach (var issue in Shown)
+                    {
+                        <div class="az-wiz-issue" role="alert">@(issue.Row is null ? issue.Message : $"{issue.Row.Name}: {issue.Message}")</div>
+                    }
+
+                    @if (_saveError is not null)
+                    {
+                        <ErrorBar Message="@_saveError" />
+                    }
+                </div>
+            </FluentWizardStep>
+        </Steps>
+    </FluentWizard>
+    <div class="az-wiz-footer">
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" Disabled="_saving" OnClick="CancelAsync">Cancel</FluentButton>
+    </div>
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private IReadOnlyList<EnvironmentCandidate>? _candidates;
+    private IReadOnlyList<EnvironmentIssue> _issues = [];
+    private string? _discoveryError;
+    private string? _saveError;
+    private string _sharedStore = string.Empty;
+    private int _step;
+    private bool _showIssues;
+    private bool _busy;
+    private bool _saving;
+
+    [CascadingParameter] public IDialogInstance? Dialog { get; set; }
+
+    private EnvironmentsDraft Draft { get; } = new();
+
+    private IReadOnlyList<EnvironmentIssue> Shown => _showIssues ? _issues : [];
+
+    private IEnumerable<AzureResource> Stores => (_candidates ?? []).Select(c => c.Store);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Draft.GitIgnoreLocalFiles = Workspace.Environments?.Profile?.GitIgnoreLocalFiles ?? false;
+        await DiscoverAsync();
+    }
+
+    private async Task DiscoverAsync()
+    {
+        _discoveryError = null;
+        switch (await Runner.RunAsync("Discover App Configuration stores", OperationKind.Read, EnvService.DiscoverAsync, _cts.Token))
+        {
+            case OperationResult<IReadOnlyList<EnvironmentCandidate>>.Success success:
+                _candidates = success.Value;
+                Rebuild();
+                break;
+            case OperationResult<IReadOnlyList<EnvironmentCandidate>>.Failed failed:
+                _discoveryError = $"{failed.Message} You can still add stores manually.";
+                _candidates = [];
+                break;
+        }
+    }
+
+    private void SetMode(EnvironmentMode mode)
+    {
+        Draft.Mode = mode;
+        Rebuild();
+    }
+
+    /// <summary>Store mode: one row per discovered store (ticked when its environment was guessed); label mode: rows come from "Load labels".</summary>
+    private void Rebuild()
+    {
+        Draft.Rows.Clear();
+        if (Draft.Mode == EnvironmentMode.StorePerEnvironment)
+        {
+            Draft.Rows.AddRange((_candidates ?? []).Select(c => new EnvironmentRow
+            {
+                Name = c.Name ?? c.Store.Name,
+                Endpoint = c.Store.Endpoint.ToString(),
+                IsProtected = c.IsProtected,
+                Included = c.Name is not null,
+                IsNew = true,
+            }));
+        }
+
+        Revalidate();
+    }
+
+    private async Task LoadLabelsAsync()
+    {
+        if (!Uri.TryCreate(_sharedStore.Trim(), UriKind.Absolute, out var store) || store.Scheme != Uri.UriSchemeHttps)
+        {
+            _discoveryError = "The shared store must be an absolute https URL.";
+            return;
+        }
+
+        _busy = true;
+        _discoveryError = null;
+        var result = await Runner.RunAsync($"List labels of {store.Host}", OperationKind.Read, ct => EnvService.ListLabelsAsync(store, ct), _cts.Token);
+        _busy = false;
+        switch (result)
+        {
+            case OperationResult<IReadOnlyList<string>>.Success success:
+                Draft.Rows.RemoveAll(r => r.Label is not null);
+                Draft.Rows.AddRange(success.Value.Select(label =>
+                {
+                    var name = EnvironmentsDraft.SuggestName(label);
+                    return new EnvironmentRow { Name = name, Endpoint = store.ToString(), Label = label, IsProtected = ConfigEnvironment.IsProtectedByName(name), IsNew = true };
+                }));
+                Revalidate();
+                break;
+            case OperationResult<IReadOnlyList<string>>.Failed failed:
+                _discoveryError = failed.Message;
+                break;
+        }
+    }
+
+    private void AddManual()
+    {
+        Draft.Rows.Add(new EnvironmentRow { Endpoint = Draft.Mode == EnvironmentMode.LabelPerEnvironment ? _sharedStore : string.Empty, IsNew = true });
+        Revalidate();
+    }
+
+    private void Revalidate() => _issues = Draft.Validate(requireOne: true);
+
+    private void OnStepChange(FluentWizardStepChangeEventArgs e)
+    {
+        if (e.TargetIndex < 2)
+        {
+            return;
+        }
+
+        Revalidate();
+        _showIssues = _issues.Count > 0;
+        e.IsCancelled = _showIssues;
+    }
+
+    private async Task SaveAsync()
+    {
+        Revalidate();
+        _showIssues = _issues.Count > 0;
+        if (_showIssues)
+        {
+            return;
+        }
+
+        _saving = true;
+        _saveError = null;
+        var result = await Loader.SaveAsync(Draft.ToProfile());
+        _saving = false;
+        switch (result)
+        {
+            case OperationResult<EnvironmentsSnapshot>.Success:
+                await Notifications.ToastAsync($"Saved {Draft.Rows.Count(r => r.Included)} environments", ToastIntent.Success);
+                if (Dialog is not null)
+                {
+                    await Dialog.CloseAsync(true);
+                }
+
+                break;
+            case OperationResult<EnvironmentsSnapshot>.Failed failed:
+                _saveError = failed.Message;
+                break;
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (Dialog is not null)
+        {
+            await Dialog.CancelAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

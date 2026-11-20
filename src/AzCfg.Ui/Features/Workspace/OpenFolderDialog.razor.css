@@ -1,0 +1,92 @@
+.az-open-folder {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.az-of-path {
+    display: flex;
+    gap: 8px;
+}
+
+.az-of-list {
+    max-height: 220px;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid var(--colorNeutralStroke2);
+    border-radius: 4px;
+}
+
+.az-of-item {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    height: var(--az-row-h);
+    padding: 0 8px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.az-of-item:hover:not(:disabled) {
+    background: var(--colorNeutralBackground1Hover);
+}
+
+.az-of-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.az-of-net {
+    margin-left: auto;
+    padding: 0 6px;
+    border-radius: 8px;
+    font-size: 11px;
+    color: var(--az-diff-remote);
+    border: 1px solid var(--az-diff-remote);
+}
+
+.az-of-empty {
+    padding: 6px 8px;
+    color: var(--colorNeutralForeground3);
+}
+
+.az-of-sub {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--colorNeutralForeground3);
+}
+
+.az-of-recent-row {
+    display: flex;
+    align-items: center;
+}
+
+.az-of-path-hint {
+    margin-left: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    color: var(--colorNeutralForeground3);
+}
+
+.az-of-scan {
+    font-size: 12px;
+    color: var(--colorNeutralForeground3);
+}
+
+.az-of-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}

@@ -1,0 +1,95 @@
+@implements IDisposable
+@inject IEnvironmentService EnvService
+@inject ISyncWorkflowService Workflow
+@inject IOperationRunner Runner
+@inject IJSRuntime JS
+
+<div class="az-discover">
+    @if (_error is not null)
+    {
+        <ErrorBar Message="@_error" OnRetry="LoadAsync" />
+    }
+    else if (_stores is null)
+    {
+        <FluentProgressBar />
+    }
+    else
+    {
+        <h4>App Configuration stores</h4>
+        <ul class="az-discover-list" aria-label="Stores">
+            @foreach (var candidate in _stores)
+            {
+                <li>
+                    <span class="az-mono">@candidate.Store.Name</span>
+                    <span class="az-discover-sub">@candidate.Store.Endpoint.Host</span>
+                    <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="@($"Copy endpoint of {candidate.Store.Name}")"
+                                  OnClick="() => CopyAsync(candidate.Store.Endpoint.ToString())">
+                        <FluentIcon Value="@(new Icons.Regular.Size16.Copy())" />
+                    </FluentButton>
+                </li>
+            }
+            @if (_stores.Count == 0)
+            {
+                <li class="az-discover-sub">No stores found</li>
+            }
+        </ul>
+        <h4>Key Vaults</h4>
+        <ul class="az-discover-list" aria-label="Vaults">
+            @foreach (var vault in _vaults ?? [])
+            {
+                <li>
+                    <span class="az-mono">@vault.Name</span>
+                    <span class="az-discover-sub">@vault.Endpoint.Host</span>
+                    <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="@($"Copy URI of {vault.Name}")"
+                                  OnClick="() => CopyAsync(vault.Endpoint.ToString())">
+                        <FluentIcon Value="@(new Icons.Regular.Size16.Copy())" />
+                    </FluentButton>
+                </li>
+            }
+            @if (_vaults is { Count: 0 })
+            {
+                <li class="az-discover-sub">No vaults found</li>
+            }
+        </ul>
+    }
+    <div class="az-discover-actions">
+        <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="CloseAsync">Close</FluentButton>
+    </div>
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private IReadOnlyList<EnvironmentCandidate>? _stores;
+    private IReadOnlyList<AzureResource>? _vaults;
+    private string? _error;
+
+    [CascadingParameter] public IDialogInstance? Dialog { get; set; }
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        var stores = await Runner.RunAsync("Discover App Configuration stores", OperationKind.Read, EnvService.DiscoverAsync, _cts.Token);
+        var vaults = await Runner.RunAsync("List key vaults", OperationKind.Read, Workflow.ListVaultsAsync, _cts.Token);
+        _stores = (stores as OperationResult<IReadOnlyList<EnvironmentCandidate>>.Success)?.Value;
+        _vaults = (vaults as OperationResult<IReadOnlyList<AzureResource>>.Success)?.Value;
+        _error = (stores as OperationResult<IReadOnlyList<EnvironmentCandidate>>.Failed)?.Message ?? (vaults as OperationResult<IReadOnlyList<AzureResource>>.Failed)?.Message;
+    }
+
+    private async Task CopyAsync(string text) => await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+
+    private async Task CloseAsync()
+    {
+        if (Dialog is not null)
+        {
+            await Dialog.CloseAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

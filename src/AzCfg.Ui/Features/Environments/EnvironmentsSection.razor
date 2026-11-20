@@ -1,0 +1,159 @@
+@implements IDisposable
+@inject WorkspaceState Workspace
+@inject ProjectSessions Sessions
+@inject TabsState Tabs
+@inject WorkbenchNavigator Navigator
+@inject IAzureStatusService Status
+@inject EnvironmentLoader Loader
+@inject IActivationFlow Activation
+@inject ICommandRegistry Commands
+@inject INotificationService Notifications
+@inject IJSRuntime JS
+
+<div class="az-envs">
+    @if (_loadError is not null)
+    {
+        <ErrorBar Message="@_loadError" OnRetry="LoadAsync" />
+    }
+    else if (Workspace.Environments is null)
+    {
+        <FluentProgressBar />
+    }
+    else if (Workspace.Environments.Environments.Count == 0)
+    {
+        <EmptyState Text="Set up environments" ActionText="Set up…" OnAction="() => Commands.ExecuteAsync(CommandIds.EnvSetup)" />
+    }
+    else
+    {
+        <div class="az-envs-manage">
+            <button type="button" class="az-link" @onclick="() => Commands.ExecuteAsync(CommandIds.EnvManage)">Manage</button>
+        </div>
+        @foreach (var env in Workspace.Environments.Environments)
+        {
+            var kind = EnvironmentRules.KindOf(env);
+            var health = HealthOf(env);
+            <div class="az-env-item @(IsSelected(env) ? "selected" : "") @(env.IsProtected ? "protected" : "")" data-env="@env.Name">
+                <button type="button" class="az-env-main" title="@Tooltip(env, health)" @onclick="() => SelectAsync(env)">
+                    <span class="az-env-dot kind-@kind.ToString().ToLowerInvariant()"></span>
+                    <span class="az-env-name">@env.Name</span>
+                    @if (env.IsProtected)
+                    {
+                        <FluentIcon Value="@(new Icons.Regular.Size16.LockClosed())" Title="Protected" />
+                    }
+                    <span class="az-env-detail">@Detail(env)</span>
+                    <StatusDot State="health.State" Detail="@health.Message" />
+                    <span class="az-env-state">@StateText(health.State, env)</span>
+                </button>
+                <span class="az-env-actions">
+                    <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="@($"Check connection to {env.Name}")"
+                                  OnClick="() => CheckAsync(env)">
+                        <FluentIcon Value="@(new Icons.Regular.Size16.ArrowClockwise())" />
+                    </FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="@($"Make {env.Name} active")"
+                                  Disabled="@(!CanActivate(env))" OnClick="() => Activation.MakeActiveAsync(ProjectId!, env)">
+                        <FluentIcon Value="@(new Icons.Regular.Size16.Checkmark())" />
+                    </FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="@($"Copy endpoint of {env.Name}")"
+                                  OnClick="() => CopyAsync(env)">
+                        <FluentIcon Value="@(new Icons.Regular.Size16.Copy())" />
+                    </FluentButton>
+                </span>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private string? _loadError;
+
+    /// <summary>The project the environments act on: the active project tab, else the selected project of the workspace tree.</summary>
+    private string? ProjectId => ActiveProject.IdOf(Tabs, Workspace);
+
+    private ProjectBinding? Binding => ProjectId is { } id ? Workspace.FindProject(id)?.Binding : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Workspace.Changed += OnChanged;
+        Tabs.Changed += OnChanged;
+        Status.Changed += OnChanged;
+        Sessions.Changed += OnChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loadError = null;
+        if (Loader.LoadIfNeededAsync(_cts.Token) is { } loading && await loading is OperationResult<EnvironmentsSnapshot>.Failed failed)
+        {
+            _loadError = failed.Message;
+            return;
+        }
+
+        foreach (var env in Workspace.Environments?.Environments ?? [])
+        {
+            if (!Status.Environments.ContainsKey(env.Name))
+            {
+                await Loader.CheckAsync(env, Binding?.Service, _cts.Token);
+            }
+        }
+    }
+
+    private EnvironmentHealth HealthOf(ConfigEnvironment env) =>
+        Status.Environments.TryGetValue(env.Name, out var health) ? health : new EnvironmentHealth(env.Name, ConnectionState.Unknown, null, DateTimeOffset.UnixEpoch);
+
+    private bool IsSelected(ConfigEnvironment env) =>
+        ProjectId is { } id && Sessions.TryGet(id, out var session) && string.Equals(session.EnvironmentName, env.Name, StringComparison.OrdinalIgnoreCase);
+
+    private bool CanActivate(ConfigEnvironment env) => Binding is { } binding && !EnvironmentRules.IsActive(binding, env);
+
+    /// <summary>Store host, or the label in label mode (§2.3).</summary>
+    private string Detail(ConfigEnvironment env) =>
+        Workspace.Environments?.Profile?.Mode == EnvironmentMode.LabelPerEnvironment ? $"label {env.Label ?? env.Name}" : env.StoreEndpoint.Host;
+
+    private static string StateText(ConnectionState state, ConfigEnvironment env) => state switch
+    {
+        ConnectionState.Connected => "connected",
+        ConnectionState.Checking => "checking…",
+        ConnectionState.AuthRequired => "sign in",
+        ConnectionState.Forbidden => "no access",
+        ConnectionState.Unreachable => "unreachable",
+        _ => string.Empty,
+    };
+
+    private static string Tooltip(ConfigEnvironment env, EnvironmentHealth health) =>
+        $"{env.Name} · {env.StoreEndpoint.Host}{(env.IsProtected ? " · protected" : string.Empty)}{(health.Message is { Length: > 0 } ? $" · {health.Message}" : string.Empty)}";
+
+    /// <summary>Selecting an environment only changes what the active project tab shows (FR-E4): no side effects on local files.</summary>
+    private async Task SelectAsync(ConfigEnvironment env)
+    {
+        if (ProjectId is { } id)
+        {
+            Navigator.OpenProject(id, env.Name);
+        }
+        else
+        {
+            await Notifications.ToastAsync("Open a project first", ToastIntent.Info);
+        }
+    }
+
+    private Task CheckAsync(ConfigEnvironment env) => Loader.CheckAsync(env, Binding?.Service, _cts.Token);
+
+    private async Task CopyAsync(ConfigEnvironment env)
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", env.StoreEndpoint.ToString());
+        await Notifications.ToastAsync($"Copied the endpoint of {env.Name}", ToastIntent.Info);
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Workspace.Changed -= OnChanged;
+        Tabs.Changed -= OnChanged;
+        Status.Changed -= OnChanged;
+        Sessions.Changed -= OnChanged;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

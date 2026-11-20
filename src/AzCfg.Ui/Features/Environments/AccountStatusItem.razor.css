@@ -1,0 +1,15 @@
+.az-account-retry {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px;
+    border: none;
+    background: transparent;
+    color: var(--az-diff-modified);
+    font: inherit;
+    cursor: pointer;
+}
+
+.az-account-retry:hover {
+    background: var(--colorNeutralBackground1Hover);
+}
