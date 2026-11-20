@@ -1,5 +1,6 @@
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Environments;
+using AzCfg.Core.Health;
 using AzCfg.Core.Model;
 using AzCfg.Core.Security;
 using AzCfg.Core.UseCases;
@@ -42,6 +43,9 @@ public sealed class ScenarioHost
 
     public FixedProjectDetector Detector { get; }
 
+    /// <summary>The signed-in Azure account reported by <c>status --check</c>.</summary>
+    public FixedAzureAccountProbe Account { get; } = new();
+
     public ProjectBinding? Binding => State.Binding(Repo);
 
     public async Task<(int Exit, string Output)> RunAsync(params string[] args)
@@ -72,7 +76,9 @@ public sealed class ScenarioHost
             .AddSingleton<IUserSettingsService, UserSettingsService>()
             .AddSingleton<IProjectSettingsService, ProjectSettingsService>()
             .AddSingleton<IProjectService, ProjectService>()
-            .AddSingleton<ISyncService, SyncService>();
+            .AddSingleton<IAzureAccountProbe>(Account)
+            .AddSingleton<ISyncService, SyncService>()
+            .AddSingleton<IHealthService, HealthService>();
 
         var app = new CommandApp(new TypeRegistrar(services));
         app.Configure(c =>

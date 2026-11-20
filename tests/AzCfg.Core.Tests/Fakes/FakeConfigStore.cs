@@ -13,14 +13,22 @@ internal sealed class FakeConfigStore(
     public IReadOnlyList<Change>? Applied { get; private set; }
     public string[] FailKeys { get; set; } = [];
     public string[] Labels { get; set; } = [];
+    public HashSet<string> Unreachable { get; } = [];
 
     public Task<IReadOnlyList<string>> ListLabelsAsync(Uri storeEndpoint, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>(Labels);
 
     public IAsyncEnumerable<ConfigEntry> ReadAsync(ConfigEnvironment env, string service, CancellationToken ct) =>
-        entriesByEnvironment![env.Name].ToAsyncEnumerable();
+        Unreachable.Contains(env.Name)
+            ? throw new UnauthorizedAccessException("denied, value=CANARY")
+            : entriesByEnvironment![env.Name].ToAsyncEnumerable();
 
     public async IAsyncEnumerable<string> ListServicePrefixesAsync(ConfigEnvironment env, [EnumeratorCancellation] CancellationToken ct)
     {
+        if (Unreachable.Contains(env.Name))
+        {
+            throw new UnauthorizedAccessException("denied, value=CANARY");
+        }
+
         foreach (var prefix in prefixesByEnvironment[env.Name])
         {
             yield return prefix;
