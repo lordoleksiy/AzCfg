@@ -160,6 +160,7 @@ src/
                           IEnvironmentResolver, IUserStateStore, ISecretFingerprinter,
                           IProjectManifestStore, IConfigSourceScanner, IConventionProfileStore, IMigrationExecutor
     UseCases/             SetupService, ProjectService, SyncService, UserSettingsService, LocalTargetOption,
+                          ProjectSettingsService (project.* ключі `config`, ADR 0014), ProjectServiceGuard (--service),
                           ProjectConfigService (discover/adopt/standardize/validate/compare)
   AzCfg.Infrastructure/
     Azure/                AppConfigStore, KeyVaultSecretStore, ResourceGraphDiscovery
@@ -261,6 +262,7 @@ public interface IUserStateStore
 {
     Task<ConfigState?> LoadSnapshotAsync(string repoPath, string environment, CancellationToken ct);
     Task SaveSnapshotAsync(string repoPath, string environment, ConfigState state, CancellationToken ct);
+    Task DeleteSnapshotsAsync(string repoPath, CancellationToken ct);  // усі середовища репо; при зміні project.service (ADR 0014)
     Task<byte[]> GetOrCreateFingerprintKeyAsync(CancellationToken ct); // персональний ключ, не в репо
     // + LoadProfileAsync/SaveProfileAsync, LoadBindingAsync/SaveBindingAsync
 }
@@ -330,7 +332,8 @@ DriftReport drift = await config.CompareAsync(repoPath, profile, ct);
 ```
 azcfg init [--mode stores|labels] [--store <endpoint>] [--label <default>]   майстер середовищ
 azcfg config list | get <key> | set <key> <value>   mode, defaultLabel, gitignoreLocalFiles,
-                                             env.<name>.label|endpoint|protected
+                                             env.<name>.label|endpoint|protected; у прив'язаному проєкті
+                                             (--project) ще project.service|values|secrets|vault.<env>|active|ignore  [ADR 0014]
 azcfg status [--check]                       активне середовище, ⇡/⇣/конфлікти; --check — здоров'я (0.5.0)  [ADR 0013]
 azcfg diff [<a>] [<b>] [--missing --all]     local ↔ env, env ↔ env, ключі, відсутні в частині середовищ  [ADR 0013]
 azcfg pull [--force] [--service <name>] [--key <p>]   App Config + KV → локальні файли (--key — лише вибрані)

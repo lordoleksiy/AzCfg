@@ -17,9 +17,13 @@ public sealed class ConfigCommandTests
         [new("dev", Shared, "Development", false), new("prod", Shared, "Production", true)],
         EnvironmentMode.LabelPerEnvironment);
 
-    private sealed class InMemoryState(UserProfile? profile) : IUserStateStore
+    private sealed class InMemoryState(UserProfile? profile, ProjectBinding? binding = null) : IUserStateStore
     {
         public UserProfile? Profile { get; private set; } = profile;
+
+        public ProjectBinding? Binding { get; private set; } = binding;
+
+        public int SnapshotDeletes { get; private set; }
 
         public Task<UserProfile?> LoadProfileAsync(CancellationToken ct) => Task.FromResult(Profile);
 
@@ -29,22 +33,67 @@ public sealed class ConfigCommandTests
             return Task.CompletedTask;
         }
 
-        public Task<ProjectBinding?> LoadBindingAsync(string repoPath, CancellationToken ct) => throw new NotSupportedException();
-        public Task SaveBindingAsync(ProjectBinding binding, CancellationToken ct) => throw new NotSupportedException();
+        public Task<ProjectBinding?> LoadBindingAsync(string repoPath, CancellationToken ct) => Task.FromResult(Binding);
+
+        public Task SaveBindingAsync(ProjectBinding binding, CancellationToken ct)
+        {
+            Binding = binding;
+            return Task.CompletedTask;
+        }
+
         public Task<ConfigState?> LoadSnapshotAsync(string repoPath, string environment, CancellationToken ct) => throw new NotSupportedException();
         public Task SaveSnapshotAsync(string repoPath, string environment, ConfigState state, CancellationToken ct) => throw new NotSupportedException();
+        public Task DeleteSnapshotsAsync(string repoPath, CancellationToken ct)
+        {
+            SnapshotDeletes++;
+            return Task.CompletedTask;
+        }
+
         public Task<byte[]> GetOrCreateFingerprintKeyAsync(CancellationToken ct) => throw new NotSupportedException();
     }
 
-    private static async Task<(int Exit, string Output, InMemoryState State)> Run(params string[] args)
+    private static readonly string Repo = Path.GetFullPath("/repo");
+    private static readonly string Csproj = Path.Combine(Repo, "Orders", "Orders.csproj");
+
+    private static readonly ProjectBinding Bound = new(
+        Repo,
+        "orders",
+        new(LocalTargetKind.AppSettingsLocal, Csproj, LocalFileFormat.NestedJson),
+        new(LocalTargetKind.UserSecrets, Csproj, LocalFileFormat.NestedJson),
+        new Dictionary<string, Uri>(),
+        "dev");
+
+    private sealed class OneProject : IProjectDetector
     {
-        var state = new InMemoryState(Profile);
+        public Task<IReadOnlyList<ProjectInfo>> DetectAsync(string repoPath, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ProjectInfo>>([new(Repo, Csproj, "Orders", false, null)]);
+    }
+
+    private sealed class SafeTarget(LocalTargetKind kind) : ILocalTarget
+    {
+        public LocalTargetKind Kind => kind;
+        public bool CanHandle(ProjectInfo project) => true;
+        public Task<LocalTargetOption> InspectAsync(LocalTargetBinding target, CancellationToken ct) => Task.FromResult(new LocalTargetOption(target, true, true));
+        public Task<IReadOnlyList<LocalValue>> ReadAsync(LocalTargetBinding target, CancellationToken ct) => throw new NotSupportedException();
+        public Task WriteAsync(LocalTargetBinding target, IReadOnlyList<LocalValue> values, CancellationToken ct) => throw new NotSupportedException();
+        public Task EnsureGitIgnoredAsync(LocalTargetBinding target, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private static Task<(int Exit, string Output, InMemoryState State)> Run(params string[] args) => RunBound(null, args);
+
+    private static async Task<(int Exit, string Output, InMemoryState State)> RunBound(ProjectBinding? binding, params string[] args)
+    {
+        var state = new InMemoryState(Profile, binding);
         var writer = new StringWriter();
         var console = AnsiConsole.Create(new() { Out = new AnsiConsoleOutput(writer), ColorSystem = ColorSystemSupport.NoColors, Enrichment = new() { UseDefaultEnrichers = false } });
         console.Profile.Width = 200;
         var services = new ServiceCollection()
             .AddSingleton<IUserStateStore>(state)
-            .AddSingleton<IUserSettingsService, UserSettingsService>();
+            .AddSingleton<IProjectDetector>(new OneProject())
+            .AddSingleton<ILocalTarget>(new SafeTarget(LocalTargetKind.UserSecrets))
+            .AddSingleton<ILocalTarget>(new SafeTarget(LocalTargetKind.AppSettingsLocal))
+            .AddSingleton<IUserSettingsService, UserSettingsService>()
+            .AddSingleton<IProjectSettingsService, ProjectSettingsService>();
         var app = new CommandApp(new TypeRegistrar(services));
         app.Configure(c =>
         {
@@ -57,7 +106,7 @@ public sealed class ConfigCommandTests
                 b.AddCommand<ConfigSetCommand>("set");
             });
         });
-        var exit = await app.RunAsync(["config", .. args]);
+        var exit = await app.RunAsync(["config", .. args, "--project", Repo]);
         return (exit, writer.ToString(), state);
     }
 
@@ -147,5 +196,76 @@ public sealed class ConfigCommandTests
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => Run("set", key, value));
 
         Assert.Contains(key.Split('.')[^1] == "label" ? "Unknown environment" : "Invalid value", ex.Message);
+    }
+
+    [Fact]
+    public async Task List_InsideBoundProject_PrintsUserKeysThenProjectKeys()
+    {
+        var (exit, output, _) = await RunBound(Bound, "list");
+
+        Assert.Equal(0, exit);
+        Assert.True(output.IndexOf("env.prod.protected", StringComparison.Ordinal) < output.IndexOf("project.service", StringComparison.Ordinal));
+        Assert.Matches(@"project\.service\s.*orders", output);
+        Assert.Matches(@"project\.active\s.*dev", output);
+        Assert.Matches(@"project\.vault\.prod\s.*\(none\)", output);
+    }
+
+    [Fact]
+    public async Task List_Json_InsideBoundProject_KeepsTheSettingShape()
+    {
+        var (_, output, _) = await RunBound(Bound, "list", "--json");
+
+        using var json = System.Text.Json.JsonDocument.Parse(output);
+        var items = json.RootElement.EnumerateArray().ToList();
+        Assert.All(items, i => Assert.Equal(["key", "value"], i.EnumerateObject().Select(p => p.Name)));
+        Assert.Equal("orders", items.Single(i => i.GetProperty("key").GetString() == "project.service").GetProperty("value").GetString());
+        Assert.Equal("mode", items[0].GetProperty("key").GetString());
+    }
+
+    [Fact]
+    public async Task Get_ProjectKey_ShowsIt()
+    {
+        var (_, output, _) = await RunBound(Bound, "get", "project.service", "--json");
+
+        Assert.Equal("""{"key":"project.service","value":"orders"}""", output.Trim());
+    }
+
+    [Fact]
+    public async Task Set_Service_SavesAndPrintsTheFollowUpHint()
+    {
+        var (exit, output, state) = await RunBound(Bound, "set", "project.service", "billing");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("project.service = billing", output);
+        Assert.Contains("azcfg use", output);
+        Assert.Equal(("billing", null), (state.Binding!.Service, state.Binding.ActiveEnvironment));
+        Assert.Equal(1, state.SnapshotDeletes);
+    }
+
+    [Fact]
+    public async Task Set_Secrets_PrintsPullForceHint_ButJsonIsTheSettingAlone()
+    {
+        var (_, human, _) = await RunBound(Bound, "set", "project.secrets", "appsettings-local");
+        var (_, json, state) = await RunBound(Bound, "set", "project.secrets", "appsettings-local", "--json");
+
+        Assert.Contains("azcfg pull --force", human);
+        Assert.Equal($$"""{"key":"project.secrets","value":{{System.Text.Json.JsonSerializer.Serialize("appsettings-local:" + Csproj)}}}""", json.Trim());
+        Assert.Equal(LocalTargetKind.AppSettingsLocal, state.Binding!.SecretsTarget.Kind);
+    }
+
+    [Fact]
+    public async Task Set_ProjectKey_WithoutBinding_AsksForPull()
+    {
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Run("set", "project.service", "x"));
+
+        Assert.Contains("azcfg pull", ex.Message);
+    }
+
+    [Fact]
+    public async Task Set_ReadOnlyProjectKey_IsAnError()
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => RunBound(Bound, "set", "project.active", "prod"));
+
+        Assert.Contains("azcfg use", ex.Message);
     }
 }

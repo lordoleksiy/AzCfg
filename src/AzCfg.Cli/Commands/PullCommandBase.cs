@@ -23,7 +23,16 @@ public abstract class PullCommandBase<TSettings>(
     protected ISyncService Sync { get; } = sync;
 
     protected override async Task<ProjectBinding> GetBindingAsync(string repo, ProjectResolution resolution, TSettings settings, CancellationToken ct) =>
-        resolution.Existing ?? await BindAsync(repo, resolution, settings.Service, !settings.Json && !settings.Yes, ct);
+        resolution.Existing is { } existing
+            ? Guard(existing, settings.Service)
+            : await BindAsync(repo, resolution, settings.Service, !settings.Json && !settings.Yes, ct);
+
+    /// <summary>A bound project keeps its service: <c>--service</c> naming another one is an error (ADR 0014), the same one is a no-op.</summary>
+    private static ProjectBinding Guard(ProjectBinding existing, string? requested)
+    {
+        ProjectServiceGuard.EnsureSameService(existing, requested);
+        return existing;
+    }
 
     public override async Task<int> ExecuteAsync(CommandContext context, TSettings settings, CancellationToken ct)
     {

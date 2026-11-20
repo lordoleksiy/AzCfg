@@ -70,6 +70,7 @@ public sealed class ScenarioHost
             .AddSingleton<IEnvironmentResolver, ProfileEnvironmentResolver>()
             .AddSingleton<ISetupService, SetupService>()
             .AddSingleton<IUserSettingsService, UserSettingsService>()
+            .AddSingleton<IProjectSettingsService, ProjectSettingsService>()
             .AddSingleton<IProjectService, ProjectService>()
             .AddSingleton<ISyncService, SyncService>();
 
