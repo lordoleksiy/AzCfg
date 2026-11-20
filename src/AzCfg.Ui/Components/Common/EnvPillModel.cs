@@ -1,4 +1,4 @@
-using AzCfg.Ui.Application.Environments;
+using AzCfg.Core.Environments;
 
 namespace AzCfg.Ui.Components.Common;
 

@@ -1,7 +1,7 @@
 using AzCfg.Core.Abstractions;
+using AzCfg.Core.Environments;
 using AzCfg.Core.Model;
 using AzCfg.Core.UseCases;
-using AzCfg.Ui.Application.Environments;
 
 namespace AzCfg.Ui.Application.Workspace;
 
