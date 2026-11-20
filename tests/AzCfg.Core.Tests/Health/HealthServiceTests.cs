@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AzCfg.Core.Abstractions;
 using AzCfg.Core.Environments;
 using AzCfg.Core.Health;
 using AzCfg.Core.Model;
@@ -24,7 +25,8 @@ public sealed class HealthServiceTests
         {
             State = new() { Profile = new([Env("dev"), Env("prod", true)]), Binding = binding };
             entries ??= new() { ["dev"] = [], ["prod"] = [] };
-            Config = new(entries.Keys.ToDictionary(k => k, _ => new[] { "orders" }), entries);
+            Prefixes = entries.Keys.ToDictionary(k => k, _ => new[] { "orders" });
+            Config = new(Prefixes, entries);
             FakeLocalTarget[] all = targets.Length > 0 ? targets : [new(LocalTargetKind.UserSecrets), new(LocalTargetKind.AppSettingsLocal)];
             Service = new HealthService(
                 State,
@@ -33,16 +35,27 @@ public sealed class HealthServiceTests
                 new SyncService(Config, KeyVault, State, new HmacSecretFingerprinter(new byte[32]), all),
                 KeyVault,
                 Probe,
-                all);
+                all,
+                Detector);
         }
 
         public FakeUserStateStore State { get; }
+        public Dictionary<string, string[]> Prefixes { get; }
         public FakeConfigStore Config { get; }
+        public ListDetector Detector { get; } = new([new("/repo", "/repo/Orders/Orders.csproj", "Orders", false, null)]);
         public FakeSecretStore KeyVault { get; } = new([]);
         public FakeAzureAccountProbe Probe { get; } = new();
         public HealthService Service { get; }
 
         public Task<HealthReport> CheckAsync() => Service.CheckAsync("/repo", Ct);
+    }
+
+    private sealed class ListDetector(List<ProjectInfo> projects) : IProjectDetector
+    {
+        public bool Throws { get; set; }
+
+        public Task<IReadOnlyList<ProjectInfo>> DetectAsync(string repoPath, CancellationToken ct) =>
+            Throws ? throw new IOException("boom, value=CANARY") : Task.FromResult<IReadOnlyList<ProjectInfo>>(projects);
     }
 
     private static ConfigEnvironment Env(string name, bool isProtected = false) => new(name, new Uri($"https://{name}.azconfig.io"), null, isProtected);
@@ -228,6 +241,170 @@ public sealed class HealthServiceTests
         var report = await rig.CheckAsync();
 
         Assert.Empty(report.Findings);
+    }
+
+    private static HealthFinding[] Mismatches(HealthReport report) => [.. report.Findings.Where(f => f.Kind == HealthCheckKind.BindingMismatch)];
+
+    [Fact]
+    public async Task CheckAsync_ServiceHasNoKeys_WithOneOtherPrefix_WarnsAndSuggestsIt()
+    {
+        var rig = new Rig(Binding with { Service = "billing" });
+
+        var finding = Assert.Single(Mismatches(await rig.CheckAsync()));
+
+        Assert.Equal(HealthSeverity.Warning, finding.Severity);
+        Assert.Contains("billing", finding.Message);
+        Assert.Equal("azcfg config set project.service orders", finding.Fix);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServiceHasNoKeys_WithSeveralOtherPrefixes_UsesPlaceholder()
+    {
+        var rig = new Rig(Binding with { Service = "billing" });
+        rig.Prefixes["dev"] = ["orders", "users"];
+
+        var finding = Assert.Single(Mismatches(await rig.CheckAsync()));
+
+        Assert.Equal("azcfg config set project.service <SERVICE>", finding.Fix);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServiceHasNoKeys_WithNoPrefixes_UsesPlaceholder()
+    {
+        var rig = new Rig(Binding with { Service = "billing" });
+        rig.Prefixes["dev"] = [];
+        rig.Prefixes["prod"] = [];
+
+        var finding = Assert.Single(Mismatches(await rig.CheckAsync()));
+
+        Assert.Equal("azcfg config set project.service <SERVICE>", finding.Fix);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServiceExistsInOneEnvironmentOnly_DoesNotWarn()
+    {
+        var rig = new Rig(Binding);
+        rig.Prefixes["prod"] = [];
+
+        Assert.Empty(Mismatches(await rig.CheckAsync()));
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServicePrefixCaseDiffers_IsAMismatch()
+    {
+        var rig = new Rig(Binding with { Service = "Orders" });
+
+        Assert.Single(Mismatches(await rig.CheckAsync()));
+    }
+
+    [Fact]
+    public async Task CheckAsync_NoEnvironmentReachable_DoesNotReportServiceMismatch()
+    {
+        var rig = new Rig(Binding with { Service = "billing" });
+        rig.Config.Unreachable.UnionWith(["dev", "prod"]);
+
+        Assert.Empty(Mismatches(await rig.CheckAsync()));
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServiceMismatch_OnlyReachableEnvironmentsCount()
+    {
+        var rig = new Rig(Binding);
+        rig.Config.Unreachable.Add("prod");
+        rig.Prefixes["prod"] = [];
+
+        Assert.Empty(Mismatches(await rig.CheckAsync()));
+    }
+
+    [Fact]
+    public async Task CheckAsync_MissingValuesProject_IsAnErrorWithFix()
+    {
+        var rig = new Rig(Binding with { ValuesTarget = new LocalTargetBinding(LocalTargetKind.AppSettingsLocal, "/repo/Gone/Gone.csproj", LocalFileFormat.NestedJson) });
+
+        var finding = Assert.Single(Mismatches(await rig.CheckAsync()));
+
+        Assert.Equal(HealthSeverity.Error, finding.Severity);
+        Assert.Equal("azcfg config set project.values appsettings-local:<PATH>", finding.Fix);
+        Assert.Contains("/repo/Gone/Gone.csproj", finding.Message);
+    }
+
+    [Fact]
+    public async Task CheckAsync_MissingSecretsProject_IsAnErrorWithFix()
+    {
+        var rig = new Rig(Binding with { SecretsTarget = new LocalTargetBinding(LocalTargetKind.UserSecrets, "/repo/Gone/Gone.csproj", LocalFileFormat.NestedJson) });
+
+        var finding = Assert.Single(Mismatches(await rig.CheckAsync()));
+
+        Assert.Equal(HealthSeverity.Error, finding.Severity);
+        Assert.Equal("azcfg config set project.secrets user-secrets:<PATH>", finding.Fix);
+    }
+
+    [Fact]
+    public async Task CheckAsync_SameMissingProjectForBothTargets_ReportsOnce()
+    {
+        var gone = new LocalTargetBinding(LocalTargetKind.UserSecrets, "/repo/Gone/Gone.csproj", LocalFileFormat.NestedJson);
+        var rig = new Rig(Binding with { ValuesTarget = gone, SecretsTarget = gone });
+
+        var finding = Assert.Single(Mismatches(await rig.CheckAsync()));
+
+        Assert.Equal("azcfg config set project.secrets user-secrets:<PATH>", finding.Fix);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ProjectDirectoryOfTarget_IsNotMissing()
+    {
+        var rig = new Rig(Binding with { ValuesTarget = new LocalTargetBinding(LocalTargetKind.AppSettingsLocal, "/repo/Orders", LocalFileFormat.NestedJson) });
+
+        Assert.Empty(Mismatches(await rig.CheckAsync()));
+    }
+
+    [Fact]
+    public async Task CheckAsync_DetectorThrows_SkipsProjectCheckWithoutLeaking()
+    {
+        var rig = new Rig(Binding);
+        rig.Detector.Throws = true;
+
+        var report = await rig.CheckAsync();
+
+        Assert.Empty(Mismatches(report));
+        Assert.DoesNotContain("CANARY", Json(report));
+    }
+
+    [Fact]
+    public async Task CheckAsync_VaultForUnknownEnvironment_WarnsWithFix()
+    {
+        var rig = new Rig(Binding with { VaultByEnvironment = new Dictionary<string, Uri> { ["staging"] = new("https://kv-staging.vault.azure.net"), ["DEV"] = new("https://kv-dev.vault.azure.net") } });
+
+        var finding = Assert.Single(Mismatches(await rig.CheckAsync()));
+
+        Assert.Equal(HealthSeverity.Warning, finding.Severity);
+        Assert.Equal("staging", finding.Environment);
+        Assert.Equal("azcfg config set project.vault.staging \"\"", finding.Fix);
+    }
+
+    [Fact]
+    public async Task CheckAsync_NoBinding_HasNoBindingMismatch()
+    {
+        var rig = new Rig(null);
+
+        Assert.Empty(Mismatches(await rig.CheckAsync()));
+    }
+
+    [Fact]
+    public async Task CheckAsync_NotSignedIn_HasNoBindingMismatch()
+    {
+        var rig = new Rig(Binding with { Service = "billing", ValuesTarget = new LocalTargetBinding(LocalTargetKind.AppSettingsLocal, "/repo/Gone/Gone.csproj", LocalFileFormat.NestedJson) });
+        rig.Probe.Result = new(false, null, "No credential");
+
+        Assert.Empty(Mismatches(await rig.CheckAsync()));
+    }
+
+    [Fact]
+    public async Task CheckAsync_HealthyBinding_HasNoBindingMismatch()
+    {
+        var rig = new Rig(Binding with { VaultByEnvironment = new Dictionary<string, Uri> { ["prod"] = new("https://kv-prod.vault.azure.net") } });
+
+        Assert.Empty(Mismatches(await rig.CheckAsync()));
     }
 
     [Fact]
