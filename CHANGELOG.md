@@ -6,17 +6,19 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
 
 ## [Unreleased]
 
-### Changed
-- `status --check`: each environment in `--json` gains `access` (`ok`, `authRequired`, `forbidden`, `unreachable`);
-  `reachable` stays. A sign-in, 403 or network failure is described with the fix (`az login`, the required role)
-  instead of the exception type name.
-
 ### Planned
 - 0.6.0 (ADR 0012, amendment 2): minimal project manifest `azcfg.json`, `project.shared`, manifest and secret-like-key
   checks in `status --check`, `local.settings.json` target.
 - 0.7.0: UI (`azcfg ui`).
 - 0.8.0 (ADR 0014): App Service / Function App settings as remotes (`--remote`, `env@remote`, `promote --key`).
 - 0.9.0 (ADR 0015): manifest v2 — team environments, key layout, custom JSON target file.
+
+## [0.5.0]
+Stable release of everything in `0.5.0-preview.1` below, plus:
+### Changed
+- `status --check`: each environment in `--json` gains `access` (`ok`, `authRequired`, `forbidden`, `unreachable`);
+  `reachable` stays. A sign-in, 403 or network failure is described with the fix (`az login`, the required role)
+  instead of the exception type name.
 
 ## [0.5.0-preview.1]
 Prerelease: install with `--prerelease` (or `--version 0.5.0-preview.1`). Not yet verified against real Azure.
