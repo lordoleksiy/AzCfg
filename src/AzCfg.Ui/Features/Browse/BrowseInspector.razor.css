@@ -1,0 +1,51 @@
+.az-bi-hint,
+.az-bi-muted {
+    color: var(--colorNeutralForeground3);
+}
+
+.az-bi-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0 8px;
+}
+
+.az-bi-line {
+    margin: 2px 0;
+    overflow-wrap: anywhere;
+}
+
+.az-bi-value {
+    margin: 2px 0;
+    overflow-wrap: anywhere;
+}
+
+.az-bi-warning {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 2px 0;
+    color: var(--az-diff-modified);
+}
+
+.az-bi-actions,
+.az-bi-edit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.az-bi-edit .az-input {
+    flex: 1;
+    min-width: 120px;
+}
+
+.az-bi-before {
+    color: var(--colorNeutralForeground3);
+}
+
+.az-bi-after {
+    color: var(--az-draft);
+}

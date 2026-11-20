@@ -1,0 +1,60 @@
+@using AzCfg.Core.Environments
+@using AzCfg.Ui.Application.State
+@using AzCfg.Ui.Shared
+@implements IDisposable
+
+<header class="az-project-header">
+    <div class="az-project-title">
+        <span class="az-project-name">@Node.Project.Project.Name</span>
+        @if (Node.Binding is { } binding)
+        {
+            <span class="az-project-service">· @binding.Service</span>
+        }
+    </div>
+    <EnvironmentSwitcher Environments="Pills" SelectedName="@Environment?.Name" OnSelect="Session.SetEnvironment" />
+    <nav class="az-project-modes" role="tablist" aria-label="Mode">
+        <button type="button" role="tab" class="az-project-mode @Selected(ProjectMode.Browse)" aria-selected="@IsMode(ProjectMode.Browse)"
+                @onclick="() => Session.SetMode(ProjectMode.Browse)">Browse</button>
+        <button type="button" role="tab" class="az-project-mode @Selected(ProjectMode.Compare)" aria-selected="@IsMode(ProjectMode.Compare)"
+                @onclick="() => Session.SetMode(ProjectMode.Compare)">Compare</button>
+        <button type="button" role="tab" class="az-project-mode @Selected(ProjectMode.Sync)" aria-selected="@IsMode(ProjectMode.Sync)"
+                @onclick="() => Session.SetMode(ProjectMode.Sync)">Sync@(PendingItems > 0 ? $" ({PendingItems})" : null)</button>
+    </nav>
+    @if (_summary is { IsActive: true } summary)
+    {
+        <span class="az-project-summary" aria-label="Summary">
+            <span class="az-project-local" title="Local changes to push">⇡ @summary.LocalChanges</span>
+            <span class="az-project-remote" title="Remote changes to pull">⇣ @summary.RemoteChanges</span>
+            @if (summary.Conflicts.Count > 0)
+            {
+                <span class="az-project-conflicts" title="Conflicts">! @summary.Conflicts.Count</span>
+            }
+        </span>
+    }
+    <span class="az-project-actions">
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="Refresh (Alt+R)" OnClick="RefreshAsync">
+            <FluentIcon Value="@(new Icons.Regular.Size16.ArrowClockwise())" />
+        </FluentButton>
+        @if (Environment is { IsProtected: true } protectedEnv)
+        {
+            <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true"
+                          Title="@(Protection.IsLocked(protectedEnv) ? "Unlock editing" : "Lock editing")" OnClick="() => ToggleLockAsync(protectedEnv)">
+                <FluentIcon Value="@(new Icons.Regular.Size16.LockClosed())" />
+            </FluentButton>
+        }
+        <span class="az-project-overflow">
+            <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="More" aria-expanded="@(_menu ? "true" : "false")"
+                          OnClick="() => _menu = !_menu">⋯</FluentButton>
+            @if (_menu)
+            {
+                <div class="az-project-menu" role="menu">
+                    <button type="button" role="menuitem" @onclick="BindAsync">Binding settings…</button>
+                    @if (Environment is { } env && Node.Binding is { } bound && !EnvironmentRules.IsActive(bound, env))
+                    {
+                        <button type="button" role="menuitem" @onclick="() => MakeActiveAsync(env)">Make @env.Name active</button>
+                    }
+                </div>
+            }
+        </span>
+    </span>
+</header>

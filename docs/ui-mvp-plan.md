@@ -153,7 +153,7 @@ what is not verified (e.g. manual browser check).
 | DH | Demo mode | F1, T1 | W2 | [x] |
 | M1 | One trunk: `dev` ↔ `master` (CLI 0.4.0 + 0.5.0), Application delegates to Core | DH | W2.5 | [x] |
 | U1 | UI: workspace, environments, settings | P1, S1, M1 | W3 | [x] |
-| U2 | UI: project tab + Browse | P1, P2, S1, S2, S3, M1 | W3 | [ ] |
+| U2 | UI: project tab + Browse | P1, P2, S1, S2, S3, M1 | W3 | [x] |
 | U3 | UI: Compare | P1, P2, S1, S2, M1 | W3 | [x] |
 | U4 | UI: Sync + make active | P1, P2, S1, S3, M1 | W3 | [x] |
 | UX1 | UI: Problems panel | U1 | W4 | [ ] |
@@ -1684,7 +1684,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     (5) `local.settings.json` read-only with tooltip; libraries dimmed; (6) *manual (demo `empty` and `full`)*.
   - **Tests:** bUnit with fakes of Application interfaces (`tests/AzCfg.Ui.Tests/Features/<X>/Fakes`).
 
-- [ ] **U2 — UI: project tab + Browse**
+- [x] **U2 — UI: project tab + Browse**
   - **Goal:** FR-B1…B7, FR-X1, FR-X2, FR-S7 (header), AD-5…AD-8 in editing.
   - **Read:** §2.4, §2.5, §2.9–§2.12, §5 (AD-4…AD-8), §7.3 (Configuration, Sync: drafts), §7.4, §7.5, §9,
     `docs/ui-components.md`.

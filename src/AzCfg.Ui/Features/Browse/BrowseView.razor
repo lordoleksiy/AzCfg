@@ -1,0 +1,273 @@
+@using AzCfg.Core.Model
+@using AzCfg.Core.Sync
+@using AzCfg.Ui.Application.Configuration
+@using AzCfg.Ui.Application.Security
+@using AzCfg.Ui.Components.Editors
+@using AzCfg.Ui.Components.KeyTree
+
+<div class="az-browse">
+    @if (Binding is not { } binding)
+    {
+        <EmptyState Text="Bind this project to a service" ActionText="Bind…" OnAction="() => BindingFlow.BindAsync(Session.ProjectId)" />
+    }
+    else if (Environment is not { } env)
+    {
+        <EmptyState Text="Set up environments" />
+    }
+    else
+    {
+        var view = Session.View;
+        var remoteOnly = view?.IsRemoteOnly ?? !AzCfg.Core.Environments.EnvironmentRules.IsActive(binding, env);
+        var filter = Session.Filter;
+        <div class="az-browse-toolbar" role="toolbar" aria-label="Browse">
+            <input class="az-input az-browse-search" type="search" placeholder="Search keys and values…" aria-label="Search keys" @ref="_search"
+                   value="@filter.Text" @oninput="Search" @onkeydown="ClearSearchOnEscape" />
+            @if (!remoteOnly)
+            {
+                <FluentButton Appearance="@(filter.ChangedOnly ? ButtonAppearance.Primary : ButtonAppearance.Outline)" Size="ButtonSize.Small"
+                              aria-pressed="@(filter.ChangedOnly ? "true" : "false")" OnClick="ToggleChanged">Changed</FluentButton>
+            }
+            <FluentButton Appearance="@(filter.SecretsOnly ? ButtonAppearance.Primary : ButtonAppearance.Outline)" Size="ButtonSize.Small"
+                          aria-pressed="@(filter.SecretsOnly ? "true" : "false")" OnClick="ToggleSecrets">Secrets</FluentButton>
+            @if (!remoteOnly)
+            {
+                <FluentButton Appearance="@(filter.IgnoredOnly ? ButtonAppearance.Primary : ButtonAppearance.Outline)" Size="ButtonSize.Small"
+                              aria-pressed="@(filter.IgnoredOnly ? "true" : "false")" OnClick="ToggleIgnored">Ignored</FluentButton>
+            }
+            <select class="az-input az-browse-scope" aria-label="Scope" @onchange="SetScope">
+                <option value="" selected="@(filter.Scope is null)">All</option>
+                <option value="service" selected="@(filter.Scope == ConfigScope.Service)">Service</option>
+                <option value="global" selected="@(filter.Scope == ConfigScope.Global)">Global</option>
+            </select>
+            @if (!Session.JsonView)
+            {
+                <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small" Title="Expand all" OnClick="ExpandAll">Expand</FluentButton>
+                <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small" Title="Collapse all" OnClick="CollapseAll">Collapse</FluentButton>
+            }
+            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Title="Add key (Alt+N)" Disabled="@(view is null || !Editable)"
+                          OnClick="StartAdd">+ Add key</FluentButton>
+            <span class="az-browse-viewswitch" role="group" aria-label="View">
+                <FluentButton Appearance="@(Session.JsonView ? ButtonAppearance.Subtle : ButtonAppearance.Primary)" Size="ButtonSize.Small"
+                              OnClick="() => Session.SetJsonView(false)">Tree</FluentButton>
+                <FluentButton Appearance="@(Session.JsonView ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" Size="ButtonSize.Small"
+                              OnClick="() => Session.SetJsonView(true)">JSON</FluentButton>
+            </span>
+            @if (Session.JsonView)
+            {
+                <span class="az-browse-jsonside" role="group" aria-label="JSON side">
+                    <FluentButton Appearance="@(_jsonLocal ? ButtonAppearance.Subtle : ButtonAppearance.Primary)" Size="ButtonSize.Small"
+                                  OnClick="() => _jsonLocal = false">Azure</FluentButton>
+                    @if (!remoteOnly)
+                    {
+                        <FluentButton Appearance="@(_jsonLocal ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" Size="ButtonSize.Small"
+                                      OnClick="() => _jsonLocal = true">Local</FluentButton>
+                    }
+                </span>
+            }
+        </div>
+        @if (_adding && view is not null)
+        {
+            <div class="az-browse-add" role="group" aria-label="Add key">
+                <input class="az-input" aria-label="New key" placeholder="Key path, e.g. Db:Host" value="@_addKey" @oninput="e => _addKey = e.Value as string ?? string.Empty"
+                       @onkeydown:stopPropagation="true" />
+                <input class="az-input" aria-label="New value" placeholder="Value" type="@(_addSecret ? "password" : "text")" value="@_addValue"
+                       @oninput="e => _addValue = e.Value as string ?? string.Empty" @onkeydown:stopPropagation="true" />
+                <label class="az-browse-add-secret"><input type="checkbox" checked="@_addSecret" @onchange="e => _addSecret = e.Value is true" /> Key Vault secret</label>
+                <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="() => AddAsync(view)">Add</FluentButton>
+                <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="CancelAdd">Cancel</FluentButton>
+            </div>
+        }
+        @if (_error is { } error)
+        {
+            <ErrorBar Message="@($"Could not load {env.Name}: {error.Message}")" Details="@($"{error.Kind}: {error.Message}")" OnRetry="RetryAsync" />
+        }
+        <div class="az-browse-body">
+            @if (view is null)
+            {
+                @if (_error is null)
+                {
+                    <div class="az-browse-skeleton" role="status" aria-label="Loading keys">
+                        @for (var i = 0; i < 8; i++)
+                        {
+                            <div class="az-browse-skeleton-row"></div>
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                Prepare(view);
+                <div class="az-browse-main">
+                    @if (Session.JsonView)
+                    {
+                        @if (_jsonLocal && !remoteOnly)
+                        {
+                            <CodeEditor @key="@("local")" Value="@LocalJson(view)" ReadOnly="true" />
+                        }
+                        else
+                        {
+                            <CodeEditor @key="@("azure")" @ref="_editor" Value="@AzureJsonText(view)" ReadOnly="@(!Editable)"
+                                        SchemaUri="@MonacoSetup.EditJsonSchemaUri" OnChange="OnJsonChangedAsync" />
+                        }
+                    }
+                    else if (_rows.Count == 0)
+                    {
+                        <EmptyState Text="@($"No keys for ‘{binding.Service}’ in {env.Name}")" ActionText="+ Add key" OnAction="StartAdd" />
+                    }
+                    else if (Model() is { } model)
+                    {
+                        <KeyTreeGrid TRow="ConfigRow" Model="model" Columns="Columns(view, env)" AriaLabel="Keys" HighlightText="@filter.Text"
+                                     SelectedPath="@Session.SelectedKey" SelectedPathChanged="Session.Select" OnActivate="ActivateAsync" />
+                    }
+                    else
+                    {
+                        <EmptyState Text="@(string.IsNullOrEmpty(filter.Text) ? "No keys match the filters" : $"No keys match ‘{filter.Text}’")" />
+                    }
+                </div>
+                <BrowseInspector Session="Session" View="view" Row="SelectedRow" Editable="Editable" Pending="@(SelectedRow is { } selected ? PendingOf(selected) : null)"
+                                 Request="_request" />
+            }
+        </div>
+        @if (_menu is { } menu)
+        {
+            var row = menu.Row;
+            var pending = PendingOf(row);
+            var plainRemote = BrowseRows.PlainRemote(row) is not null || pending is { Removed: false, AfterIsSecret: false, After: not null };
+            var key = row.Key;
+            var ignoredExactly = view?.Binding.Ignore?.Contains(key) == true;
+            <div class="az-browse-menu-backdrop" @onclick="CloseMenu" @oncontextmenu="CloseMenu" @oncontextmenu:preventDefault="true"></div>
+            <div class="az-browse-menu" role="menu" aria-label="Key actions" style="left: @((int)menu.X)px; top: @((int)menu.Y)px">
+                <button type="button" role="menuitem" disabled="@(!Editable)" @onclick="() => RunMenuAsync(() => StartEditAsync(row))">Edit value</button>
+                <button type="button" role="menuitem" disabled="@(!Editable)" @onclick="() => RunMenuAsync(() => { RequestSecretEdit(row); return Task.CompletedTask; })">Set secret value…</button>
+                <button type="button" role="menuitem" disabled="@(!Editable || !plainRemote)" @onclick="() => RunMenuAsync(() => Editor.MoveToKeyVaultAsync(Session, view!, BrowseRows.DraftKeyOf(row), _cts.Token))">Move to Key Vault</button>
+                <button type="button" role="menuitem" disabled="@(!Editable || pending is null)" @onclick="() => RunMenuAsync(() => Editor.RevertAsync(Session, view!, BrowseRows.DraftKeyOf(row), _cts.Token))">Revert</button>
+                <button type="button" role="menuitem" disabled="@(!Editable || !(ExistsRemotely(row) || pending is { Removed: false }))" @onclick="() => RunMenuAsync(() => DeleteAsync(row))">Delete</button>
+                <hr />
+                <button type="button" role="menuitem" @onclick="() => RunMenuAsync(() => CopyAsync(row.Key))">Copy key</button>
+                <button type="button" role="menuitem" disabled="@(BrowseRows.PlainRemote(row) is null && BrowseRows.PlainLocal(row) is null)"
+                        @onclick="() => RunMenuAsync(() => CopyAsync(BrowseRows.PlainRemote(row) ?? BrowseRows.PlainLocal(row)))">Copy value</button>
+                <hr />
+                @if (row.IsIgnored)
+                {
+                    <button type="button" role="menuitem" disabled="@(remoteOnly || !ignoredExactly)" title="@(ignoredExactly ? null : "Ignored by a pattern; edit the project's ignore rules")"
+                            @onclick="() => RunMenuAsync(() => Editor.StopIgnoringAsync(Session, view!, key))">Stop ignoring</button>
+                }
+                else
+                {
+                    <button type="button" role="menuitem" disabled="@remoteOnly" @onclick="() => RunMenuAsync(() => Editor.IgnoreAsync(Session, view!, key))">Ignore locally</button>
+                }
+                <button type="button" role="menuitem" disabled="@(remoteOnly || row.Local is null)"
+                        @onclick="() => RunMenuAsync(() => Editor.SetLocalScopeAsync(Session, view!, key, row.Local?.Scope == ConfigScope.Global ? ConfigScope.Service : ConfigScope.Global))">@(row.Local?.Scope == ConfigScope.Global ? "Mark as service" : "Mark as global")</button>
+                <button type="button" role="menuitem" @onclick="() => RunMenuAsync(() => { CompareAcrossEnvironments(row); return Task.CompletedTask; })">Compare across environments</button>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private IReadOnlyList<KeyTreeColumn<ConfigRow>> Columns(ConfigurationView view, ConfigEnvironment env) =>
+        view.IsRemoteOnly
+            ?
+            [
+                new($"Azure · {env.Name}", "minmax(180px, 1.4fr)", AzureCell(view)),
+                new("Status", "48px", StatusCell),
+                new(string.Empty, "32px", ActionsCell),
+            ]
+            :
+            [
+                new("Local", "minmax(140px, 1fr)", LocalCell),
+                new($"Azure · {env.Name}", "minmax(160px, 1fr)", AzureCell(view)),
+                new("Status", "110px", StatusCell),
+                new(string.Empty, "32px", ActionsCell),
+            ];
+
+    private RenderFragment<KeyTreeRow<ConfigRow>> LocalCell => row =>
+        @<text>
+            @if (row.Item is { Local: { } local } item)
+            {
+                <span class="az-browse-cell" @oncontextmenu="e => OpenMenu(e, item)" @oncontextmenu:preventDefault="true">
+                    <span class="az-browse-source" title="@BrowseRows.SourceName(local.Source)">
+                        <FluentIcon Value="@(new Icons.Regular.Size16.Document())" />
+                    </span>
+                    @if (local.Masked)
+                    {
+                        <SecretValue />
+                    }
+                    else
+                    {
+                        <span class="az-mono" title="@local.Value">@local.Value</span>
+                    }
+                    @if (local.Scope == ConfigScope.Global)
+                    {
+                        <span class="az-browse-badge" title="Marked //@@global in the local file">global</span>
+                    }
+                </span>
+            }
+        </text>;
+
+    private RenderFragment<KeyTreeRow<ConfigRow>> AzureCell(ConfigurationView view) => row =>
+        @<text>
+            @if (row.Item is { } item)
+            {
+                @if (_editingKey == item.Key)
+                {
+                    <input class="az-input az-browse-edit" aria-label="@($"Value of {item.Key}")" @ref="_editInput" value="@_editText"
+                           @oninput="OnEditInput"
+                           @onkeydown="e => EditKeyDownAsync(e, item, view)" @onkeydown:stopPropagation="true"
+                           @onblur="CancelEdit" @onclick:stopPropagation="true" />
+                }
+                else
+                {
+                    var pending = PendingOf(item);
+                    <span class="az-browse-cell" @oncontextmenu="e => OpenMenu(e, item)" @oncontextmenu:preventDefault="true">
+                        @if (item.Remote is { IsSecret: true } secret)
+                        {
+                            <SecretValue />
+                            <span class="az-mono az-browse-ref" title="Key Vault reference">@BrowseRows.ReferenceText(secret)</span>
+                        }
+                        else if (item.Remote is { Value: { } value })
+                        {
+                            <span class="az-mono @(pending is null ? null : "az-browse-superseded")" title="@value">@value</span>
+                        }
+                        @if (pending is not null)
+                        {
+                            @if (pending.Removed)
+                            {
+                                <span class="az-browse-draft" title="Pending edit">deleted</span>
+                            }
+                            else if (pending.AfterIsSecret)
+                            {
+                                <span class="az-browse-draft" title="Pending edit">→ @SecretPolicy.Mask</span>
+                            }
+                            else
+                            {
+                                <span class="az-mono az-browse-draft" title="Pending edit">→ @pending.After</span>
+                            }
+                        }
+                    </span>
+                }
+            }
+        </text>;
+
+    private RenderFragment<KeyTreeRow<ConfigRow>> StatusCell => row =>
+        @<text>
+            @if (row.Item is { } item)
+            {
+                <span class="az-browse-cell" @oncontextmenu="e => OpenMenu(e, item)" @oncontextmenu:preventDefault="true">
+                    @if (item.IsIgnored)
+                    {
+                        <span class="az-browse-ignored">ignored</span>
+                    }
+                    <DiffBadge Kind="@(item.IsIgnored ? null : item.Status)" HasDraft="HasDraftEdit(item)" />
+                </span>
+            }
+        </text>;
+
+    private RenderFragment<KeyTreeRow<ConfigRow>> ActionsCell => row =>
+        @<text>
+            @if (row.Item is { } item)
+            {
+                <button type="button" class="az-browse-more" aria-label="@($"Actions for {item.Key}")" @onclick="e => OpenMenu(e, item)" @onclick:stopPropagation="true">⋯</button>
+            }
+        </text>;
+}

@@ -1,0 +1,136 @@
+@using AzCfg.Core.Environments
+@using AzCfg.Ui.Application.Operations
+@using AzCfg.Ui.Application.State
+@using AzCfg.Ui.Application.Workspace
+@using AzCfg.Ui.Features.Sync
+@using AzCfg.Ui.Shared
+@implements IDisposable
+@inject ProjectSessions Sessions
+@inject WorkspaceState Workspace
+@inject TabsState Tabs
+@inject IOperationRunner Runner
+@inject IEnumerable<ProjectModeRegistration> Modes
+@inject IActivationFlow Activation
+@inject ProtectionFlow Protection
+@inject ProtectedUnlockState Unlock
+
+@if (Node is not { } node || _session is null)
+{
+    <EmptyState Text="This project is no longer in the workspace" />
+}
+else
+{
+    var env = SyncSelection.EnvironmentOf(Workspace, _session, node.Binding);
+    var locked = env is not null && Protection.IsLocked(env);
+    <div class="az-project @(env is { IsProtected: true } ? "protected" : null)" data-project="@node.Id">
+        <ProjectHeader Session="_session" Node="node" Environment="env" />
+        @if (env is { IsProtected: true })
+        {
+            <div class="az-project-protected" role="status">
+                <FluentIcon Value="@(new Icons.Regular.Size16.LockClosed())" />
+                @if (locked)
+                {
+                    <span>PROTECTED · read-only</span>
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Protection.UnlockAsync(env)">Unlock editing</FluentButton>
+                }
+                else
+                {
+                    <span>PROTECTED · Editing unlocked</span>
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Protection.Lock(env)">Lock</FluentButton>
+                }
+            </div>
+        }
+        @if (env is not null && node.Binding is { } binding && _session.Mode == ProjectMode.Browse && !EnvironmentRules.IsActive(binding, env))
+        {
+            <FluentMessageBar Intent="MessageBarIntent.Info" Layout="MessageBarLayout.SingleLine" AllowDismiss="false">
+                <ChildContent>Viewing @env.Name — remote only. @(binding.ActiveEnvironment is { } active ? $"Local files reflect {active}." : "Local files are not linked to an environment yet.")</ChildContent>
+                <ActionsTemplate>
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Activation.MakeActiveAsync(_session.ProjectId, env)">Make @env.Name active</FluentButton>
+                </ActionsTemplate>
+            </FluentMessageBar>
+        }
+        @if (Runner.Running.Any(o => o.Kind == OperationKind.Read))
+        {
+            <div class="az-project-progress" role="progressbar" aria-label="Loading"></div>
+        }
+        <div class="az-project-body">
+            @if (Modes.FirstOrDefault(m => m.Mode == _session.Mode) is { } registration)
+            {
+                <DynamicComponent @key="_session.Mode" Type="registration.Component" Parameters="@(new Dictionary<string, object?> { ["Session"] = _session })" />
+            }
+            else
+            {
+                <EmptyState Text="@($"{_session.Mode} is not available")" />
+            }
+        </div>
+        @if (env is not null)
+        {
+            <DraftBar Session="_session" Environment="@env.Name" />
+        }
+    </div>
+}
+
+@code {
+    private ProjectSession? _session;
+
+    /// <summary>The tab of a project (<see cref="TabKind.Project"/>); its session is created on first use.</summary>
+    [Parameter, EditorRequired] public WorkbenchTab Tab { get; set; } = default!;
+
+    private ProjectNode? Node => Tab.Descriptor.ProjectId is { } id ? Workspace.FindProject(id) : null;
+
+    protected override void OnInitialized()
+    {
+        Workspace.Changed += OnChanged;
+        Runner.Changed += OnChanged;
+        Unlock.Changed += OnChanged;
+    }
+
+    protected override void OnParametersSet()
+    {
+        var next = Tab.Descriptor.ProjectId is { } id ? Sessions.GetOrCreate(id) : null;
+        if (!ReferenceEquals(next, _session))
+        {
+            if (_session is not null)
+            {
+                _session.Changed -= OnSessionChanged;
+            }
+
+            _session = next;
+            if (_session is not null)
+            {
+                _session.Changed += OnSessionChanged;
+            }
+        }
+
+        SyncDirty();
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnSessionChanged() => InvokeAsync(() =>
+    {
+        SyncDirty();
+        StateHasChanged();
+    });
+
+    /// <summary>The tab is dirty while any environment of the project has pending edits.</summary>
+    private void SyncDirty()
+    {
+        var dirty = _session is { TotalPending: > 0 };
+        if (Tabs.Tabs.FirstOrDefault(t => t.Id == Tab.Id) is { } current && current.IsDirty != dirty)
+        {
+            Tabs.SetDirty(Tab.Id, dirty);
+        }
+    }
+
+    public void Dispose()
+    {
+        Workspace.Changed -= OnChanged;
+        Runner.Changed -= OnChanged;
+        Unlock.Changed -= OnChanged;
+        if (_session is not null)
+        {
+            _session.Changed -= OnSessionChanged;
+        }
+    }
+}
