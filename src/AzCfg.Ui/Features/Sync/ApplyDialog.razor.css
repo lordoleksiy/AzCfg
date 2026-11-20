@@ -1,0 +1,39 @@
+.az-apply p {
+    margin: 0 0 8px;
+}
+
+.az-apply-rows {
+    max-height: 240px;
+    margin-bottom: 12px;
+    overflow-y: auto;
+}
+
+.az-apply-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.az-apply-table th,
+.az-apply-table td {
+    padding: 2px 8px 2px 0;
+    text-align: left;
+}
+
+.az-apply-table th {
+    color: var(--colorNeutralForeground3);
+    font-weight: 600;
+}
+
+.az-apply-global {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.az-apply-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}

@@ -1,0 +1,120 @@
+@implements IDisposable
+
+<div class="az-sync-view">
+    @if (_loadError is not null)
+    {
+        <ErrorBar Message="@_loadError" OnRetry="LoadAsync" />
+    }
+    else if (_preview is null)
+    {
+        <FluentProgressBar />
+    }
+    else
+    {
+        <div class="az-sync-body">
+            <div class="az-sync-list">
+                @if (_preview.Incoming.Count == 0 && _preview.Conflicts.Count == 0)
+                {
+                    <EmptyState Text="Nothing to pull" />
+                }
+                @if (_preview.Conflicts.Count > 0)
+                {
+                    <section class="az-sync-group">
+                        <h4 class="az-sync-group-title conflict">Conflicts (@_preview.Conflicts.Count)</h4>
+                        @foreach (var conflict in _preview.Conflicts)
+                        {
+                            <div class="az-sync-conflict" data-key="@conflict.Key">
+                                <div class="az-sync-conflict-head">
+                                    <span class="az-sync-kind conflict">!</span>
+                                    <span class="az-mono">@conflict.Key</span>
+                                    <span class="az-sync-spacer"></span>
+                                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@Busy"
+                                                  OnClick="() => ResolveAsync(conflict.Key, ConflictChoice.KeepLocal)">Keep local</FluentButton>
+                                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@Busy"
+                                                  OnClick="() => ResolveAsync(conflict.Key, ConflictChoice.KeepRemote)">Keep remote</FluentButton>
+                                </div>
+                                <table class="az-sync-mini">
+                                    <tr><th>local</th><td class="az-mono">@Shown(conflict.IsSecret, conflict.Local)</td></tr>
+                                    <tr><th>remote</th><td class="az-mono">@Shown(conflict.IsSecret, conflict.Remote)</td></tr>
+                                </table>
+                            </div>
+                        }
+                    </section>
+                }
+                @if (_preview.Incoming.Count > 0)
+                {
+                    <section class="az-sync-group">
+                        <h4 class="az-sync-group-title">Incoming (@_preview.Incoming.Count)</h4>
+                        <table class="az-sync-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" class="az-sync-all" title="Select all" checked="@AllSelected" disabled="@Busy" @onchange="ToggleAll" /></th>
+                                    <th>Kind</th>
+                                    <th>Key</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in _preview.Incoming)
+                                {
+                                    <tr data-key="@row.Key">
+                                        <td>
+                                            <input type="checkbox" class="az-sync-check" checked="@_selected.Contains(row.Key)" disabled="@Busy"
+                                                   @onchange="e => Toggle(row.Key, e)" />
+                                        </td>
+                                        <td><span class="az-sync-kind remote">@SyncText.Kind(row.Kind)</span></td>
+                                        <td class="az-mono">@row.Key</td>
+                                        <td class="az-mono az-sync-value">
+                                            @if (row.IsSecret)
+                                            {
+                                                <FluentIcon Value="@(new Icons.Regular.Size16.Key())" Title="Secret" />
+                                                <span>@SecretPolicy.Mask</span>
+                                            }
+                                            else
+                                            {
+                                                @if (row.Local is not null)
+                                                {
+                                                    <span class="az-sync-before">@row.Local</span>
+                                                }
+                                                @if (row.Local is not null && row.Remote is not null)
+                                                {
+                                                    <span> → </span>
+                                                }
+                                                @if (row.Remote is not null)
+                                                {
+                                                    <span>@row.Remote</span>
+                                                }
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </section>
+                }
+                @if (_preview.LocalChanges.Count > 0)
+                {
+                    <section class="az-sync-group">
+                        <h4 class="az-sync-group-title">Local changes Pull all would overwrite (@_preview.LocalChanges.Count)</h4>
+                        <ul class="az-sync-warnings">
+                            @foreach (var key in _preview.LocalChanges)
+                            {
+                                <li class="az-mono">@key</li>
+                            }
+                        </ul>
+                    </section>
+                }
+            </div>
+        </div>
+        <footer class="az-sync-footer">
+            <span class="az-sync-summary">@_selected.Count of @_preview.Incoming.Count incoming</span>
+            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Disabled="@Busy" OnClick="PullAllAsync">Pull all…</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" Disabled="@(!CanPull)" Loading="@_busy"
+                          Title="@(_selected.Count == 0 ? "Nothing selected" : null)" OnClick="PullSelectedAsync">Pull selected</FluentButton>
+        </footer>
+    }
+</div>
+
+@code {
+    private static string Shown(bool isSecret, string? value) => isSecret ? SecretPolicy.Mask : value ?? "—";
+}

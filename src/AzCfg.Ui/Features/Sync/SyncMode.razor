@@ -1,0 +1,64 @@
+@implements IDisposable
+@inject WorkspaceState Workspace
+@inject ActivationFlow Activation
+@inject IBindingFlow BindingFlow
+
+<div class="az-sync">
+    @if (Workspace.FindProject(Session.ProjectId)?.Binding is not { } binding)
+    {
+        <EmptyState Text="Bind this project to a service" ActionText="Bind…" OnAction="() => BindingFlow.BindAsync(Session.ProjectId)" />
+    }
+    else if (SyncSelection.EnvironmentOf(Workspace, Session, binding) is not { } env)
+    {
+        <EmptyState Text="Set up environments" />
+    }
+    else
+    {
+        var active = EnvironmentRules.IsActive(binding, env);
+        var hasDraft = Session.DraftFor(env.Name) is not null;
+        var view = Session.SyncView == SyncView.Draft && !hasDraft ? SyncView.Push : Session.SyncView;
+        var hint = $"Make {env.Name} active to sync local files";
+        <nav class="az-sync-views" role="tablist">
+            <button type="button" role="tab" class="az-sync-tab @(view == SyncView.Push ? "selected" : null)" disabled="@(!active)"
+                    title="@(active ? null : hint)" @onclick="() => Session.SetSyncView(SyncView.Push)">Push (Local → @env.Name)</button>
+            <button type="button" role="tab" class="az-sync-tab @(view == SyncView.Pull ? "selected" : null)" disabled="@(!active)"
+                    title="@(active ? null : hint)" @onclick="() => Session.SetSyncView(SyncView.Pull)">Pull (@env.Name → Local)</button>
+            @if (hasDraft)
+            {
+                <button type="button" role="tab" class="az-sync-tab @(view == SyncView.Draft ? "selected" : null)"
+                        @onclick="() => Session.SetSyncView(SyncView.Draft)">Pending edits (→ @env.Name) <span class="az-sync-count">@Session.PendingCount(env.Name)</span></button>
+            }
+        </nav>
+        @if (view != SyncView.Draft && !active)
+        {
+            <EmptyState Text="@hint" ActionText="@($"Make {env.Name} active")" OnAction="() => Activation.MakeActiveAsync(Session.ProjectId, env)" />
+        }
+        else if (view == SyncView.Pull)
+        {
+            <PullView @key="@($"pull:{env.Name}")" Session="Session" Binding="binding" Environment="env" />
+        }
+        else
+        {
+            <PushView @key="@($"{view}:{env.Name}")" Session="Session" Binding="binding" Environment="env"
+                      Origin="@(view == SyncView.Draft ? PushOrigin.Draft : PushOrigin.LocalFiles)" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ProjectSession Session { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        Workspace.Changed += OnChanged;
+        Session.Changed += OnChanged;
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Workspace.Changed -= OnChanged;
+        Session.Changed -= OnChanged;
+    }
+}
