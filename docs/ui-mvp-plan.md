@@ -11,9 +11,11 @@ Baseline: `master` @ `15419ba` (2026-11-18). Notation: **[exists]** — already 
 - **One trunk.** From M1 on, UI tasks branch from `origin/master` and PR into `master`; `dev`, `release/*` and the merge
   tasks M2/M3 are gone (`docs/mvp-plan.md` «Гілки», «Сесії оркестратора»). CLI 0.5.0 is merged by M1.
 - **More UI instead of speculative CLI scope:** UX1 Problems panel, UX2 consistency matrix + copy to environment
-  (FR-C5 becomes MVP), UX3 editable `local.settings.json` + share with team (`azcfg.json`). R1 is the 0.7.0 release PR.
-- Orchestrator sessions: session 0 = M1; session 1 = U1–U4; session 3 = UX1–UX3, X1 → Q1 → Q2 → R1 (CLI 0.6.0 runs as
-  session 2, in parallel with session 1).
+  (FR-C5 becomes MVP), UX3 editable `local.settings.json`, UX4 share with team (`azcfg.json`). R1 is the 0.6.0 release PR.
+- Orchestrator sessions: session 0 = M1; session 1 = U1–U4; session 3 = UX1–UX3, X1 → Q1 → Q2 → R1.
+- **Reorder (2026-11-21): UI before the manifest.** LS1 shipped as CLI 0.5.1 (together with U3, U4); the UI ships as
+  0.6.0 (R1) without waiting for the manifest; the manifest (`docs/mvp-plan.md` PC1–PC5) follows as 0.7.0 in session 2b
+  together with UX4 (the "share with team" half of the former UX3).
 
 ### What changed against the previous revision (review summary)
 - **UX:** three working modes inside one project tab — **Browse / Compare / Sync** — with a persistent inspector and a
@@ -111,7 +113,7 @@ what is not verified (e.g. manual browser check).
 - CI (`ci.yml`, build/test/format) runs on every PR since CLI 0.5.0 (H0); the orchestrator still checks 0.5 locally.
 - The UI is in `master` but not in the NuGet package until X1 adds `azcfg ui` (`AzCfg.Cli` does not reference
   `AzCfg.Ui` before that); the package changes only with a `<Version>` bump (R1).
-- CLI 0.6.0 (`docs/mvp-plan.md` stage 10) runs in parallel with U1–U4 in another session; its files do not overlap the UI.
+- The manifest (`docs/mvp-plan.md` stage 10, PC1–PC5, CLI 0.7.0) runs after R1 in session 2b together with UX4.
 
 ### 0.5 PR checklist
 1. `gh pr diff <N> --name-only` — only the task's "Files" (+ its `[x]` line in this plan).
@@ -152,15 +154,16 @@ what is not verified (e.g. manual browser check).
 | M1 | One trunk: `dev` ↔ `master` (CLI 0.4.0 + 0.5.0), Application delegates to Core | DH | W2.5 | [x] |
 | U1 | UI: workspace, environments, settings | P1, S1, M1 | W3 | [ ] |
 | U2 | UI: project tab + Browse | P1, P2, S1, S2, S3, M1 | W3 | [ ] |
-| U3 | UI: Compare | P1, P2, S1, S2, M1 | W3 | [ ] |
-| U4 | UI: Sync + make active | P1, P2, S1, S3, M1 | W3 | [ ] |
+| U3 | UI: Compare | P1, P2, S1, S2, M1 | W3 | [x] |
+| U4 | UI: Sync + make active | P1, P2, S1, S3, M1 | W3 | [x] |
 | UX1 | UI: Problems panel | U1 | W4 | [ ] |
 | UX2 | UI: consistency matrix + copy to environment | U3 | W4 | [ ] |
-| UX3 | UI: editable `local.settings.json` + share with team | U1, U2, CLI 0.6.0 | W4 | [ ] |
+| UX3 | UI: editable `local.settings.json` | U1, U2 (LS1 is in `master`, CLI 0.5.1) | W4 | [ ] |
 | X1 | Distribution: `azcfg ui` in the CLI tool | M1 | W4 | [ ] |
 | Q1 | Integration and security tests | I1, DH, U1–U4, UX1–UX3 | W4 | [ ] |
 | Q2 | Docs, polish, measurements, smoke checklist | Q1, X1 | W5 | [ ] |
-| R1 | Release CLI 0.7.0 (`azcfg ui` preview) | Q2, CLI 0.6.0 | W6 | [ ] |
+| R1 | Release CLI 0.6.0 (`azcfg ui` preview) | Q2 | W6 | [ ] |
+| UX4 | UI: share with team (`azcfg.json`) | UX3, R1, PC3 (`docs/mvp-plan.md`) | W7 | [ ] |
 
 ### 0.8 Next steps (after M1, 2026-11-20)
 1. **Merge M1** — PR `dev` → `master` (no `<Version>` change, nothing is published). From then on every task branches
@@ -170,8 +173,9 @@ what is not verified (e.g. manual browser check).
 3. **Session 1 (W3)** — U1, U2, U3, U4 in parallel, one worktree agent each (`docs/mvp-plan.md` «Сесії оркестратора»).
    Today `--demo` shows only Welcome: opening a folder leaves the Explorer empty and "Set up environments" unticked —
    that is U1 work (sidebar sections, environment wizard), not a bug.
-4. **Session 2 (CLI 0.6.0)** in parallel with session 1 — `docs/mvp-plan.md` stage 10 (PC1–PC5, LS1). No UI files.
-5. **Session 3 (W4–W6)** — UX1, UX2, X1 in parallel, UX3 after CLI 0.6.0; then Q1 → Q2 → R1 (release 0.7.0).
+4. **Session 2 (CLI 0.5.1)** — LS1 merged together with U3, U4 and released as 0.5.1 (reorder 2026-11-21).
+5. **Session 3 (W4–W6)** — UX1, UX2, UX3, X1 in parallel; then Q1 → Q2 → R1 (release 0.6.0).
+6. **Session 2b (W7)** — manifest `docs/mvp-plan.md` PC1–PC5 + UX4, release 0.7.0.
 Critical path: M1 → U1–U4 → UX1–UX3 → Q1 → Q2 → R1.
 
 ---
@@ -1705,7 +1709,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     Set secret value produce the right `IDraftService` calls (fakes); (10) *manual (demo)*.
   - **Tests:** bUnit + fakes (`IConfigurationService`, `IDraftService`, `ILocalValuesService`, `IActivationFlow`, …).
 
-- [ ] **U3 — UI: Compare**
+- [x] **U3 — UI: Compare**
   - **Goal:** FR-C1…C4.
   - **Read:** §2.6, §2.9–§2.12, §7.3 (Configuration: compare), §7.4, §7.5, §9, `docs/ui-components.md`.
   - **Scope:** `CompareView` (`ProjectMode.Compare`): side pickers (Local + every env), swap, differences only, search,
@@ -1719,7 +1723,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     (5) changing the selected env or a write invalidates the comparison; (6) *manual (demo)*: dev ↔ stage and local ↔ dev.
   - **Tests:** bUnit + fake `ICompareService`.
 
-- [ ] **U4 — UI: Sync + make active**
+- [x] **U4 — UI: Sync + make active**
   - **Goal:** FR-S1…S7, FR-X1 (apply), G16, G20.
   - **Read:** §2.7, §2.8 (4–9), §2.9–§2.12, §4 (G16, G20), §5 (AD-5…AD-9), §7.3 (Sync), §7.4, §7.5, §9,
     `docs/ui-components.md`.
@@ -1775,21 +1779,29 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Acceptance:** (1) 3 environments: matrix and counts match `MissingKeysReport`; (2) copy adds to the right draft (bar
     count); (3) protected target requires unlock; (4) secret values never in markup; (5) *manual (demo)*.
 
-- [ ] **UX3 — UI: editable `local.settings.json` + share with team**
-  - **Goal:** FR-W3 (writable `local.settings.json`), FR-W7 (`azcfg.json`). One agent: both touch `Features/Workspace`.
-  - **Read:** `docs/mvp-plan.md` stage 10 (LS1, PC3), ADR 0012 amendment 2, ADR 0014 amendment, §2.3, §7.3 (Workspace).
-  - **Scope:** (1) `local-settings` is offered as a values/secrets target for Azure Functions projects in the binding
+- [ ] **UX3 — UI: editable `local.settings.json`**
+  - **Goal:** FR-W3 (writable `local.settings.json`). The "share with team" half (FR-W7) moved to UX4 (reorder 2026-11-21).
+  - **Read:** `docs/mvp-plan.md` stage 10 (LS1), §2.3, §7.3 (Workspace).
+  - **Scope:** `local-settings` is offered as a values/secrets target for Azure Functions projects in the binding
     flow and project settings; Browse reads/writes local values through it like the other targets; the read-only tooltip
-    and G17 go away. (2) Project settings: **Share with team** → `IProjectSettingsService.SetAsync(repo,
-    "project.shared", "true")`; badge "shared (azcfg.json)" on the project node; editing service/targets of a shared
-    project says that `azcfg.json` changes ("commit it"). `WorkspaceService.OpenAsync`: an unbound project with a
-    manifest shows as bound (Core `ResolveAsync`), no wizard.
+    and G17 go away.
   - **Files:** `src/AzCfg.Ui/Features/{Workspace,Browse}/**` (targets and settings only),
     `src/AzCfg.Ui.Application/Workspace/**`, `src/AzCfg.Ui/Demo/{DemoAzure,SampleWorkspace}.cs` (one Functions project), matching tests.
-  - **Depends on:** U1, U2, CLI 0.6.0 merged into `master` (LS1, PC3).
+  - **Depends on:** U1, U2 (LS1 is in `master` since CLI 0.5.1).
   - **Acceptance:** (1) Functions project binds to `local.settings.json`, a pull writes only `Values`, other sections
-    kept; (2) share writes `azcfg.json`, the badge appears; (3) a second workspace state without bindings opens the
-    project as bound; (4) *manual (demo)*.
+    kept; (2) *manual (demo)*.
+
+- [ ] **UX4 — UI: share with team (`azcfg.json`)** — session 2b, with the manifest (CLI 0.7.0)
+  - **Goal:** FR-W7 (`azcfg.json`).
+  - **Read:** `docs/mvp-plan.md` stage 10 (PC3), ADR 0012 amendment 2, ADR 0014 amendment, §2.3, §7.3 (Workspace).
+  - **Scope:** Project settings: **Share with team** → `IProjectSettingsService.SetAsync(repo, "project.shared",
+    "true")`; badge "shared (azcfg.json)" on the project node; editing service/targets of a shared project says that
+    `azcfg.json` changes ("commit it"). `WorkspaceService.OpenAsync`: an unbound project with a manifest shows as bound
+    (Core `ResolveAsync`), no wizard.
+  - **Files:** `src/AzCfg.Ui/Features/Workspace/**` (settings only), `src/AzCfg.Ui.Application/Workspace/**`, matching tests.
+  - **Depends on:** UX3, R1, PC3 merged into `master`.
+  - **Acceptance:** (1) share writes `azcfg.json`, the badge appears; (2) a second workspace state without bindings
+    opens the project as bound; (3) *manual (demo)*.
 
 - [ ] **Q1 — Integration and security tests**
   - **Goal:** prove the scenarios end to end and AD-1, AD-6, AD-7 on real Core + Application + components with the
@@ -1846,10 +1858,10 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Depends on:** Q1, X1.
   - **Acceptance:** §14 done except the smoke item (ticked by the user).
 
-- [ ] **R1 — Release CLI 0.7.0 (`azcfg ui` preview)** — orchestrator
-  - One PR into `master`: `<Version>` 0.7.0 + release notes in the Cli csproj, `CHANGELOG.md` («`azcfg ui` — preview»),
+- [ ] **R1 — Release CLI 0.6.0 (`azcfg ui` preview)** — orchestrator
+  - One PR into `master`: `<Version>` 0.6.0 + release notes in the Cli csproj, `CHANGELOG.md` («`azcfg ui` — preview»),
     README. Merging it publishes the tool with the UI.
-  - **Depends on:** Q2, CLI 0.6.0 released (`docs/mvp-plan.md` PC5).
+  - **Depends on:** Q2 (the manifest is not required: reorder 2026-11-21).
   - **Acceptance:** CI green; the published tool passes the X1 pack test; smoke §12.5 ticked by the user.
 
 ---
@@ -1873,11 +1885,12 @@ graph LR
   M1 --> U1 & U2 & U3 & U4 & X1
   U1 --> UX1
   U3 --> UX2
-  CLI060["CLI 0.6.0"]
-  U1 & U2 & CLI060 --> UX3
+  U1 & U2 --> UX3
   I1 & DH & U1 & U2 & U3 & U4 & UX1 & UX2 & UX3 --> Q1 --> Q2
   X1 --> Q2
-  Q2 & CLI060 --> R1
+  Q2 --> R1
+  PC3["PC3 (manifest)"]
+  UX3 & R1 & PC3 --> UX4
 ```
 
 ### 11.2 Waves
@@ -1887,12 +1900,13 @@ graph LR
 | W1 | D1, C1, C2, T1, F1 | 5 |
 | W2 | I1, P1, P2, S1, S2, S3, DH | 7 |
 | W2.5 | M1 (session 0: orchestrator merge + 1 agent for the delegation) | 1 |
-| W3 | U1, U2, U3, U4 (session 1; CLI 0.6.0 runs in parallel as session 2) | 4 |
-| W4 | UX1, UX2, UX3 (once CLI 0.6.0 is in `master`), X1 (session 3) | 4 |
+| W3 | U1, U2, U3 ✅, U4 ✅ (session 1; LS1 → CLI 0.5.1 as session 2) | 4 |
+| W4 | UX1, UX2, UX3, X1 (session 3) | 4 |
 | W5 | Q1 (session 3) | 1 |
-| W6 | Q2, then R1 (session 3, orchestrator) | 1 |
+| W6 | Q2, then R1 (session 3, orchestrator) — CLI 0.6.0 | 1 |
+| W7 | UX4 with `docs/mvp-plan.md` PC1–PC5 (session 2b) — CLI 0.7.0 | 1–2 |
 
-Critical path: **M1 → U1–U4 → UX1–UX3 → Q1 → Q2 → R1**; UX3 and R1 also wait for CLI 0.6.0. F1 and P1 are the largest tasks of their waves — start them first.
+Critical path: **M1 → U1–U4 → UX1–UX3 → Q1 → Q2 → R1**; nothing waits for the manifest (UX4 comes after R1). F1 and P1 are the largest tasks of their waves — start them first.
 After W2 is merged, `--demo` works and every W3 agent can check its screens in a browser.
 
 ### 11.3 Shared files

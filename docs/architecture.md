@@ -8,7 +8,7 @@
 ### Продукт
 - **Zero-config**: жодних обовʼязкових файлів у репо. Розробник один раз проходить майстер `azcfg init`,
   далі просто `azcfg pull / edit / push`.
-- Опційний маніфест проєкту `azcfg.json` у репо (ADR 0012, поправка 2; CLI 0.6.0) — спільні налаштування прив'язки
+- Опційний маніфест проєкту `azcfg.json` у репо (ADR 0012, поправка 2; CLI 0.7.0) — спільні налаштування прив'язки
   (сервіс, цілі, vault-и), щоб колега після clone робив `pull` без майстра; замінює нереалізований `.azcfg.yaml`.
   Без маніфесту zero-config працює як раніше.
 - Розробники мають право змінювати App Configuration напряму → push іде прямо в Azure (не через pipeline).
@@ -25,7 +25,7 @@
 - Формат — властивість локальної цілі (`LocalTargetBinding.Format`, ADR 0006): `NestedJson` для user-secrets і
   `appsettings.local.json` (`Dataverse:ConnString` → `{"Dataverse":{"ConnString":"..."}}`, без scope-префікса);
   `FlatDictionary` — єдиний дозволений формат для `local.settings.json` (`Values` — плоский словник рядків,
-  ключі `A:B` як є, без вкладеності; вкладений JSON для цієї цілі заборонено). `LocalSettingsTarget` — CLI 0.6.0
+  ключі `A:B` як є, без вкладеності; вкладений JSON для цієї цілі заборонено). `LocalSettingsTarget` — CLI 0.5.1
   (етап 10, LS1; ADR 0004, ADR 0006).
 
 ### Середовища (ADR 0002, ADR 0008)
@@ -49,7 +49,7 @@
   папки, git remote, наявними ключами local.settings.json. Впевнений збіг — автоматично, інакше вибір. Запамʼятовується.
 - **Цілі**: розробник сам вирішує, куди йдуть значення, а куди — секрети (ADR 0006); Core лише пропонує
   варіанти (`LocalTargetOption`), рішення не приймає. Варіанти: user-secrets і `appsettings.local.json`
-  (MVP, вкладений JSON) та `local.settings.json` (Azure Functions; лише плоский `Values`, CLI 0.6.0). Вибір запам'ятовується в `projects.json` (`ProjectBinding.ValuesTarget`/`SecretsTarget`) — наступного
+  (MVP, вкладений JSON) та `local.settings.json` (Azure Functions; лише плоский `Values`, CLI 0.5.1). Вибір запам'ятовується в `projects.json` (`ProjectBinding.ValuesTarget`/`SecretsTarget`) — наступного
   разу `ProjectResolution.Existing` повертає його без повторних запитань. Пропонуються лише реальні цілі
   (ADR 0009): class library і тест-проєкти пропускаються (`ProjectInfo.IsLibrary`), `appsettings.local.json` —
   лише якщо поруч є будь-який `appsettings*.json` (без урахування регістру). Режим `gitignoreLocalFiles` (ADR 0009) дописує
@@ -61,7 +61,7 @@
     (3) серед `global:` референсів → (4) список з Resource Graph, ранжований (та сама RG, суфікс середовища), вибір
     користувача → (5) у майбутньому — створення vault.
 
-### Конфігурація проєкту (ADR 0012, поправка 2 — CLI 0.6.0)
+### Конфігурація проєкту (ADR 0012, поправка 2 — CLI 0.7.0)
 - **Маніфест** `azcfg.json` (git-tracked, найближчий від шляху проєкту вгору до кореня git): `schemaVersion`, `service`,
   `values`/`secrets` (`{ target, project }`), опційні `vaults` (середовище → URI). **Ніколи не містить значень**; строга
   схема відхиляє невідомі поля (`value`, `password`, …); нові поля — через підвищення `SchemaVersion` (v1 лишається валідним).
@@ -143,16 +143,16 @@ src/
     Security/             HmacSecretFingerprinter
     Health/               HealthService (IHealthService), HealthReport, AzureAccountCheck, EnvironmentCheck,
                           HealthFinding, HealthSeverity, HealthCheckKind (ADR 0013, поправка 0.5.0)
-    Manifest/             ProjectManifest, ManifestTarget, ManifestSerializer, ManifestValidator (ADR 0012, 0.6.0)
+    Manifest/             ProjectManifest, ManifestTarget, ManifestSerializer, ManifestValidator (ADR 0012, 0.7.0)
     Abstractions/         IConfigStore, ISecretStore, IResourceDiscovery, ILocalTarget, IProjectDetector,
                           IEnvironmentResolver, IUserStateStore, ISecretFingerprinter, IAzureAccountProbe,
-                          IProjectManifestStore, ITrackedSettingsReader (0.6.0)
+                          IProjectManifestStore, ITrackedSettingsReader (0.7.0)
     UseCases/             SetupService, ProjectService, SyncService, UserSettingsService, LocalTargetOption,
                           ProjectSettingsService (project.* ключі `config`, ADR 0014), ProjectServiceGuard (--service)
   AzCfg.Infrastructure/
     Azure/                AppConfigStore, KeyVaultSecretStore, ResourceGraphDiscovery, AzureAccountProbe
     Local/                JsonFileTarget, UserSecretsTarget, AppSettingsLocalTarget, CsprojDetector
-                          LocalSettingsTarget (0.6.0)
+                          LocalSettingsTarget (0.5.1)
     State/                JsonUserStateStore, JsonConventionProfileStore
     Project/              FileProjectManifestStore, FileConfigSourceScanner, FileMigrationExecutor
     DependencyInjection.cs   services.AddAzCfg()
@@ -311,7 +311,7 @@ azcfg init [--mode stores|labels] [--store <endpoint>] [--label <default>]   м�
 azcfg config list | get <key> | set <key> <value>   mode, defaultLabel, gitignoreLocalFiles,
                                              env.<name>.label|endpoint|protected; у прив'язаному проєкті
                                              (--project) ще project.service|values|secrets|vault.<env>|active|ignore,
-                                             з 0.6.0 project.shared (azcfg.json)  [ADR 0014, ADR 0012 поправка 2]
+                                             з 0.7.0 project.shared (azcfg.json)  [ADR 0014, ADR 0012 поправка 2]
 azcfg status [--check]                       активне середовище, ⇡/⇣/конфлікти; --check — здоров'я (0.5.0)  [ADR 0013]
 azcfg diff [<a>] [<b>] [--missing --all]     local ↔ env, env ↔ env, ключі, відсутні в частині середовищ  [ADR 0013]
 azcfg pull [--force] [--service <name>] [--key <p>]   App Config + KV → локальні файли (--key — лише вибрані)
@@ -322,7 +322,7 @@ azcfg plan [--delete] / push [--delete]      локальні файли → App
 azcfg edit [--set K=V] [--unset K]           JSON у $EDITOR (або патч без редактора) → plan → підтвердження → push
 azcfg promote <from> <to> [--in <file>]      нові ключі <from> → <to> через редактор
 (без adopt/standardize/validate: azcfg.json — через майстер і project.shared, перевірки — status --check)
-azcfg ui                                     UI (0.7.0, задача X1 `docs/ui-mvp-plan.md`)
+azcfg ui                                     UI (0.6.0, задача X1 `docs/ui-mvp-plan.md`)
 Глобальні: --env, --json, --yes, --project <path>
 ```
 Бюджет команд (ADR 0013, `docs/cli-roadmap.md` §8): нові команди — лише `status`, `diff` і `ui`; решта — прапорці й ключі `config`.
@@ -333,8 +333,8 @@ MVP CLI завершено — задачі й рішення в `docs/mvp-plan.
 UX: label середовища, реальні цілі, `//@global`, відформатований JSON, `.gitignore` — ADR 0009 (0.3.0).
 0.4.0 — щоденний workflow (`status`, `diff`, `--key`, `edit --set`, безпечний `use`) — ADR 0013, етап 8;
 0.5.0 — здоров'я конфігурації (`status --check`) і `config project.*` — етап 9 (ADR 0013, 0014).
-З 2026-11-21 — одна гілка `master` і сесії оркестратора (`docs/mvp-plan.md`): 0.6.0 — мінімальний маніфест і
-`local.settings.json` (етап 10, ADR 0012 поправка 2); паралельно — екрани UI; 0.7.0 — UI як `azcfg ui`.
+З 2026-11-21 — одна гілка `master` і сесії оркестратора (`docs/mvp-plan.md`, перестановка 2026-11-21): 0.5.1 — `local.settings.json`; 0.6.0 — UI як `azcfg ui`;
+0.7.0 — мінімальний маніфест (етап 10, ADR 0012 поправка 2) одразу в CLI і UI.
 Аналіз і обґрунтування — `docs/cli-roadmap.md` (§8). План UI — `docs/ui-mvp-plan.md`.
 
 ## Майбутнє

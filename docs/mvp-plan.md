@@ -6,8 +6,10 @@
 > **Статус:** етапи 1–9 виконано. Історія версій CLI: 0.1.0 — етапи 1–6 (MVP); 0.2.0 — ADR 0008 (режими
 > середовищ store / label, читання всіх labels у store-режимі, локальний ігнор `azcfg ignore`, push за
 > замовчуванням — upsert, `--delete`, `azcfg config`, `pull/use --service`); 0.3.0 — етап 7, ADR 0009;
-> 0.3.1 — виявлення `appsettings*.json`; 0.4.0 — етап 8 (ADR 0013); 0.5.0 — етап 9 (`status --check`, `config project.*`).
-> Далі: 0.6.0 — етап 10 (мінімальний маніфест — ADR 0012, поправка 2; `local.settings.json`), 0.7.0 — UI (`azcfg ui`).
+> 0.3.1 — виявлення `appsettings*.json`; 0.4.0 — етап 8 (ADR 0013); 0.5.0 — етап 9 (`status --check`, `config project.*`);
+> 0.5.1 — ціль `local.settings.json` (LS1).
+> Далі (перестановка 2026-11-21, UI раніше за маніфест): 0.6.0 — UI (`azcfg ui`, preview), 0.7.0 — етап 10
+> (мінімальний маніфест — ADR 0012, поправка 2; одразу в CLI і UI).
 > Після UI: 0.8.0 — етап 11 (провайдери, App Service / Function App settings — ADR 0014), 0.9.0 — етап 12 (маніфест v2:
 > середовища команди, розкладка ключів — ADR 0015). Обґрунтування — `docs/cli-roadmap.md` §9.
 > Де текст задачі етапів 1–6 розходиться з ADR 0008/0009 — правильний ADR. Аналіз і обґрунтування порядку —
@@ -305,11 +307,17 @@
 | # | Сесія | Задачі | Агенти | Залежить від |
 |---|---|---|---|---|
 | 0 ✅ | Одна гілка + M1 (виконано 2026-11-20; лишилось: злиття PR `dev` → `master` і прибирання гілок — `docs/ui-mvp-plan.md` §0.8) | цей документ і ADR; PR `release/0.5.0` → `master` (реліз 0.5.0); `master` → `dev` + Application делегує в Core (UI M1, включно з колишнім M2: `HealthReport`, `IProjectSettingsService`); PR `dev` → `master` без зміни версії; видалити `dev`, `release/*`, старі worktree; CI лише на PR у `master` | 1–2 | — |
-| 1 | UI: основні екрани | U1 Workspace/Environments, U2 Browse, U3 Compare, U4 Sync — паралельно (`docs/ui-mvp-plan.md`) | 4 | 0 |
-| 2 | CLI 0.6.0 | PC1–PC4 ∥ LS1, потім PC5 (етап 10) | 2 → 1 | 0 (паралельно з 1) |
-| 3 | UI: доповнення + 0.7.0 | UX1 Problems, UX2 матриця + copy, UX3 `local.settings.json` + share, X1 `azcfg ui` ∥, потім Q1, Q2, R1 (`docs/ui-mvp-plan.md`) | 4 → 1 | 1, 2 |
+| 1 | UI: основні екрани | U1 Workspace/Environments, U2 Browse ∥ (U3 Compare, U4 Sync ✅) (`docs/ui-mvp-plan.md`) | 2 | 0 |
+| 2 ✅ | CLI 0.5.1 | LS1 `local.settings.json` + випуск 0.5.1 (етап 10); злито разом з U3, U4 | 1 | 0 |
+| 3 | UI: доповнення + 0.6.0 | UX1 Problems, UX2 матриця + copy, UX3 редагований `local.settings.json`, X1 `azcfg ui` ∥, потім Q1, Q2, R1 (`docs/ui-mvp-plan.md`) | 4 → 1 | 1, 2 |
+| 2b | CLI + UI 0.7.0 — маніфест | PC1, потім PC2 → PC3 ∥ PC4, UX4 share with team (після PC3), PC5 (етап 10) | 1 → 2 → 1 | 3 |
 | 4 | CLI 0.8.0 — App Service / Functions | RP0, потім RP1 → RP2 ∥ RP3 → RP4 → RP5, RP6 (етап 11) | 1 → 2 → 1 | 3 |
 | 5 | CLI 0.9.0 — маніфест v2 | MV0, потім MV1 ∥ MV4 ∥ MV5 → MV2 → MV3, MV6 (етап 12) | 1 → 3 → 1 | 4 |
+
+**Перестановка 2026-11-21.** UI (сесії 1, 3) іде раніше за маніфест: на `azcfg.json` у UI спирається лише «share with
+team» (UX4, колишня половина UX3). LS1 вийшов окремо як 0.5.1, UI — як 0.6.0, маніфест (сесія 2b) — як 0.7.0 одразу для
+CLI і UI: зміни `ProjectService`/`ProjectSettingsService` і `AzCfg.Ui.Application` робляться в одній сесії, без
+подвійної роботи. Перевірки PC4 з'являються в панелі Problems (UX1) без змін UI — вона адаптер над `IHealthService`.
 
 Сесії 4 і 5 — після 0.7.0, бо змінюють `SyncService`/`KeyMapper`, якими користується UI; кожна оновлює
 `AzCfg.Ui.Application` у тому самому PR, якщо сигнатура змінюється. Порядок 4 ↔ 5 можна поміняти, якщо маніфест v2
@@ -422,11 +430,12 @@
   `IProjectSettingsService` для налаштувань проєкту в U1).
   - Залежить від: H2, H4
 
-## Етап 10. Команда і Functions — CLI 0.6.0 (сесія 2)
+## Етап 10. Команда і Functions — CLI 0.5.1 (LS1, сесія 2) і 0.7.0 (маніфест, сесія 2b)
 
 Контракт — ADR 0012, поправка 2 (мінімальний маніфест, без `adopt`) і ADR 0014, поправка (провайдери — етап 11). Нових
 команд немає. Маніфест і перевірки **ніколи не містять значень** (ні секретних, ні звичайних). Два агенти паралельно:
-маніфест (PC1–PC4, послідовно) і `local.settings.json` (LS1); потім реліз PC5.
+маніфест (PC1–PC4, послідовно) і `local.settings.json` (LS1); потім реліз PC5. Перестановка 2026-11-21: LS1 вийшов як
+0.5.1 (LS-R); PC1–PC5 — після UI 0.6.0, разом з UI-задачею UX4, реліз 0.7.0.
 
 - [x] **PC0. ADR 0012** (+ поправки 2026-11-20, 2026-11-21).
   - Залежить від: —
@@ -459,6 +468,8 @@
     ніколи не пишуть); `config list` показує `project.shared`.
   - Тести: Core на fakes (кожне правило); сценарій `/cli-scenario-test`: розробник A → `config set project.shared true`;
     розробник B (порожній стан користувача) → `pull` без майстра, ті самі цілі.
+  - UI-частина — UX4 (`docs/ui-mvp-plan.md`) у тій самій сесії 2b; якщо сигнатура змінюється — PC3 оновлює
+    `AzCfg.Ui.Application` у тому самому PR.
   - Залежить від: PC2
 
 - [ ] **PC4. Перевірки в `status --check`**
@@ -470,7 +481,7 @@
   - Тести: кожна перевірка; канарковий секрет відсутній у `HealthReport` JSON; поза git → перевірка пропускається.
   - Залежить від: PC1 (ManifestInvalid), H1
 
-- [ ] **LS1. `LocalSettingsTarget`** (через `/add-local-target`, ADR 0006)
+- [x] **LS1. `LocalSettingsTarget`** (через `/add-local-target`, ADR 0006)
   - `local.settings.json` поруч із `.csproj` Azure Functions: читання/запис лише секції `Values` (`FlatDictionary`, ключі
     `A:B` як є, без вкладення); інші секції (`IsEncrypted`, `Host`, `ConnectionStrings`) зберігаються як були; відсутній
     файл → створити `{ "IsEncrypted": false, "Values": {} }`. Безпека — як `AppSettingsLocalTarget` (git-ignored і
@@ -482,10 +493,14 @@
   - Тести: round-trip, збереження інших секцій, safety у temp git-репо.
   - Залежить від: —
 
-- [ ] **PC5. Випуск 0.6.0**
-  - README (`azcfg.json`, `project.shared`, нові перевірки, `local.settings.json`), `CHANGELOG.md`, `<Version>` 0.6.0 +
+- [x] **LS-R. Випуск 0.5.1** (перестановка 2026-11-21)
+  - README (`local.settings.json`), `CHANGELOG.md`, `<Version>` 0.5.1; один PR у `master` разом з LS1, U3, U4.
+  - Залежить від: LS1
+
+- [ ] **PC5. Випуск 0.7.0**
+  - README (`azcfg.json`, `project.shared`, нові перевірки; UI — share with team), `CHANGELOG.md`, `<Version>` 0.7.0 +
     release notes; PR у `master`.
-  - Залежить від: PC3, PC4, LS1
+  - Залежить від: PC3, PC4, UX4, UI 0.6.0 (`docs/ui-mvp-plan.md` R1)
 
 ## Етап 11. App Service / Function App settings — CLI 0.8.0 (сесія 4)
 

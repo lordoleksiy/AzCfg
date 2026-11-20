@@ -1,0 +1,37 @@
+@using AzCfg.Core.Model
+@using AzCfg.Core.Sync
+@using AzCfg.Ui.Application.Configuration
+
+<InspectorPane Title="@(Row?.Key ?? "Compare")" Subtitle="@(Row is null ? null : CompareSides.Describe(Row, View.Left, View.Right))">
+    @if (Row is null)
+    {
+        <span class="az-compare-hint">Select a key to see both sides.</span>
+    }
+    else
+    {
+        <InspectorSection Title="@CompareSides.Name(View.Left)">@Side(Row.Left)</InspectorSection>
+        <InspectorSection Title="@CompareSides.Name(View.Right)">@Side(Row.Right)</InspectorSection>
+        <div class="az-compare-actions">
+            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => OnOpenInBrowse.InvokeAsync(Row.Key)">Open in Browse</FluentButton>
+        </div>
+    }
+</InspectorPane>
+
+@code {
+    [Parameter, EditorRequired] public ComparisonView View { get; set; } = default!;
+
+    /// <summary>The selected key's row; null shows a hint.</summary>
+    [Parameter] public CompareRow? Row { get; set; }
+
+    /// <summary>Raised with the key.</summary>
+    [Parameter] public EventCallback<string> OnOpenInBrowse { get; set; }
+
+    private static RenderFragment Side(CompareCell? cell) =>
+        @<div class="az-compare-side-detail">
+            <CompareCellValue Cell="cell" MissingText="Not present" />
+            @if (cell is not null)
+            {
+                <span class="az-compare-meta">scope @(cell.Scope == ConfigScope.Global ? "global" : "service") · @(cell.Label is null ? "no label" : $"label {cell.Label}")</span>
+            }
+        </div>;
+}

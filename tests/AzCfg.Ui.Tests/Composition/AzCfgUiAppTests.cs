@@ -1,5 +1,6 @@
 using AzCfg.Ui.Application.State;
 using AzCfg.Ui.Application.Workspace;
+using AzCfg.Ui.Features.Sync;
 using AzCfg.Ui.Hosting;
 using AzCfg.Ui.Shared;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -23,7 +24,7 @@ public sealed class AzCfgUiAppTests
         using var scope = app.Services.CreateScope();
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<WorkbenchNavigator>());
         Assert.Same(scope.ServiceProvider.GetRequiredService<TabsState>(), scope.ServiceProvider.GetRequiredService<TabsState>());
-        Assert.IsType<NotAvailableActivationFlow>(scope.ServiceProvider.GetRequiredService<IActivationFlow>());
+        Assert.IsType<ActivationFlow>(scope.ServiceProvider.GetRequiredService<IActivationFlow>());
         Assert.Equal(StateRoot, app.Services.GetRequiredService<UiStatePaths>().Root);
     }
 

@@ -1,0 +1,16 @@
+.az-compare-missing {
+    color: var(--colorNeutralForeground3);
+}
+
+.az-compare-secret {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+.az-compare-plain {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

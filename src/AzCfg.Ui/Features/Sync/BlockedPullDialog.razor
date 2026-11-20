@@ -1,0 +1,37 @@
+<div class="az-blocked-pull">
+    <p>@Keys.Count local @(Keys.Count == 1 ? "change" : "changes") would be overwritten:</p>
+    <ul class="az-blocked-keys">
+        @foreach (var key in Keys)
+        {
+            <li class="az-mono">@key</li>
+        }
+    </ul>
+    <div class="az-blocked-actions">
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" OnClick="CancelAsync">Cancel</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Class="az-danger" OnClick="() => CloseAsync(BlockedPullChoice.Discard)">Discard local changes</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="() => CloseAsync(BlockedPullChoice.PushFirst)">Push first</FluentButton>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public IDialogInstance? Dialog { get; set; }
+
+    /// <summary>Keys with local changes the pull would overwrite (keys only, never values).</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<string> Keys { get; set; } = [];
+
+    private async Task CloseAsync(BlockedPullChoice choice)
+    {
+        if (Dialog is not null)
+        {
+            await Dialog.CloseAsync(choice);
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (Dialog is not null)
+        {
+            await Dialog.CancelAsync();
+        }
+    }
+}
