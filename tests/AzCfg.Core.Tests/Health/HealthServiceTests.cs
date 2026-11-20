@@ -5,6 +5,7 @@ using AzCfg.Core.Environments;
 using AzCfg.Core.Health;
 using AzCfg.Core.Model;
 using AzCfg.Core.Security;
+using AzCfg.Core.Sync;
 using AzCfg.Core.Tests.Fakes;
 using AzCfg.Core.UseCases;
 
@@ -28,18 +29,21 @@ public sealed class HealthServiceTests
             Prefixes = entries.Keys.ToDictionary(k => k, _ => new[] { "orders" });
             Config = new(Prefixes, entries);
             FakeLocalTarget[] all = targets.Length > 0 ? targets : [new(LocalTargetKind.UserSecrets), new(LocalTargetKind.AppSettingsLocal)];
+            Sync = new SyncService(Config, KeyVault, State, new HmacSecretFingerprinter(new byte[32]), all);
             Service = new HealthService(
                 State,
                 new SeparateStoresResolver(),
                 Config,
-                new SyncService(Config, KeyVault, State, new HmacSecretFingerprinter(new byte[32]), all),
+                Sync,
                 KeyVault,
                 Probe,
                 all,
-                Detector);
+                Detector,
+                new FakeAccessErrorClassifier());
         }
 
         public FakeUserStateStore State { get; }
+        public SyncService Sync { get; }
         public Dictionary<string, string[]> Prefixes { get; }
         public FakeConfigStore Config { get; }
         public ListDetector Detector { get; } = new([new("/repo", "/repo/Orders/Orders.csproj", "Orders", false, null)]);
@@ -48,6 +52,9 @@ public sealed class HealthServiceTests
         public HealthService Service { get; }
 
         public Task<HealthReport> CheckAsync() => Service.CheckAsync("/repo", Ct);
+
+        public HealthService With(IConfigStore store) =>
+            new(State, new SeparateStoresResolver(), store, Sync, KeyVault, Probe, [], Detector, new FakeAccessErrorClassifier());
     }
 
     private sealed class ListDetector(List<ProjectInfo> projects) : IProjectDetector
@@ -473,5 +480,96 @@ public sealed class HealthServiceTests
 
         Assert.NotEmpty(report.Findings);
         Assert.DoesNotContain(canary, Json(report));
+    }
+    [Fact]
+    public async Task CheckAsync_EnvironmentDenied_ReportsForbiddenAccess()
+    {
+        var rig = new Rig(Binding);
+        rig.Config.Unreachable.Add("prod");
+
+        var report = await rig.CheckAsync();
+
+        Assert.Equal(EnvironmentAccess.Ok, report.Environments.Single(e => e.Name == "dev").Access);
+        var prod = report.Environments.Single(e => e.Name == "prod");
+        Assert.Equal(EnvironmentAccess.Forbidden, prod.Access);
+        Assert.False(prod.Reachable);
+        Assert.DoesNotContain("CANARY", Json(report));
+    }
+
+    [Fact]
+    public async Task CheckAsync_NotSignedIn_EnvironmentsNeedSignIn()
+    {
+        var rig = new Rig(Binding);
+        rig.Probe.Result = new(false, null, "No credential");
+
+        var report = await rig.CheckAsync();
+
+        Assert.All(report.Environments, e => Assert.Equal(EnvironmentAccess.AuthRequired, e.Access));
+    }
+
+    [Fact]
+    public async Task CheckEnvironmentAsync_WithService_ReadsServiceAndIsOk()
+    {
+        // No prefixes for 'dev': listing them would fail, so Ok proves the service was read.
+        var store = new FakeConfigStore([], new() { ["dev"] = [Plain("A")] });
+        var service = new Rig(Binding).With(store);
+
+        var check = await service.CheckEnvironmentAsync(Env("dev"), "orders", Ct);
+
+        Assert.Equal(new EnvironmentCheck("dev", EnvironmentAccess.Ok, null), check);
+        Assert.True(check.Reachable);
+    }
+
+    [Fact]
+    public async Task CheckEnvironmentAsync_WithoutService_ListsPrefixes()
+    {
+        // No entries: reading the service would fail, so Ok proves the prefixes were listed.
+        var store = new FakeConfigStore(new() { ["dev"] = ["orders"] });
+        var service = new Rig(Binding).With(store);
+
+        var check = await service.CheckEnvironmentAsync(Env("dev"), null, Ct);
+
+        Assert.Equal(EnvironmentAccess.Ok, check.Access);
+    }
+
+    [Fact]
+    public async Task CheckEnvironmentAsync_Denied_ClassifiedWithoutMessage()
+    {
+        var store = new FakeConfigStore(new() { ["dev"] = ["orders"] });
+        store.Unreachable.Add("dev");
+        var service = new Rig(Binding).With(store);
+
+        var check = await service.CheckEnvironmentAsync(Env("dev"), "orders", Ct);
+
+        Assert.Equal(new EnvironmentCheck("dev", EnvironmentAccess.Forbidden, nameof(UnauthorizedAccessException)), check);
+        Assert.False(check.Reachable);
+    }
+
+    [Fact]
+    public async Task CheckEnvironmentAsync_Cancelled_Throws()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var service = new Rig(Binding).With(new CancellingStore());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckEnvironmentAsync(Env("dev"), "orders", cts.Token));
+    }
+
+    private sealed class CancellingStore : IConfigStore
+    {
+        public IAsyncEnumerable<ConfigEntry> ReadAsync(ConfigEnvironment env, string service, CancellationToken ct) => Throw<ConfigEntry>(ct);
+
+        public IAsyncEnumerable<string> ListServicePrefixesAsync(ConfigEnvironment env, CancellationToken ct) => Throw<string>(ct);
+
+        public Task<ApplyResult> ApplyAsync(ConfigEnvironment env, string service, IReadOnlyList<Change> changes, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<string>> ListLabelsAsync(Uri storeEndpoint, CancellationToken ct) => throw new NotSupportedException();
+
+        private static async IAsyncEnumerable<T> Throw<T>([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.Yield();
+            ct.ThrowIfCancellationRequested();
+            yield break;
+        }
     }
 }

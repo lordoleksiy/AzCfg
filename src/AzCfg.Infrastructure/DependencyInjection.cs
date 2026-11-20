@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.AddSingleton<ISyncService, SyncService>();
         services.AddSingleton<IConfigComparisonService, ConfigComparisonService>();
         services.AddSingleton<IAzureAccountProbe, AzureAccountProbe>();
+        services.AddSingleton<IAccessErrorClassifier, AzureAccessErrorClassifier>();
         services.AddSingleton<IHealthService, HealthService>();
         return services;
     }

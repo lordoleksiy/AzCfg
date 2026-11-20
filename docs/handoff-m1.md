@@ -31,20 +31,22 @@ Source of truth for the task: `docs/ui-mvp-plan.md` §10 block **M1**, `docs/mvp
    the binding (gains Core validation: https vault root, canonical env name). Test now saves the binding first (Core
    requires a bound project — the UI always has one).
 
-Test counts after step 5: Core 729, Cli 266, Infrastructure 198, Ui 403.
+6. Per-env probe → Core `IHealthService.CheckEnvironmentAsync(env, service?, ct)`; `EnvironmentCheck(Name, Access, Error)`
+   with `EnvironmentAccess { Ok, AuthRequired, Forbidden, Unreachable }` (`Reachable` is computed, kept in JSON).
+   Classification via a new Core port `IAccessErrorClassifier` → Infrastructure `AzureAccessErrorClassifier` over
+   `AzureErrors` (fixed texts for auth/403/network, type name otherwise — never a message). `CheckAsync` reuses it.
+   UI `AzureStatusService` now takes `IHealthService` (not `IConfigStore`) and keeps cache, events, `ConnectionState`
+   mapping and the account check. CLI: `status --check --json` gains `environments[].access`; human output shows the
+   fixed reason instead of the type name for auth/403/network (CHANGELOG [Unreleased]). The CLI scenario host registers
+   the classifier by hand (it does not use `AddAzCfg`).
+
+Test counts after step 6: Core 735, Cli 266, Infrastructure 206, Ui 407.
 
 ## Remaining (M1 scope (2), §7.3 signatures stay; a signature that must change → plan §0.6)
 - [x] `Configuration/CompareService` → adapter over `IConfigComparisonService` (see step 4; `CompareSide` question open).
 - [x] FR-S7 counts: Application computes none yet (header is U2) → nothing to delegate. **Add to U2 brief:** header
       summary must come from `ISyncService.StatusAsync` (`SyncSummary`), not from UI code.
-- [ ] `Environments/AzureStatusService.CheckEnvironmentAsync` (per-env probe) → Core. **Needs a Core decision:** Core's
-      env check is private inside `HealthService.CheckAsync(repoPath)` (whole report, needs a profile) and returns
-      `EnvironmentCheck(Name, bool Reachable, string? Error)` — it loses Auth/Forbidden/Unreachable that the UI shows.
-      Recommended: additive Core API (TDD) `IHealthService.CheckEnvironmentAsync(ConfigEnvironment env, string? service, ct)`
-      → `EnvironmentCheck` extended with an access kind (e.g. `EnvironmentAccess { Ok, AuthRequired, Forbidden, Unreachable }`;
-      the CLI `--json` gains a field — mention in CHANGELOG), `HealthService.CheckAsync` reuses it; UI keeps cache, events,
-      `ConnectionState` mapping and `CheckAccountAsync`/`JwtClaims`. Classification must move from `AzureErrors` (UI) to
-      Core via exception-type-free rule → probably an Infrastructure port method or a classified exception. Ask the user.
+- [x] `Environments/AzureStatusService.CheckEnvironmentAsync` → Core (step 6, decided by the user: a Core method).
 - [x] `SetVaultAsync` → `IProjectSettingsService` (step 5).
 - [ ] `WorkspaceService.BindAsync` re-bind: UI restores vaults + **ActiveEnvironment** + ignore after Core `BindAsync`
       (which builds a fresh binding). **Rule divergence:** Core `project.service` change resets ActiveEnvironment and deletes

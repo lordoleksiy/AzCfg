@@ -20,6 +20,7 @@ public sealed class HealthService(
     IAzureAccountProbe account,
     IEnumerable<ILocalTarget> targets,
     IProjectDetector detector,
+    IAccessErrorClassifier classifier,
     ILogger<HealthService>? logger = null) : IHealthService
 {
     private const string GitIgnoreFix = "azcfg config set gitignoreLocalFiles true";
@@ -43,13 +44,13 @@ public sealed class HealthService(
                 await CheckTargetProjectsAsync(binding, findings, ct);
             }
 
-            return new(who, [.. environments.Select(e => new EnvironmentCheck(e.Name, false, "Not signed in to Azure."))], findings);
+            return new(who, [.. environments.Select(e => new EnvironmentCheck(e.Name, EnvironmentAccess.AuthRequired, "Not signed in to Azure."))], findings);
         }
 
         List<EnvironmentCheck> checks = [];
         foreach (var env in environments)
         {
-            var check = await CheckEnvironmentAsync(env, binding, ct);
+            var check = await CheckEnvironmentAsync(env, binding?.Service, ct);
             checks.Add(check);
             if (!check.Reachable)
             {
@@ -80,11 +81,11 @@ public sealed class HealthService(
         }
     }
 
-    private async Task<EnvironmentCheck> CheckEnvironmentAsync(ConfigEnvironment env, ProjectBinding? binding, CancellationToken ct)
+    public async Task<EnvironmentCheck> CheckEnvironmentAsync(ConfigEnvironment env, string? service, CancellationToken ct)
     {
         try
         {
-            if (binding is null)
+            if (service is null)
             {
                 await foreach (var _ in store.ListServicePrefixesAsync(env, ct).WithCancellation(ct))
                 {
@@ -93,17 +94,18 @@ public sealed class HealthService(
             }
             else
             {
-                await foreach (var _ in store.ReadAsync(env, binding.Service, ct).WithCancellation(ct))
+                await foreach (var _ in store.ReadAsync(env, service, ct).WithCancellation(ct))
                 {
                     break;
                 }
             }
 
-            return new(env.Name, true, null);
+            return new(env.Name, EnvironmentAccess.Ok, null);
         }
         catch (Exception ex) when (Handled(ex, ct, "environment access"))
         {
-            return new(env.Name, false, ex.GetType().Name);
+            var failure = classifier.Classify(ex);
+            return new(env.Name, failure.Access, failure.Reason);
         }
     }
 

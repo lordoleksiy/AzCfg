@@ -1,4 +1,4 @@
-using AzCfg.Core.Abstractions;
+using AzCfg.Core.Health;
 using AzCfg.Core.Model;
 using AzCfg.Infrastructure.Azure;
 using Azure.Core;
@@ -8,9 +8,10 @@ namespace AzCfg.Ui.Application.Environments;
 
 /// <summary>
 /// <see cref="IAzureStatusService"/>. Successful checks are cached for 5 minutes (a failure is always retried, so a sign-in
-/// is noticed at once). The access token is read for its claims only and is never stored or logged.
+/// is noticed at once). The access token is read for its claims only and is never stored or logged. The environment probe and
+/// its classification are Core's (<see cref="IHealthService.CheckEnvironmentAsync"/>); this service adds the cache and events.
 /// </summary>
-public sealed class AzureStatusService(TokenCredential credential, IConfigStore store, TimeProvider time, ILogger<AzureStatusService> logger) : IAzureStatusService
+public sealed class AzureStatusService(TokenCredential credential, IHealthService health, TimeProvider time, ILogger<AzureStatusService> logger) : IAzureStatusService
 {
     private static readonly TimeSpan CacheFor = TimeSpan.FromMinutes(5);
     private static readonly string[] ManagementScope = ["https://management.azure.com/.default"];
@@ -95,11 +96,10 @@ public sealed class AzureStatusService(TokenCredential credential, IConfigStore 
         }
 
         Changed?.Invoke();
-        EnvironmentHealth result;
+        EnvironmentCheck check;
         try
         {
-            await FirstAsync(env, service, ct);
-            result = new EnvironmentHealth(env.Name, ConnectionState.Connected, null, time.GetUtcNow());
+            check = await health.CheckEnvironmentAsync(env, service, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -111,11 +111,8 @@ public sealed class AzureStatusService(TokenCredential credential, IConfigStore 
             Changed?.Invoke();
             throw;
         }
-        catch (Exception ex)
-        {
-            logger.LogWarning("Environment '{Environment}' check failed: {ExceptionType}", env.Name, ex.GetType().Name);
-            result = new EnvironmentHealth(env.Name, StateOf(ex), AzureErrors.Describe(ex), time.GetUtcNow());
-        }
+
+        var result = new EnvironmentHealth(env.Name, StateOf(check.Access), check.Error, time.GetUtcNow());
 
         lock (_gate)
         {
@@ -134,18 +131,13 @@ public sealed class AzureStatusService(TokenCredential credential, IConfigStore 
         _ => ConnectionState.Unreachable,
     };
 
-    private async Task FirstAsync(ConfigEnvironment env, string? service, CancellationToken ct)
+    private static ConnectionState StateOf(EnvironmentAccess access) => access switch
     {
-        if (service is null)
-        {
-            await using var prefixes = store.ListServicePrefixesAsync(env, ct).GetAsyncEnumerator(ct);
-            await prefixes.MoveNextAsync();
-            return;
-        }
-
-        await using var entries = store.ReadAsync(env, service, ct).GetAsyncEnumerator(ct);
-        await entries.MoveNextAsync();
-    }
+        EnvironmentAccess.Ok => ConnectionState.Connected,
+        EnvironmentAccess.AuthRequired => ConnectionState.AuthRequired,
+        EnvironmentAccess.Forbidden => ConnectionState.Forbidden,
+        _ => ConnectionState.Unreachable,
+    };
 
     private void Set(AzureAccountStatus status)
     {

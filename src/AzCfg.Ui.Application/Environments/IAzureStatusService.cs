@@ -18,6 +18,6 @@ public interface IAzureStatusService
     /// </summary>
     Task<AzureAccountStatus> CheckAccountAsync(CancellationToken ct);
 
-    /// <summary>Probe: first item of <c>IConfigStore.ReadAsync(env, service)</c>, or of <c>ListServicePrefixesAsync</c> when <paramref name="service"/> is null.</summary>
+    /// <summary>Core's probe (<c>IHealthService.CheckEnvironmentAsync</c>), cached; its access kind maps to <see cref="ConnectionState"/>.</summary>
     Task<EnvironmentHealth> CheckEnvironmentAsync(ConfigEnvironment env, string? service, CancellationToken ct);
 }

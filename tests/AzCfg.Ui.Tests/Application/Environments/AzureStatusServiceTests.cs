@@ -1,4 +1,5 @@
 using AzCfg.Core.Abstractions;
+using AzCfg.Core.Health;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
 using AzCfg.Infrastructure.InMemory;
@@ -20,13 +21,13 @@ public sealed class AzureStatusServiceTests : IDisposable
 
     public void Dispose() => _w.Dispose();
 
-    private AzureStatusService Service(TokenCredential? credential = null, IConfigStore? store = null) =>
-        new(credential ?? _w.Get<TokenCredential>(), store ?? _w.World.AppConfig, _time, NullLogger<AzureStatusService>.Instance);
+    private AzureStatusService Service(TokenCredential? credential = null, IHealthService? health = null) =>
+        new(credential ?? _w.Get<TokenCredential>(), health ?? _w.Get<IHealthService>(), _time, NullLogger<AzureStatusService>.Instance);
 
     [Fact]
     public async Task CheckAccountAsync_StaticTokenCredential_ConnectedWithAccountAndTenant()
     {
-        var service = new AzureStatusService(new StaticTokenCredential("dev@corp.com", "tenant-1"), _w.World.AppConfig, _time, NullLogger<AzureStatusService>.Instance);
+        var service = new AzureStatusService(new StaticTokenCredential("dev@corp.com", "tenant-1"), _w.Get<IHealthService>(), _time, NullLogger<AzureStatusService>.Instance);
 
         var status = await service.CheckAccountAsync(default);
 
@@ -126,68 +127,115 @@ public sealed class AzureStatusServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CheckEnvironmentAsync_NoService_ProbesPrefixes()
+    public async Task CheckEnvironmentAsync_PassesEnvironmentAndServiceToCore()
     {
-        var store = new RecordingStore();
+        var health = new StubHealth(EnvironmentAccess.Ok);
 
-        await Service(store: store).CheckEnvironmentAsync(_w.Env("dev"), null, default);
+        await Service(health: health).CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
+        await Service(health: health).CheckEnvironmentAsync(_w.Env("dev"), null, default);
 
-        Assert.Equal(["prefixes"], store.Calls);
+        Assert.Equal(["dev:crm", "dev:"], health.Calls);
+    }
+
+    [Theory]
+    [InlineData(EnvironmentAccess.AuthRequired, ConnectionState.AuthRequired)]
+    [InlineData(EnvironmentAccess.Forbidden, ConnectionState.Forbidden)]
+    [InlineData(EnvironmentAccess.Unreachable, ConnectionState.Unreachable)]
+    public async Task CheckEnvironmentAsync_MapsCoreAccessAndReason(EnvironmentAccess access, ConnectionState state)
+    {
+        var health = await Service(health: new StubHealth(access, "reason")).CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
+
+        Assert.Equal(state, health.State);
+        Assert.Equal("reason", health.Message);
     }
 
     [Fact]
-    public async Task CheckEnvironmentAsync_WithService_ProbesRead()
+    public async Task CheckEnvironmentAsync_ForbiddenStore_ForbiddenWithRoleMessage()
     {
-        var store = new RecordingStore();
+        var core = ActivatorUtilities.CreateInstance<HealthService>(_w.Provider, (IConfigStore)new FailingStore(new RequestFailedException(403, "no")));
 
-        await Service(store: store).CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
-
-        Assert.Equal(["read:crm"], store.Calls);
-    }
-
-    [Fact]
-    public async Task CheckEnvironmentAsync_Forbidden_ForbiddenWithMessage()
-    {
-        var service = Service(store: new RecordingStore(new RequestFailedException(403, "no")));
-
-        var health = await service.CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
+        var health = await Service(health: core).CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
 
         Assert.Equal(ConnectionState.Forbidden, health.State);
         Assert.Contains("403", health.Message);
     }
 
     [Fact]
-    public async Task CheckEnvironmentAsync_Auth_AuthRequired()
+    public async Task CheckEnvironmentAsync_AuthFailureStore_AuthRequired()
     {
-        var service = Service(store: new RecordingStore(new AuthenticationFailedException("x")));
+        var core = ActivatorUtilities.CreateInstance<HealthService>(_w.Provider, (IConfigStore)new FailingStore(new AuthenticationFailedException("x")));
 
-        Assert.Equal(ConnectionState.AuthRequired, (await service.CheckEnvironmentAsync(_w.Env("dev"), null, default)).State);
+        Assert.Equal(ConnectionState.AuthRequired, (await Service(health: core).CheckEnvironmentAsync(_w.Env("dev"), null, default)).State);
+    }
+
+    [Fact]
+    public async Task CheckEnvironmentAsync_Cancelled_ThrowsAndForgetsTheEnvironment()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var service = Service(health: new StubHealth(EnvironmentAccess.Ok) { Cancel = true });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckEnvironmentAsync(_w.Env("dev"), "crm", cts.Token));
+
+        Assert.False(service.Environments.ContainsKey("dev"));
     }
 
     [Fact]
     public async Task CheckEnvironmentAsync_Connected_CachedUntilExpiry()
     {
-        var store = new RecordingStore();
-        var service = Service(store: store);
+        var health = new StubHealth(EnvironmentAccess.Ok);
+        var service = Service(health: health);
 
         await service.CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
         await service.CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
         _time.Advance(TimeSpan.FromMinutes(6));
         await service.CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
 
-        Assert.Equal(2, store.Calls.Count);
+        Assert.Equal(2, health.Calls.Count);
+    }
+
+    [Fact]
+    public async Task CheckEnvironmentAsync_Failure_NotCached()
+    {
+        var health = new StubHealth(EnvironmentAccess.AuthRequired);
+        var service = Service(health: health);
+
+        await service.CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
+        await service.CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
+
+        Assert.Equal(2, health.Calls.Count);
     }
 
     [Fact]
     public async Task CheckEnvironmentAsync_DifferentService_NotServedFromCache()
     {
-        var store = new RecordingStore();
-        var service = Service(store: store);
+        var health = new StubHealth(EnvironmentAccess.Ok);
+        var service = Service(health: health);
 
         await service.CheckEnvironmentAsync(_w.Env("dev"), "crm", default);
         await service.CheckEnvironmentAsync(_w.Env("dev"), "billing", default);
 
-        Assert.Equal(2, store.Calls.Count);
+        Assert.Equal(2, health.Calls.Count);
+    }
+
+    private sealed class StubHealth(EnvironmentAccess access, string? reason = null) : IHealthService
+    {
+        public List<string> Calls { get; } = [];
+
+        public bool Cancel { get; init; }
+
+        public Task<HealthReport> CheckAsync(string repoPath, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<EnvironmentCheck> CheckEnvironmentAsync(ConfigEnvironment env, string? service, CancellationToken ct)
+        {
+            Calls.Add($"{env.Name}:{service}");
+            if (Cancel)
+            {
+                ct.ThrowIfCancellationRequested();
+            }
+
+            return Task.FromResult(new EnvironmentCheck(env.Name, access, access == EnvironmentAccess.Ok ? null : reason));
+        }
     }
 
     private sealed class ThrowingCredential(Exception exception) : TokenCredential
@@ -222,36 +270,26 @@ public sealed class AzureStatusServiceTests : IDisposable
         }
     }
 
-    private sealed class RecordingStore(Exception? failure = null) : IConfigStore
+    /// <summary>Every read fails with <paramref name="failure"/> (thrown on the first <c>MoveNextAsync</c>, as the Azure SDK does).</summary>
+    private sealed class FailingStore(Exception failure) : IConfigStore
     {
-        public List<string> Calls { get; } = [];
+        public IAsyncEnumerable<ConfigEntry> ReadAsync(ConfigEnvironment env, string service, CancellationToken ct) => Fail<ConfigEntry>();
 
-        public async IAsyncEnumerable<ConfigEntry> ReadAsync(ConfigEnvironment env, string service, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-        {
-            Calls.Add($"read:{service}");
-            await Task.Yield();
-            if (failure is not null)
-            {
-                throw failure;
-            }
-
-            yield return new ConfigEntry("A", ConfigScope.Service, new ConfigValue.Plain("1"));
-        }
-
-        public async IAsyncEnumerable<string> ListServicePrefixesAsync(ConfigEnvironment env, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-        {
-            Calls.Add("prefixes");
-            await Task.Yield();
-            if (failure is not null)
-            {
-                throw failure;
-            }
-
-            yield return "crm";
-        }
+        public IAsyncEnumerable<string> ListServicePrefixesAsync(ConfigEnvironment env, CancellationToken ct) => Fail<string>();
 
         public Task<ApplyResult> ApplyAsync(ConfigEnvironment env, string service, IReadOnlyList<Change> changes, CancellationToken ct) => throw new NotSupportedException();
 
         public Task<IReadOnlyList<string>> ListLabelsAsync(Uri storeEndpoint, CancellationToken ct) => throw new NotSupportedException();
+
+        private async IAsyncEnumerable<T> Fail<T>()
+        {
+            await Task.Yield();
+            if (failure is not null)
+            {
+                throw failure;
+            }
+
+            yield break;
+        }
     }
 }

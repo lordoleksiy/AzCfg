@@ -4,6 +4,7 @@ using AzCfg.Core.Health;
 using AzCfg.Core.Model;
 using AzCfg.Core.Security;
 using AzCfg.Core.UseCases;
+using AzCfg.Infrastructure.Azure;
 using AzCfg.Infrastructure.InMemory;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
@@ -79,6 +80,7 @@ public sealed class ScenarioHost
             .AddSingleton<IProjectService, ProjectService>()
             .AddSingleton<IAzureAccountProbe>(Account)
             .AddSingleton<ISyncService, SyncService>()
+            .AddSingleton<IAccessErrorClassifier, AzureAccessErrorClassifier>()
             .AddSingleton<IHealthService, HealthService>();
 
         var app = new CommandApp(new TypeRegistrar(services));

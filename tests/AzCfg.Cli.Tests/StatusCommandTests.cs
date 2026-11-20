@@ -23,7 +23,7 @@ public sealed class StatusCommandTests
         public ProjectBinding? Existing { get; init; } = Binding("dev");
         public Func<ConfigEnvironment, SyncSummary> SummaryFor { get; init; } = e => new(e.Name, true, 0, 0, [], [], [], 0);
         public List<(ProjectBinding Binding, ConfigEnvironment Env)> Asked { get; } = [];
-        public HealthReport Report { get; init; } = new(new(true, "dev@contoso.com", null), [new("dev", true, null), new("prod", true, null)], []);
+        public HealthReport Report { get; init; } = new(new(true, "dev@contoso.com", null), [new("dev", EnvironmentAccess.Ok, null), new("prod", EnvironmentAccess.Ok, null)], []);
         public List<string> Checked { get; } = [];
     }
 
@@ -34,6 +34,8 @@ public sealed class StatusCommandTests
             s.Checked.Add(repoPath);
             return Task.FromResult(s.Report);
         }
+
+        public Task<EnvironmentCheck> CheckEnvironmentAsync(ConfigEnvironment env, string? service, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private sealed class StubState(Stubs s) : IUserStateStore
@@ -204,7 +206,7 @@ public sealed class StatusCommandTests
 
     private static readonly HealthReport Broken = new(
         new(true, "dev@contoso.com", null),
-        [new("dev", true, null), new("prod", false, "UnauthorizedAccessException")],
+        [new("dev", EnvironmentAccess.Ok, null), new("prod", EnvironmentAccess.Forbidden, "UnauthorizedAccessException")],
         [
             new(HealthCheckKind.KeyMissingInEnvironments, HealthSeverity.Warning, "Key 'Feature:X' is missing in prod.", "prod", "Feature:X", "azcfg promote dev prod"),
             new(HealthCheckKind.EnvironmentAccess, HealthSeverity.Error, "Environment 'prod' is not reachable (UnauthorizedAccessException).", "prod"),
@@ -271,6 +273,7 @@ public sealed class StatusCommandTests
         var root = JsonDocument.Parse(output).RootElement;
         Assert.True(root.GetProperty("account").GetProperty("signedIn").GetBoolean());
         Assert.False(root.GetProperty("environments")[1].GetProperty("reachable").GetBoolean());
+        Assert.Equal("forbidden", root.GetProperty("environments")[1].GetProperty("access").GetString());
         Assert.True(root.GetProperty("hasErrors").GetBoolean());
         var finding = root.GetProperty("findings")[0];
         Assert.Equal("keyMissingInEnvironments", finding.GetProperty("kind").GetString());
