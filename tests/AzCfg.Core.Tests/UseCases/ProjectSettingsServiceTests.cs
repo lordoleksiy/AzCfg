@@ -347,9 +347,60 @@ public sealed class ProjectSettingsServiceTests
     [Theory]
     [InlineData(null)]
     [InlineData("orders")]
-    [InlineData("ORDERS")]
     public void ServiceGuard_NoneOrSameService_IsNoOp(string? requested) =>
         ProjectServiceGuard.EnsureSameService(Bound(), requested);
+
+    [Fact]
+    public void ServiceGuard_DifferentCase_IsAnotherService() =>
+        Assert.Throws<InvalidOperationException>(() => ProjectServiceGuard.EnsureSameService(Bound(), "ORDERS"));
+
+    [Fact]
+    public void ServiceHint_MentionsUseOrPullForceBeforePush()
+    {
+        var hint = ProjectSettingKeys.Hint("project.service")!;
+
+        Assert.Contains("azcfg use <ENV>", hint);
+        Assert.Contains("azcfg pull --force", hint);
+        Assert.Contains("azcfg push", hint);
+    }
+
+    [Fact]
+    public async Task SetAsync_Service_SnapshotDeleteFails_LeavesBindingUnchanged()
+    {
+        var (service, state) = Create(Bound());
+        state.DeleteSnapshotsThrows = true;
+
+        await Assert.ThrowsAsync<IOException>(() => service.SetAsync(Repo, "project.service", "billing", Ct));
+
+        Assert.Equal(Bound(), state.Binding);
+    }
+
+    [Theory]
+    [InlineData("https://kv-prod.vault.azure.net/", "https://kv-prod.vault.azure.net")]
+    [InlineData("  https://kv-prod.vault.azure.net  ", "https://kv-prod.vault.azure.net")]
+    public async Task SetAsync_Vault_StoresNormalizedRootUri(string value, string expected)
+    {
+        var (service, state) = Create(Bound());
+
+        var result = await service.SetAsync(Repo, "project.vault.prod", value, Ct);
+
+        Assert.Equal(expected, result.Value);
+        Assert.Equal(new Uri(expected), state.Binding!.VaultByEnvironment["prod"]);
+    }
+
+    [Theory]
+    [InlineData("https://kv-dev.vault.azure.net/secrets/Db--Password")]
+    [InlineData("https://kv-dev.vault.azure.net/?x=1")]
+    [InlineData("https://kv-dev.vault.azure.net/#frag")]
+    [InlineData("https://user@kv-dev.vault.azure.net")]
+    public async Task SetAsync_VaultWithPathQueryFragmentOrUserInfo_IsRejected(string value)
+    {
+        var (service, state) = Create(Bound());
+
+        await Assert.ThrowsAsync<ArgumentException>(() => service.SetAsync(Repo, "project.vault.prod", value, Ct));
+
+        Assert.Equal(Bound(), state.Binding);
+    }
 
     [Theory]
     [InlineData("project.service", true)]

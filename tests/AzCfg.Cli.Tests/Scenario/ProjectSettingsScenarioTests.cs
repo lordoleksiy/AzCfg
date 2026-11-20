@@ -17,8 +17,8 @@ public sealed class ProjectSettingsScenarioTests
         Assert.Equal(("orders", "dev"), (host.Binding!.Service, host.Binding.ActiveEnvironment));
         Assert.NotNull(host.State.Snapshot(host.Repo, "dev"));
 
-        // Same service is a no-op, even with another case.
-        Assert.Equal(0, (await host.RunAsync("pull", "--yes", "--json", "--service", "ORDERS")).Exit);
+        // Same service is a no-op, (ordinal).
+        Assert.Equal(0, (await host.RunAsync("pull", "--yes", "--json", "--service", "orders")).Exit);
 
         var (exit, output) = await host.RunAsync("config", "set", "project.service", "other");
         Assert.Equal(0, exit);

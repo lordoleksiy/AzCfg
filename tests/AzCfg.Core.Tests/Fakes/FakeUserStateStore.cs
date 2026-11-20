@@ -34,8 +34,14 @@ internal sealed class FakeUserStateStore : IUserStateStore
         return Task.CompletedTask;
     }
     public int DeleteSnapshotsCalls { get; private set; }
+    public bool DeleteSnapshotsThrows { get; set; }
     public Task DeleteSnapshotsAsync(string repoPath, CancellationToken ct)
     {
+        if (DeleteSnapshotsThrows)
+        {
+            throw new IOException("disk");
+        }
+
         DeleteSnapshotsCalls++;
         Snapshots.Clear();
         return Task.CompletedTask;

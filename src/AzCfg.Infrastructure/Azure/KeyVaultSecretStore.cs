@@ -23,23 +23,31 @@ public sealed class KeyVaultSecretStore(Func<Uri, SecretClient> clientFactory) :
         (await Client(vaultUri).SetSecretAsync(name, value, ct)).Value.Id;
 
     /// <summary>
-    /// Lists the secret's version <em>properties</em> (never a value): a versioned identifier exists when that version is listed,
-    /// a versionless one when any version is. A 404 means the secret does not exist.
+    /// Lists the secret's version <em>properties</em> (never a value). A versioned identifier exists when that version is listed and not disabled;
+    /// a versionless one when its newest version (by creation time, all pages) is not disabled. A 404 means the secret does not exist.
     /// </summary>
     public async Task<bool> ExistsAsync(Uri secretUri, CancellationToken ct)
     {
         var id = new KeyVaultSecretIdentifier(secretUri);
         try
         {
+            SecretProperties? newest = null;
             await foreach (var properties in Client(id.VaultUri).GetPropertiesOfSecretVersionsAsync(id.Name, ct))
             {
-                if (id.Version is null || string.Equals(properties.Version, id.Version, StringComparison.Ordinal))
+                if (id.Version is not null)
                 {
-                    return true;
+                    if (string.Equals(properties.Version, id.Version, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return properties.Enabled != false;
+                    }
+                }
+                else if (newest is null || (properties.CreatedOn ?? DateTimeOffset.MinValue) > (newest.CreatedOn ?? DateTimeOffset.MinValue))
+                {
+                    newest = properties;
                 }
             }
 
-            return false;
+            return newest is not null && newest.Enabled != false;
         }
         catch (RequestFailedException ex) when (ex.Status == 404)
         {

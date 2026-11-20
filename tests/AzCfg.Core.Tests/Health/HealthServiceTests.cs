@@ -52,6 +52,8 @@ public sealed class HealthServiceTests
 
     private sealed class ListDetector(List<ProjectInfo> projects) : IProjectDetector
     {
+        public List<ProjectInfo> Projects => projects;
+
         public bool Throws { get; set; }
 
         public Task<IReadOnlyList<ProjectInfo>> DetectAsync(string repoPath, CancellationToken ct) =>
@@ -216,6 +218,48 @@ public sealed class HealthServiceTests
         await rig.CheckAsync();
 
         Assert.Equal([DevSecret], rig.KeyVault.ExistsCalls);
+    }
+
+    [Fact]
+    public async Task CheckAsync_NotSignedInWithUnsafeSecretsTarget_StillReportsTargetFinding()
+    {
+        var rig = new Rig(Binding, null, new FakeLocalTarget(LocalTargetKind.UserSecrets, isSafeForSecrets: false), new FakeLocalTarget(LocalTargetKind.AppSettingsLocal));
+        rig.Probe.Result = new(false, null, "No credential");
+
+        var report = await rig.CheckAsync();
+
+        Assert.Contains(report.Findings, f => f.Kind == HealthCheckKind.AzureSignIn);
+        var finding = Assert.Single(report.Findings, f => f.Kind == HealthCheckKind.SecretsTargetNotIgnored);
+        Assert.Equal(HealthSeverity.Error, finding.Severity);
+        Assert.Contains("git rm --cached", finding.Message);
+        Assert.Contains("azcfg pull", finding.Message);
+    }
+
+    [Fact]
+    public async Task CheckAsync_NotSignedInWithMissingTargetProject_StillReportsBindingMismatch()
+    {
+        var rig = new Rig(Binding);
+        rig.Probe.Result = new(false, null, "No credential");
+        rig.Detector.Projects.Clear();
+
+        var report = await rig.CheckAsync();
+
+        Assert.Contains(report.Findings, f => f.Kind == HealthCheckKind.BindingMismatch && f.Severity == HealthSeverity.Error);
+    }
+
+    [Fact]
+    public async Task CheckAsync_GlobalKeyMissingInOneEnvironment_FixIsGlobalEdit()
+    {
+        var rig = new Rig(Binding, new()
+        {
+            ["dev"] = [new ConfigEntry("G", ConfigScope.Global, new ConfigValue.Plain("v"))],
+            ["prod"] = [],
+        });
+
+        var report = await rig.CheckAsync();
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal("azcfg edit --env prod --global --set G=<VALUE>", finding.Fix);
     }
 
     [Fact]
@@ -391,12 +435,13 @@ public sealed class HealthServiceTests
     }
 
     [Fact]
-    public async Task CheckAsync_NotSignedIn_HasNoBindingMismatch()
+    public async Task CheckAsync_NotSignedIn_SkipsServiceCheckButChecksTargetProjects()
     {
         var rig = new Rig(Binding with { Service = "billing", ValuesTarget = new LocalTargetBinding(LocalTargetKind.AppSettingsLocal, "/repo/Gone/Gone.csproj", LocalFileFormat.NestedJson) });
         rig.Probe.Result = new(false, null, "No credential");
 
-        Assert.Empty(Mismatches(await rig.CheckAsync()));
+        var mismatch = Assert.Single(Mismatches(await rig.CheckAsync()));
+        Assert.Contains("no longer exists", mismatch.Message);
     }
 
     [Fact]

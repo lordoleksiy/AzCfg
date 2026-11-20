@@ -36,6 +36,13 @@ public sealed class HealthService(
         if (!who.SignedIn)
         {
             findings.Add(new(HealthCheckKind.AzureSignIn, HealthSeverity.Error, $"Not signed in to Azure{Suffix(who.Error)}.", Fix: "az login"));
+            if (binding is not null)
+            {
+                // Local checks need no Azure access.
+                await CheckTargetsAsync(binding, findings, ct);
+                await CheckTargetProjectsAsync(binding, findings, ct);
+            }
+
             return new(who, [.. environments.Select(e => new EnvironmentCheck(e.Name, false, "Not signed in to Azure."))], findings);
         }
 
@@ -106,7 +113,7 @@ public sealed class HealthService(
         if (secretsSafe != true)
         {
             findings.Add(secretsSafe is false
-                ? new(HealthCheckKind.SecretsTargetNotIgnored, HealthSeverity.Error, $"The secrets target ({binding.SecretsTarget.Kind}) is not safe for secrets: it is tracked or not git-ignored.", Fix: GitIgnoreFix)
+                ? new(HealthCheckKind.SecretsTargetNotIgnored, HealthSeverity.Error, $"The secrets target ({binding.SecretsTarget.Kind}) is not safe for secrets: it is tracked or not git-ignored. If the file is tracked, untrack it (git rm --cached <file>) and run 'azcfg pull'.", Fix: GitIgnoreFix)
                 : new(HealthCheckKind.SecretsTargetNotIgnored, HealthSeverity.Warning, $"The secrets target ({binding.SecretsTarget.Kind}) could not be inspected.", Fix: GitIgnoreFix));
         }
 
@@ -179,9 +186,16 @@ public sealed class HealthService(
                     $"Key '{missing.Key}' is missing in {string.Join(", ", missing.MissingIn)}.",
                     string.Join(", ", missing.MissingIn),
                     missing.Key,
-                    $"azcfg promote {missing.PresentIn[0]} {missing.MissingIn[0]}"));
+                    FixMissing(missing, filtered)));
             }
         }
+    }
+
+    /// <summary>Promote copies only service-scope keys; a global key is added with an edit of the global scope.</summary>
+    private static string? FixMissing(MissingKey missing, IReadOnlyList<RemoteConfig> configs)
+    {
+        var isGlobal = configs.SelectMany(c => c.Entries).Any(e => e.Key == missing.Key && e.Scope == ConfigScope.Global);
+        return isGlobal ? $"azcfg edit --env {missing.MissingIn[0]} --global --set {missing.Key}=<VALUE>" : $"azcfg promote {missing.PresentIn[0]} {missing.MissingIn[0]}";
     }
 
     /// <summary>The binding no longer matches reality: the service has no keys, a target's project is gone, a vault names an unknown environment.</summary>

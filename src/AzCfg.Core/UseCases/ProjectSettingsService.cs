@@ -87,8 +87,9 @@ public sealed class ProjectSettingsService(IUserStateStore state, IProjectDetect
 
         if (service != binding.Service)
         {
-            await state.SaveBindingAsync(binding with { Service = service, ActiveEnvironment = null }, ct);
+            // Snapshots first: if deleting fails the binding stays unchanged and the change can be retried.
             await state.DeleteSnapshotsAsync(binding.RepoPath, ct);
+            await state.SaveBindingAsync(binding with { Service = service, ActiveEnvironment = null }, ct);
         }
 
         return new(ProjectSettingKeys.Service, service);
@@ -110,9 +111,7 @@ public sealed class ProjectSettingsService(IUserStateStore state, IProjectDetect
         }
         else
         {
-            vaults[name] = Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps
-                ? uri
-                : throw Invalid(canonical, value, "an absolute https Key Vault URI, e.g. https://<name>.vault.azure.net");
+            vaults[name] = NormalizeVault(canonical, value);
         }
 
         var before = binding.VaultByEnvironment.TryGetValue(name, out var old) ? old : null;
@@ -122,6 +121,22 @@ public sealed class ProjectSettingsService(IUserStateStore state, IProjectDetect
         }
 
         return new(canonical, vaults.TryGetValue(name, out var saved) ? saved.OriginalString : null);
+    }
+
+    /// <summary>A vault is its root URI: https, absolute, no path (or "/"), query, fragment or user info; stored without the trailing slash.</summary>
+    private static Uri NormalizeVault(string key, string value)
+    {
+        if (Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttps
+            && uri.AbsolutePath == "/"
+            && uri.Query.Length == 0
+            && uri.Fragment.Length == 0
+            && uri.UserInfo.Length == 0)
+        {
+            return new(uri.GetLeftPart(UriPartial.Authority));
+        }
+
+        throw Invalid(key, value, "an absolute https Key Vault root URI without path, query or fragment, e.g. https://<name>.vault.azure.net");
     }
 
     /// <summary>Git-ignores the target's file in the gitignore mode and, for secrets, rejects a target that is not safe for secrets.</summary>

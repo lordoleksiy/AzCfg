@@ -63,7 +63,11 @@ of 0.6.0 (stage 10), App Service / Function App settings are a later stage (11).
   - Changing `project.values`/`project.secrets` does **not** move data (moving is `standardize`, deferred by the ADR
     0012 amendment). The result carries a hint: run `azcfg pull --force` to fill the new target. Secret-safety rule of
     ADR 0006 still applies: a secrets target that is a git-tracked, non-ignored file is rejected.
-  - Values are validated with the same rules as the `pull` wizard (service name syntax, existing csproj, KV URI).
+  - Snapshots are dropped through the new port method `IUserStateStore.DeleteSnapshotsAsync(repoPath, ct)`, **before**
+    the binding is saved: if deletion fails the binding is unchanged and the command can be retried.
+  - Values are validated with the same rules as the `pull` wizard (service name syntax, existing csproj, KV URI). A
+    `project.vault.<env>` value must be an absolute https root URI (no path, query, fragment or user info); it is stored
+    without a trailing slash.
 - `pull`/`use --service X` on a project bound to another service → error naming the current service and the
   `azcfg config set project.service X` command (today it is silently ignored). Same service → no-op.
 
