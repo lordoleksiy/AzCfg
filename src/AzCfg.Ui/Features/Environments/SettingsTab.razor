@@ -1,0 +1,88 @@
+<div class="az-settings">
+    <h2 class="az-settings-title">Settings</h2>
+
+    <section class="az-settings-section" aria-label="Environments">
+        <header class="az-settings-head">
+            <h3>Environments</h3>
+            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Commands.ExecuteAsync(CommandIds.EnvSetup)">Set up with wizard…</FluentButton>
+        </header>
+        @if (_loadError is not null)
+        {
+            <ErrorBar Message="@_loadError" OnRetry="ReloadAsync" />
+        }
+        else if (Workspace.Environments is null)
+        {
+            <FluentProgressBar />
+        }
+        else
+        {
+            <label class="az-settings-field">Mode
+                <select class="az-input" aria-label="Mode" @onchange="e => Edit(() => _draft.Mode = Enum.Parse<EnvironmentMode>(e.Value!.ToString()!))">
+                    <option value="@EnvironmentMode.StorePerEnvironment" selected="@(_draft.Mode == EnvironmentMode.StorePerEnvironment)">One store per environment</option>
+                    <option value="@EnvironmentMode.LabelPerEnvironment" selected="@(_draft.Mode == EnvironmentMode.LabelPerEnvironment)">One store, a label per environment</option>
+                </select>
+            </label>
+            <EnvironmentRowsEditor Draft="_draft" Issues="_issues" AllowRemove="true" OnChanged="OnEdited" />
+            @foreach (var issue in _issues.Where(i => i.Row is null))
+            {
+                <div class="az-settings-issue" role="alert">@issue.Message</div>
+            }
+
+            <div>
+                <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" OnClick="AddEnvironment">Add environment</FluentButton>
+            </div>
+            @if (_draft.Mode == EnvironmentMode.StorePerEnvironment)
+            {
+                <label class="az-settings-field">Label for new keys (optional)
+                    <input class="az-input" aria-label="Default label" value="@_draft.DefaultLabel" @oninput="e => Edit(() => _draft.DefaultLabel = e.Value?.ToString())" />
+                </label>
+            }
+
+            <label class="az-settings-check">
+                <input type="checkbox" aria-label="Git-ignore local files" checked="@_draft.GitIgnoreLocalFiles" @onchange="e => Edit(() => _draft.GitIgnoreLocalFiles = (bool)e.Value!)" />
+                <span>Keep config in project files (adds <code>appsettings.local.json</code> to <code>.gitignore</code>; such files are offered as safe for secrets)</span>
+            </label>
+            @if (_saveError is not null)
+            {
+                <ErrorBar Message="@_saveError" />
+            }
+
+            <div class="az-settings-actions">
+                <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" Disabled="_saving" Loading="_saving" OnClick="SaveAsync">Save</FluentButton>
+                <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" Disabled="_saving" OnClick="Discard">Discard changes</FluentButton>
+            </div>
+        }
+    </section>
+
+    <section class="az-settings-section" aria-label="Project settings">
+        <header class="az-settings-head">
+            <h3>Project settings@(_project is null ? string.Empty : $" · {_project.Project.Project.Name}")</h3>
+            @if (_project is not null)
+            {
+                <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="EditBindingAsync">Edit binding…</FluentButton>
+            }
+        </header>
+        @if (_project?.Binding is null)
+        {
+            <EmptyState Text="Select a bound project in the workspace to see its settings" />
+        }
+        else if (_projectError is not null)
+        {
+            <ErrorBar Message="@_projectError" OnRetry="LoadProjectAsync" />
+        }
+        else
+        {
+            <table class="az-settings-table">
+                <tbody>
+                    @foreach (var setting in _projectSettings)
+                    {
+                        <tr>
+                            <th scope="row" class="az-mono">@setting.Key</th>
+                            <td class="az-mono">@(setting.Value ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+</div>

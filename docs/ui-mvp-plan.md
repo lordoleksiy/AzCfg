@@ -152,7 +152,7 @@ what is not verified (e.g. manual browser check).
 | S3 | Application: sync workflow, drafts | F1, T1, C1, C2 | W2 | [x] |
 | DH | Demo mode | F1, T1 | W2 | [x] |
 | M1 | One trunk: `dev` ↔ `master` (CLI 0.4.0 + 0.5.0), Application delegates to Core | DH | W2.5 | [x] |
-| U1 | UI: workspace, environments, settings | P1, S1, M1 | W3 | [ ] |
+| U1 | UI: workspace, environments, settings | P1, S1, M1 | W3 | [x] |
 | U2 | UI: project tab + Browse | P1, P2, S1, S2, S3, M1 | W3 | [ ] |
 | U3 | UI: Compare | P1, P2, S1, S2, M1 | W3 | [x] |
 | U4 | UI: Sync + make active | P1, P2, S1, S3, M1 | W3 | [x] |
@@ -1662,7 +1662,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     screens as before; the published package unchanged (same version); `dev` deleted.
   - **Tests:** Application tests keep their intent; delete only tests of logic that moved to Core (Core has its own).
 
-- [ ] **U1 — UI: workspace, environments, settings**
+- [x] **U1 — UI: workspace, environments, settings**
   - **Goal:** FR-W1…W6, FR-E1…E6 (UI), G15, G17, G30.
   - **Read:** §2.2, §2.3, §2.8 (1–3), §2.9, §4 (G15, G17, G30), §5 (AD-9, AD-10), §7.3 (Workspace, Environments),
     §7.4, §7.5, §9, `docs/ui-components.md`.

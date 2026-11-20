@@ -1,0 +1,87 @@
+.az-envs-manage {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0 8px;
+}
+
+.az-link {
+    border: none;
+    background: transparent;
+    color: var(--colorBrandForegroundLink);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.az-env-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: var(--az-row-h);
+    padding-right: 4px;
+}
+
+.az-env-item:hover,
+.az-env-item.selected {
+    background: var(--colorNeutralBackground1Hover);
+}
+
+.az-env-item.selected {
+    font-weight: 600;
+}
+
+.az-env-item.protected {
+    box-shadow: inset 2px 0 0 var(--az-env-prod);
+}
+
+.az-env-main {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    height: 100%;
+    padding: 0 8px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.az-env-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--az-env-custom);
+}
+
+.az-env-dot.kind-development { background: var(--az-env-dev); }
+.az-env-dot.kind-staging { background: var(--az-env-stage); }
+.az-env-dot.kind-production { background: var(--az-env-prod); }
+
+.az-env-detail,
+.az-env-state {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--colorNeutralForeground3);
+}
+
+.az-env-detail {
+    flex: 1;
+    min-width: 0;
+}
+
+.az-env-actions {
+    display: none;
+}
+
+.az-env-item:hover .az-env-actions,
+.az-env-item:focus-within .az-env-actions {
+    display: inline-flex;
+}

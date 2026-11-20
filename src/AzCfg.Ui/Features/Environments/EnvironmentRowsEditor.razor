@@ -1,0 +1,109 @@
+<table class="az-env-editor">
+    <thead>
+        <tr>
+            @if (ShowInclude)
+            {
+                <th class="narrow"><span class="az-visually-hidden">Use</span></th>
+            }
+            <th>Name</th>
+            <th>Endpoint</th>
+            <th>Label</th>
+            <th class="narrow">Protected</th>
+            @if (AllowRemove)
+            {
+                <th class="narrow"></th>
+            }
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var row in Draft.Rows)
+        {
+            <tr class="az-env-row @(row.IsProtected ? "protected" : "")" data-env="@row.Name">
+                @if (ShowInclude)
+                {
+                    <td class="narrow"><input type="checkbox" aria-label="Use @row.Name" checked="@row.Included" @onchange="e => Set(() => row.Included = (bool)e.Value!)" /></td>
+                }
+                <td>
+                    <input class="az-input" aria-label="Name" value="@row.Name" disabled="@(!row.IsNew)" placeholder="dev"
+                           title="@(row.IsNew ? "Environment name" : "A saved environment cannot be renamed: remove it and add a new one")"
+                           @oninput="e => Rename(row, e.Value?.ToString() ?? string.Empty)" />
+                </td>
+                <td>
+                    <input class="az-input az-mono" aria-label="Endpoint" value="@row.Endpoint" placeholder="https://name.azconfig.io" spellcheck="false"
+                           @oninput="e => Set(() => row.Endpoint = e.Value?.ToString() ?? string.Empty)" />
+                </td>
+                <td>
+                    <input class="az-input" aria-label="Label" value="@row.Label" placeholder="@LabelHint" spellcheck="false"
+                           @oninput="e => Set(() => row.Label = e.Value?.ToString())" />
+                </td>
+                <td class="narrow">
+                    <input type="checkbox" aria-label="Protected @row.Name" checked="@row.IsProtected" @onchange="e => Protect(row, (bool)e.Value!)" />
+                </td>
+                @if (AllowRemove)
+                {
+                    <td class="narrow">
+                        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="@($"Remove {row.Name}")"
+                                      OnClick="() => Remove(row)">
+                            <FluentIcon Value="@(new Icons.Regular.Size16.Delete())" />
+                        </FluentButton>
+                    </td>
+                }
+            </tr>
+            @foreach (var issue in Issues.Where(i => i.Row == row))
+            {
+                <tr class="az-env-issue"><td colspan="@Columns" role="alert">@issue.Message</td></tr>
+            }
+        }
+        @if (Draft.Rows.Count == 0)
+        {
+            <tr><td colspan="@Columns" class="az-env-none">No environments yet</td></tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private readonly HashSet<EnvironmentRow> _protectionTouched = [];
+
+    [Parameter, EditorRequired] public EnvironmentsDraft Draft { get; set; } = default!;
+
+    /// <summary>Problems to show under their rows.</summary>
+    [Parameter] public IReadOnlyList<EnvironmentIssue> Issues { get; set; } = [];
+
+    /// <summary>Shows the "use" checkbox column (discovered stores of the wizard).</summary>
+    [Parameter] public bool ShowInclude { get; set; }
+
+    /// <summary>Shows the remove button column (Settings).</summary>
+    [Parameter] public bool AllowRemove { get; set; }
+
+    /// <summary>Raised after every edit; the owner re-validates.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private int Columns => 4 + (ShowInclude ? 1 : 0) + (AllowRemove ? 1 : 0);
+
+    private string LabelHint => Draft.Mode == EnvironmentMode.LabelPerEnvironment ? "(environment name)" : "(default label)";
+
+    private void Set(Action change)
+    {
+        change();
+        OnChanged.InvokeAsync();
+    }
+
+    private void Rename(EnvironmentRow row, string name)
+    {
+        row.Name = name;
+        if (row.IsNew && !_protectionTouched.Contains(row))
+        {
+            row.IsProtected = ConfigEnvironment.IsProtectedByName(name);
+        }
+
+        OnChanged.InvokeAsync();
+    }
+
+    private void Protect(EnvironmentRow row, bool value)
+    {
+        _protectionTouched.Add(row);
+        Set(() => row.IsProtected = value);
+    }
+
+    private void Remove(EnvironmentRow row) => Set(() => Draft.Rows.Remove(row));
+}

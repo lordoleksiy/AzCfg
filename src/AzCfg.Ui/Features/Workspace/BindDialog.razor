@@ -1,0 +1,99 @@
+<div class="az-bind">
+    <label class="az-bind-field">Service
+        <input class="az-input" aria-label="Service" list="az-bind-services" placeholder="orders" spellcheck="false" autocomplete="off"
+               value="@_service" @oninput="e => _service = e.Value?.ToString() ?? string.Empty" />
+        <datalist id="az-bind-services">
+            @foreach (var candidate in Proposal.Resolution.Candidates)
+            {
+                <option value="@candidate"></option>
+            }
+        </datalist>
+        <span class="az-bind-hint">The prefix of the keys of this project in App Configuration (<code>&lt;service&gt;:Key:Path</code>).</span>
+    </label>
+
+    <fieldset class="az-bind-group" aria-label="Values target">
+        <legend>Plain values go to</legend>
+        @foreach (var option in Proposal.Resolution.TargetOptions)
+        {
+            <label class="az-bind-option">
+                <input type="radio" name="az-bind-values" checked="@(_values == option.Target)" @onchange="() => _values = option.Target" />
+                <span>@TargetText(option)</span>
+            </label>
+        }
+    </fieldset>
+
+    <fieldset class="az-bind-group" aria-label="Secrets target">
+        <legend>Secrets go to</legend>
+        @foreach (var option in Proposal.Resolution.TargetOptions)
+        {
+            <label class="az-bind-option @(option.IsSafeForSecrets ? "" : "unsafe")">
+                <input type="radio" name="az-bind-secrets" disabled="@(!option.IsSafeForSecrets)" checked="@(_secrets == option.Target)"
+                       @onchange="() => _secrets = option.Target" />
+                <span>@TargetText(option)</span>
+                @if (!option.IsSafeForSecrets)
+                {
+                    <span class="az-bind-reason">not offered for secrets: the file is not git-ignored, so a secret could be committed. Git-ignore it, or turn on “Keep config in project files” in Settings.</span>
+                }
+            </label>
+        }
+    </fieldset>
+
+    @if (IsRebind)
+    {
+        <p class="az-bind-hint">Vaults and local ignore patterns are kept. A different service clears the active environment; existing local data is not moved.</p>
+    }
+
+    <div class="az-bind-actions">
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" OnClick="CancelAsync">Cancel</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" Disabled="!CanSubmit" OnClick="SubmitAsync">@(IsRebind ? "Save binding" : "Bind")</FluentButton>
+    </div>
+</div>
+
+@code {
+    private string _service = string.Empty;
+    private LocalTargetBinding? _values;
+    private LocalTargetBinding? _secrets;
+
+    [CascadingParameter] public IDialogInstance? Dialog { get; set; }
+
+    [Parameter, EditorRequired] public ProjectSetupProposal Proposal { get; set; } = default!;
+
+    private bool IsRebind => Proposal.Resolution.Existing is not null;
+
+    private bool CanSubmit =>
+        !string.IsNullOrWhiteSpace(_service) && _values is not null && _secrets is not null
+        && Proposal.Resolution.TargetOptions.Any(o => o.Target == _secrets && o.IsSafeForSecrets);
+
+    protected override void OnInitialized()
+    {
+        var resolution = Proposal.Resolution;
+        var options = resolution.TargetOptions;
+        _service = resolution.Existing?.Service ?? (resolution.IsConfident ? resolution.Candidates.FirstOrDefault() : null) ?? string.Empty;
+        _values = resolution.Existing?.ValuesTarget ?? options.FirstOrDefault()?.Target;
+        _secrets = resolution.Existing?.SecretsTarget ?? options.FirstOrDefault(o => o.IsSafeForSecrets)?.Target;
+    }
+
+    private static string TargetText(LocalTargetOption option) =>
+        $"{option.Target.Kind switch
+        {
+            LocalTargetKind.UserSecrets => "user-secrets",
+            LocalTargetKind.AppSettingsLocal => "appsettings.local.json",
+            _ => "local.settings.json",
+        }}{(option.Exists ? string.Empty : " (new file)")}";
+
+    private async Task SubmitAsync()
+    {
+        if (CanSubmit && Dialog is not null)
+        {
+            await Dialog.CloseAsync(new BindChoice(_service.Trim(), _values!, _secrets!));
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (Dialog is not null)
+        {
+            await Dialog.CancelAsync();
+        }
+    }
+}

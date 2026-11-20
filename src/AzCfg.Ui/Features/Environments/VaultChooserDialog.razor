@@ -1,0 +1,86 @@
+@implements IDisposable
+@inject ISyncWorkflowService Workflow
+@inject IOperationRunner Runner
+
+<div class="az-vault-chooser">
+    @if (_error is not null)
+    {
+        <ErrorBar Message="@_error" OnRetry="LoadAsync" />
+    }
+    else if (_vaults is null)
+    {
+        <FluentProgressBar />
+    }
+    else
+    {
+        <input class="az-input" type="search" aria-label="Search vaults" placeholder="Search vaults" autocomplete="off" spellcheck="false" value="@_filter"
+               @oninput="e => _filter = e.Value?.ToString() ?? string.Empty" />
+        <ul class="az-vault-chooser-list">
+            @foreach (var vault in Filtered)
+            {
+                <li>
+                    <button type="button" class="az-vault-chooser-item" @onclick="() => ChooseAsync(vault)">
+                        <span class="az-mono">@vault.Name</span>
+                        <span class="az-vault-chooser-sub">@vault.ResourceGroup</span>
+                    </button>
+                </li>
+            }
+            @if (!Filtered.Any())
+            {
+                <li class="az-vault-chooser-sub">No vaults match</li>
+            }
+        </ul>
+    }
+    <div class="az-vault-chooser-actions">
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" OnClick="CancelAsync">Cancel</FluentButton>
+    </div>
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private IReadOnlyList<AzureResource>? _vaults;
+    private string _filter = string.Empty;
+    private string? _error;
+
+    [CascadingParameter] public IDialogInstance? Dialog { get; set; }
+
+    private IEnumerable<AzureResource> Filtered => (_vaults ?? []).Where(v => v.Name.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        switch (await Runner.RunAsync("List key vaults", OperationKind.Read, Workflow.ListVaultsAsync, _cts.Token))
+        {
+            case OperationResult<IReadOnlyList<AzureResource>>.Success success:
+                _vaults = success.Value;
+                break;
+            case OperationResult<IReadOnlyList<AzureResource>>.Failed failed:
+                _error = failed.Message;
+                break;
+        }
+    }
+
+    private async Task ChooseAsync(AzureResource vault)
+    {
+        if (Dialog is not null)
+        {
+            await Dialog.CloseAsync(vault);
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (Dialog is not null)
+        {
+            await Dialog.CancelAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}
