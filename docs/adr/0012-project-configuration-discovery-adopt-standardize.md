@@ -1,7 +1,8 @@
 # 0012. Project Configuration: manifest, convention profiles, discovery, `adopt`, `standardize`
 
 Status: accepted, **amended 2026-11-20 and 2026-11-21** (see «Amendment» and «Amendment 2» at the end): CLI 0.6.0
-ships only the minimal manifest of Amendment 2; most of the model below is deferred.
+ships only the minimal manifest of Amendment 2; most of the model below is deferred. Release renumbered 2026-11-21
+(`docs/cli-roadmap.md` §8.1): the manifest ships as **0.7.0**, after the UI (0.6.0); read «0.6.0» below as 0.7.0.
 
 ## Context
 - Today AzCfg is zero-config (ADR 0001): everything is auto-detected and the choice is remembered in user state

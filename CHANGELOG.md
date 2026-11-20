@@ -7,11 +7,19 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
 ## [Unreleased]
 
 ### Planned
-- 0.6.0 (ADR 0012, amendment 2): minimal project manifest `azcfg.json`, `project.shared`, manifest and secret-like-key
-  checks in `status --check`, `local.settings.json` target.
-- 0.7.0: UI (`azcfg ui`).
+- 0.6.0: UI (`azcfg ui`, preview).
+- 0.7.0 (ADR 0012, amendment 2): minimal project manifest `azcfg.json`, `project.shared`, manifest and secret-like-key
+  checks in `status --check`; "share with team" in the UI.
 - 0.8.0 (ADR 0014): App Service / Function App settings as remotes (`--remote`, `env@remote`, `promote --key`).
 - 0.9.0 (ADR 0015): manifest v2 — team environments, key layout, custom JSON target file.
+
+## [0.5.1]
+### Added
+- Azure Functions `local.settings.json` as a local target (`local-settings`), offered for Functions projects
+  (`<AzureFunctionsVersion>`): only the `Values` section is read and written, as a flat dictionary with `A:B` keys;
+  other sections (`IsEncrypted`, `Host`, `ConnectionStrings`) are kept; a missing file is created. Secrets are written
+  there only when the file is git-ignored, as for `appsettings.local.json`. No `//@global` markers in this file: all
+  its keys are service keys. `azcfg config set project.values|secrets local-settings` accepts it.
 
 ## [0.5.0]
 Stable release of everything in `0.5.0-preview.1` below, plus:

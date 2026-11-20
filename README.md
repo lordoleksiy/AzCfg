@@ -1,7 +1,8 @@
 # AzCfg
 
 Local manager for Azure App Configuration and Key Vault for .NET developers: two-way sync of configuration
-between Azure and your local files (user-secrets, `appsettings.local.json`) and JSON editing of App
+between Azure and your local files (user-secrets, `appsettings.local.json`, `local.settings.json` for Azure
+Functions) and JSON editing of App
 Configuration. Ships as the `azcfg` dotnet tool.
 
 - Pull an environment's config (App Configuration keys + Key Vault secrets) into your local files.
@@ -91,7 +92,7 @@ azcfg config set project.vault.dev https://my-kv.vault.azure.net/
 azcfg config set project.vault.dev ""                        # unset
 ```
 
-Targets: `user-secrets`, `appsettings-local`. Changing a target does not move data: run `azcfg pull --force` to fill
+Targets: `user-secrets`, `appsettings-local`, `local-settings` (Azure Functions). Changing a target does not move data: run `azcfg pull --force` to fill
 the new one. A secrets target must be git-ignored. `project.active` and `project.ignore` are read-only (use `azcfg use`
 and `azcfg ignore`). `pull`/`use --service X` on a project bound to another service fails with the
 `config set project.service` command to run.
@@ -112,8 +113,8 @@ activation overwrites unmanaged local keys (`--yes` skips it) and, for a protect
 written to local files (`--confirm <ENV>` skips it). With `--json` it never prompts and reports the refusal as data.
 
 On the first pull azcfg binds the project to a service and to local targets: user-secrets (outside the repo)
-or `appsettings.local.json` next to the `.csproj`. Only application projects are offered as targets — class
-libraries and test projects are skipped.
+or `appsettings.local.json` next to the `.csproj`; for Azure Functions projects also `local.settings.json` (see below).
+Only application projects are offered as targets — class libraries and test projects are skipped.
 
 ### 3. Change config and push it back
 
@@ -222,6 +223,19 @@ key between scopes:
 
 `dotnet user-secrets set` rewrites the file without comments, so the markers are lost there (the keys become
 service keys).
+
+## Azure Functions: `local.settings.json`
+
+For a Functions project (`<AzureFunctionsVersion>` in the `.csproj`) azcfg offers `local.settings.json` next to the
+`.csproj` as a target (`local-settings`). Only the `Values` section is read and written, as a flat dictionary
+(`Api:Url` stays one key, no nesting); `IsEncrypted`, `Host` and `ConnectionStrings` are kept as they are, and a
+missing file is created. Secrets are written there only when git ignores the file. `//@global` markers are not used in
+this file, so push treats all its keys as service keys.
+
+```bash
+azcfg config set project.values local-settings
+azcfg config set project.secrets local-settings:src/Functions/Functions.csproj
+```
 
 ## Keeping config in the project folder
 

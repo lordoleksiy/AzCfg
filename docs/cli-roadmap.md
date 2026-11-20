@@ -1,6 +1,6 @@
 # CLI roadmap analysis: daily workflow, consistency, environment switching
 
-Status: **accepted** (2026-11-20), **revised 2026-11-21** (§8 supersedes the 0.6.0 scope and the branching of §6–§7), **extended** by §9 (releases after 0.7.0). Contract: ADR 0013 (+ amendment of ADR 0012). Tasks: `docs/mvp-plan.md`
+Status: **accepted** (2026-11-20), **revised 2026-11-21** (§8 supersedes the 0.6.0 scope and the branching of §6–§7; §8.1 reorders UI before the manifest), **extended** by §9 (releases after 0.7.0). Contract: ADR 0013 (+ amendment of ADR 0012). Tasks: `docs/mvp-plan.md`
 stages 8–10; UI side: task M1 in `docs/ui-mvp-plan.md`. Releases go to `master` **before** the UI. Sources: `docs/architecture.md` §«Майбутнє», `docs/mvp-plan.md`
 (stage 8, «Поза MVP»), ADR 0010–0012, `docs/ui-mvp-plan.md` (U1–U4 open), the code of `AzCfg.Core`, `AzCfg.Cli`,
 `AzCfg.Ui.Application`. Purpose: one place to restore the context of «what to build next in the CLI and why».
@@ -145,6 +145,18 @@ Execution in orchestrator sessions (one coherent chunk each, 2–4 worktree agen
 0. one trunk + UI M1 (docs, 0.5.0 to `master`, `dev` merged both ways, delete `dev`/`release/*`);
 1. UI core screens U1–U4 ∥ 2. CLI 0.6.0 (manifest, checks, `local.settings.json`);
 3. UI extras UX1–UX3 + X1 → Q1, Q2 → 0.7.0 (`azcfg ui`).
+
+### 8.1 Reorder (2026-11-21, later the same day): UI before the manifest
+With U3, U4 and LS1 done and the manifest (PC1–PC4) not started, the UI goes first:
+- **0.5.1** — `local.settings.json` target (LS1), merged together with the UI screens U3, U4 (not packed yet).
+- **0.6.0** — UI preview (`azcfg ui`): U1, U2, UX1–UX3, X1, Q1, Q2, R1. Was 0.7.0.
+- **0.7.0** — minimal manifest `azcfg.json` (PC1–PC5) for CLI **and** UI at once (UX4 "share with team"). Was 0.6.0.
+- 0.8.0, 0.9.0 unchanged.
+
+Why: only "share with team" of the UI plan needs the manifest; building the `ProjectService`/`ProjectSettingsService`
+changes and their UI in one session avoids touching `AzCfg.Ui.Application` twice. Cost: a preview UI without
+`azcfg.json` sharing (bindings stay per user, as in 0.5.x). Where §6–§9 say 0.6.0 for the manifest or 0.7.0 for the
+UI, this section wins.
 
 Watch, do not act on now: `SyncService` (≈540 lines, 11 public methods) — split only when a feature lands there;
 `ConfigEnvironment` is App Configuration-shaped — fine until stage 11.

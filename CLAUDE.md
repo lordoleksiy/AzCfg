@@ -1,7 +1,7 @@
 # AzCfg
 
 Local manager for Azure App Configuration + Key Vault for .NET developers: two-way sync of config between Azure
-and local files (user-secrets, `appsettings.local.json`; `local.settings.json` is designed, not implemented yet)
+and local files (user-secrets, `appsettings.local.json`, `local.settings.json` for Azure Functions)
 and JSON editing of App Configuration.
 Core is a class library; the client is currently a CLI (`dotnet tool azcfg`), a UI comes later.
 Code, identifiers, commits and docs are in English (existing ADRs and plans in `docs/` are in Ukrainian).
@@ -62,8 +62,9 @@ tests/AzCfg.Cli.Tests     command tests + Scenario/ (end-to-end on in-memory fak
 
 ## Documentation
 - Full architecture, models, ports, CLI: `docs/architecture.md`
-- CLI plan: `docs/mvp-plan.md` (stages 1–9 done, CLI 0.1.0–0.5.0; stage 10 = CLI 0.6.0; orchestrator sessions 0–3
-  and branching; where it differs from later ADRs, the ADR wins)
+- CLI plan: `docs/mvp-plan.md` (stages 1–9 done, CLI 0.1.0–0.5.0; 0.5.1 = `local.settings.json`; reorder 2026-11-21:
+  0.6.0 = UI (`azcfg ui`), 0.7.0 = stage 10 manifest for CLI + UI; orchestrator sessions and branching; where it
+  differs from later ADRs, the ADR wins, except release numbers — `docs/cli-roadmap.md` §8.1)
 - Branching: one trunk `master` — `feature/<id>-<slug>` from `origin/master`, PR into `master`; a release is a PR that
   changes `<Version>` (NuGet publishes only then, `--skip-duplicate`). No `dev`/`release/*` branches after session 0.
 - CLI roadmap analysis (command budget, why this order, 2026-11-21 scope revision §8): `docs/cli-roadmap.md`
