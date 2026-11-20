@@ -1,6 +1,6 @@
 # CLI roadmap analysis: daily workflow, consistency, environment switching
 
-Status: **accepted** (2026-11-20), **revised 2026-11-21** (§8 supersedes the 0.6.0 scope and the branching of §6–§7). Contract: ADR 0013 (+ amendment of ADR 0012). Tasks: `docs/mvp-plan.md`
+Status: **accepted** (2026-11-20), **revised 2026-11-21** (§8 supersedes the 0.6.0 scope and the branching of §6–§7), **extended** by §9 (releases after 0.7.0). Contract: ADR 0013 (+ amendment of ADR 0012). Tasks: `docs/mvp-plan.md`
 stages 8–10; UI side: task M1 in `docs/ui-mvp-plan.md`. Releases go to `master` **before** the UI. Sources: `docs/architecture.md` §«Майбутнє», `docs/mvp-plan.md`
 (stage 8, «Поза MVP»), ADR 0010–0012, `docs/ui-mvp-plan.md` (U1–U4 open), the code of `AzCfg.Core`, `AzCfg.Cli`,
 `AzCfg.Ui.Application`. Purpose: one place to restore the context of «what to build next in the CLI and why».
@@ -148,3 +148,40 @@ Execution in orchestrator sessions (one coherent chunk each, 2–4 worktree agen
 
 Watch, do not act on now: `SyncService` (≈540 lines, 11 public methods) — split only when a feature lands there;
 `ConfigEnvironment` is App Configuration-shaped — fine until stage 11.
+
+## 9. Revision (2026-11-20): universal configuration for .NET teams beyond our own
+Question: can AzCfg serve third-party .NET teams (App Service / Functions settings, no App Configuration, other key
+conventions, plain `appsettings.json` + env vars) without a new architecture? Checked against ADR 0001–0014, this plan
+and a real service (ASP.NET Core API on App Service, built config by hand, no App Configuration at runtime).
+
+**Answer: no re-architecture.** The core (ports, `ConfigState` + 3-way diff, plan → apply, `SecretString`, `status --check`,
+command budget) is already the universal part. Three additive generalisations are missing:
+1. **Remote as an abstraction** — ADR 0014 providers, App Service / Function App settings (stage 11, unchanged design).
+2. **Key layout** instead of the hard-wired `<service>:` / `global:` (ADR 0004 becomes the default of `KeyLayout`).
+3. **Team-level environments** — optional `environments` in `azcfg.json` (v2) instead of only the per-user `profile.json`;
+   onboarding becomes «clone → `az login` → `pull`», and repos of different organisations stop sharing one global list.
+
+**Model.** Remote (App Configuration; App Service/Function App settings) ↔ local target (user-secrets, git-ignored JSON,
+`local.settings.json`); Key Vault stays the secret backend behind references; tracked `appsettings*.json` and env vars are
+read-only layers (checks, a later UI view), never written. Settings levels: `profile.json` (developer) → `azcfg.json`
+(team) → `projects.json` (personal per project); precedence: flag > personal fields > team (shared fields win) > developer
+> auto-detection. Runtime precedence of .NET configuration is explained, never changed.
+
+**Moving config between sources** needs no command: `diff dev@app dev`, `promote dev@app dev --key <pattern>` over the
+providers; `RemoteDrift` in `status --check` afterwards.
+
+| Item | Decision | Why |
+| --- | --- | --- |
+| 0.6.0, 0.7.0 | **Unchanged** | No conflict; `local.settings.json` and the v1 manifest are prerequisites |
+| Stage 11 (ADR 0014) | **Scheduled as 0.8.0** (was «only on demand») | Deployed config of App Service apps lives in App Settings, often drifting from App Configuration; Functions are the 0.6.0 audience |
+| `env@remote`, `promote --key`, `RemoteDrift` | **0.8.0** | Migration App Service → App Configuration without a new command |
+| Manifest v2: `environments`, `layout`, `remotes`, `file` | **0.9.0**, ADR 0015 | Teams with other conventions and multi-org developers; additive, v1 stays valid |
+| `LocalTargetNotLoaded` check | **0.9.0** | A bound target the app never loads silently «loses» pulled values (seen in practice) |
+| Binding without local targets, Key Vault as a remote, effective-config UI view | **Candidates** | Only with a real user; KV-as-remote conflicts with ADR 0014 and needs an amendment |
+| Convention profiles, `standardize`, CI/CD generation, env-var/`.env` manager, writing tracked `appsettings*.json`, continuous App Configuration → App Service sync | **Never** | CD or code concerns, large surface, no value over existing .NET mechanisms |
+
+Conflicts and minimal corrections (done as ADR amendments in the stage's first task, not here): ADR 0004 (convention →
+default layout), ADR 0008 / UI Q2 (environments may come from the manifest), ADR 0012 (endpoints allowed in the manifest),
+ADR 0006 (custom JSON file name, git-ignored only), ADR 0014 (stage 11 scheduled; its «`project.*` never writes the
+manifest» is superseded by ADR 0012 amendment 2). No breaking changes: every new field defaults to today's behaviour.
+Tasks: `docs/mvp-plan.md` stages 11–12, sessions 4–5.

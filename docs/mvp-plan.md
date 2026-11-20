@@ -8,7 +8,8 @@
 > замовчуванням — upsert, `--delete`, `azcfg config`, `pull/use --service`); 0.3.0 — етап 7, ADR 0009;
 > 0.3.1 — виявлення `appsettings*.json`; 0.4.0 — етап 8 (ADR 0013); 0.5.0 — етап 9 (`status --check`, `config project.*`).
 > Далі: 0.6.0 — етап 10 (мінімальний маніфест — ADR 0012, поправка 2; `local.settings.json`), 0.7.0 — UI (`azcfg ui`).
-> Етап 11 (провайдери, App Service / Function App settings — ADR 0014) — лише коли з'явиться користувач із цією потребою.
+> Після UI: 0.8.0 — етап 11 (провайдери, App Service / Function App settings — ADR 0014), 0.9.0 — етап 12 (маніфест v2:
+> середовища команди, розкладка ключів — ADR 0015). Обґрунтування — `docs/cli-roadmap.md` §9.
 > Де текст задачі етапів 1–6 розходиться з ADR 0008/0009 — правильний ADR. Аналіз і обґрунтування порядку —
 > `docs/cli-roadmap.md`.
 
@@ -307,6 +308,12 @@
 | 1 | UI: основні екрани | U1 Workspace/Environments, U2 Browse, U3 Compare, U4 Sync — паралельно (`docs/ui-mvp-plan.md`) | 4 | 0 |
 | 2 | CLI 0.6.0 | PC1–PC4 ∥ LS1, потім PC5 (етап 10) | 2 → 1 | 0 (паралельно з 1) |
 | 3 | UI: доповнення + 0.7.0 | UX1 Problems, UX2 матриця + copy, UX3 `local.settings.json` + share, X1 `azcfg ui` ∥, потім Q1, Q2, R1 (`docs/ui-mvp-plan.md`) | 4 → 1 | 1, 2 |
+| 4 | CLI 0.8.0 — App Service / Functions | RP0, потім RP1 → RP2 ∥ RP3 → RP4 → RP5, RP6 (етап 11) | 1 → 2 → 1 | 3 |
+| 5 | CLI 0.9.0 — маніфест v2 | MV0, потім MV1 ∥ MV4 ∥ MV5 → MV2 → MV3, MV6 (етап 12) | 1 → 3 → 1 | 4 |
+
+Сесії 4 і 5 — після 0.7.0, бо змінюють `SyncService`/`KeyMapper`, якими користується UI; кожна оновлює
+`AzCfg.Ui.Application` у тому самому PR, якщо сигнатура змінюється. Порядок 4 ↔ 5 можна поміняти, якщо маніфест v2
+потрібен раніше (тоді `remotes` у маніфесті додає сесія 4).
 
 Сесії 1 і 2 не перетинаються за файлами (`src/AzCfg.Ui*` проти Core/Infrastructure/CLI); якщо сесії 2 треба змінити
 сигнатуру, яку вже використовує UI, — вона ж оновлює `AzCfg.Ui.Application` у тому самому PR.
@@ -480,13 +487,115 @@
     release notes; PR у `master`.
   - Залежить від: PC3, PC4, LS1
 
+## Етап 11. App Service / Function App settings — CLI 0.8.0 (сесія 4)
+
+Контракт — ADR 0014 (провайдери) + поправка RP0. Обґрунтування потреби — `docs/cli-roadmap.md` §9: сервіси на App Service
+тримають деплоєний конфіг в App Settings (часто без App Configuration у рантаймі), Functions — цільова аудиторія 0.6.0.
+Нових команд немає: `--remote`, сторона `env@remote`, `config project.remote.*`. Значення секретів — як і раніше, ніде.
+
+- [ ] **RP0. Поправка ADR 0014** (оркестратор, до коду)
+  - Етап 11 заплановано (знімається умова «лише за потреби»); додається: сторона `env@remote` у `diff`/`promote`,
+    `promote --key`, `HealthCheckKind.RemoteDrift`; явно — поправка 2 ADR 0012 перекриває «`project.*` never the manifest».
+  - Залежить від: 0.7.0
+
+- [ ] **RP1. Core: провайдери** (`Core/Remotes`, TDD)
+  - `RemoteKind`, `RemoteCapabilities`, `RemoteLocation`, `IRemoteConfigProvider`; `AppConfigurationProvider(IConfigStore)` —
+    поточна поведінка, винесена з `SyncService` без змін; `SyncService` працює через `IEnumerable<IRemoteConfigProvider>`;
+    `RemoteResolver` (static).
+  - Приймання: **усі наявні тести проходять без змін**; правила capabilities (немає `ServiceScopes` → `ApplyBlocker` для
+    global, немає `Labels` → label ігнорується, немає `PerKeyConcurrency` → read-modify-write з перевіркою `Before`,
+    `RestartsOnWrite` → `SyncWarningKind.RestartsApp`) — на фейковому провайдері.
+  - Залежить від: RP0
+
+- [ ] **RP2. Infrastructure: `IAppSettingsStore`** (порт у Core, реалізація через ARM)
+  - `ReadAsync(resourceId, slot)` → `AppSettingsSnapshot(Settings, ETag)`, `ReplaceAsync(resourceId, slot, settings, expectedETag)`;
+    Web App і Function App, слоти; 412 → `ApplyResult.Failed`; помилки доступу — через `AzureErrors`. DI в `AddAzCfg()`.
+  - Залежить від: RP1
+
+- [ ] **RP3. Core: `AppServiceSettingsProvider`**
+  - `A__B` ↔ `A:B` (читання приймає обидва, запис — `__`); `@Microsoft.KeyVault(SecretUri=…)` ↔ `ConfigValue.KeyVaultRef`;
+    усе `ConfigScope.Service`; `PlatformIgnore`: `WEBSITE_*`, `FUNCTIONS_*`, `AzureWebJobs*`, `APPLICATIONINSIGHTS_*`,
+    `APPINSIGHTS_*`, `SCM_*`. Capabilities: `Delete`, `KeyVaultReferences`, `RestartsOnWrite`.
+  - Тести: мапінг, KV-референси без читання значень, platform-ключі не потрапляють у plan, конфлікт при зміні між read і replace.
+  - Залежить від: RP1 (паралельно з RP2 — на фейку порту)
+
+- [ ] **RP4. Прив'язка і CLI `--remote`**
+  - `ProjectBinding.Remotes` (`RemoteBinding(Name, Kind, LocationByEnvironment)`, опційне, старі `projects.json` без міграції);
+    `config set project.remote.<name>.<env> <resource-id>[@<slot>]` (kind — з типу ресурсу); `--remote <name>` для `pull`,
+    `use`, `status`, `diff`, `plan`, `push`, `edit`; знімки не-основного ремоута — `snapshots/<repo>/<env>@<remote>.json`.
+  - Без `--remote` — рівно поведінка 0.7.0 (`appconfig`).
+  - Тести: сценарій `/cli-scenario-test` Function App: `config set project.remote…` → `pull --remote app` у
+    `local.settings.json` → зміна → `plan --remote app` (warning `RestartsApp`) → `push`.
+  - Залежить від: RP2, RP3
+
+- [ ] **RP5. Між ремоутами: `env@remote`, `promote --key`, `RemoteDrift`**
+  - `diff dev@app dev`, `promote dev@app dev [--key <pattern>]` (міграція App Service → App Configuration і навпаки; KV-референси
+    переносяться як референси); `promote --key` працює і без ремоутів.
+  - `status --check`: `RemoteDrift` (Warning) — ключ є в основному і в іншому ремоуті одного середовища з різними значеннями
+    (секрети — за назвою/референсом, не за значенням).
+  - Тести: усі форми сторін; platform-ключі не мігрують; канарковий секрет відсутній у `--json`.
+  - Залежить від: RP4
+
+- [ ] **RP6. Випуск 0.8.0** — README (сценарії App Service і Functions, міграція в App Configuration), `CHANGELOG.md`,
+  `<Version>`; UI: вибір ремоута — окрема задача UI-плану після релізу.
+  - Залежить від: RP5
+
+## Етап 12. Маніфест v2: середовища команди і розкладка ключів — CLI 0.9.0 (сесія 5)
+
+Контракт — ADR 0015 (MV0). Усе адитивне: без `azcfg.json` v2 поведінка як у 0.8.0; файл v1 лишається валідним; дефолт
+розкладки = ADR 0004. Нових команд немає.
+
+- [ ] **MV0. ADR 0015 + поправки ADR 0004, 0008, 0012** (оркестратор, до коду)
+  - ADR 0015: `KeyLayout`, `environments` / `remotes` / `values|secrets.file` у маніфесті v2, пріоритет рівнів
+    (прапорець > особисте в `projects.json` > `azcfg.json` > `profile.json` > автовизначення).
+  - Поправки: ADR 0004 (конвенція — дефолт розкладки), ADR 0008 (режим і середовища можуть приходити з маніфесту),
+    ADR 0012 (endpoints/resource id у маніфесті дозволені, опційно), ADR 0006 (власна назва JSON-цілі, лише git-ignored).
+  - Залежить від: 0.8.0
+
+- [ ] **MV1. Core: `KeyLayout`** (TDD)
+  - `KeyLayout(ServicePrefix, GlobalPrefix?)`, дефолт `("<service>:", "global:")`; `KeyMapper`, `ScopeMerger`, `JsonProjection`,
+    `ListServicePrefixesAsync`-евристика сервісу приймають layout; `ServicePrefix = ""` — store/label належить застосунку;
+    `GlobalPrefix = null` → `@global` і `//@global` дають `ApplyBlocker`. KV-назви `:` → `--` без змін.
+  - Приймання: наявні тести без змін (дефолт); параметризований набір для трьох розкладок.
+  - Залежить від: MV0
+
+- [ ] **MV2. Модель і валідатор маніфесту v2**
+  - `schemaVersion: 2`; опційні `layout`, `environments` (`mode`, на середовище `appconfig`, `label`, `protected`), `remotes`
+    (як `ProjectBinding.Remotes`), `values|secrets.file`. Строга схема, value-free, канарковий `"value"` відхиляється;
+    v1 читається як раніше; v2 у 0.8.0 → помилка з підказкою оновитися (вже поведінка v1-валідатора).
+  - Залежить від: MV1
+
+- [ ] **MV3. Розв'язання рівнів**
+  - Середовища: є `environments` у маніфесті → для цього репо вони замінюють список профілю (без злиття по полях); `pull`/`use`
+    без `profile.json` працюють (`init` не потрібен); `config list`, `status` показують джерело середовищ.
+  - `layout`, `remotes` з маніфесту потрапляють у binding як спільні поля (правило поправки 2 ADR 0012).
+  - Тести: сценарій `/cli-scenario-test` «новий розробник»: порожній стан користувача + `azcfg.json` v2 → `pull` без `init` і
+    без майстра.
+  - Залежить від: MV2
+
+- [ ] **MV4. JSON-ціль із власною назвою файлу**
+  - `appsettings-local` + `file` (напр. `appsettings.Development.json`) у маніфесті й `config set project.values
+    appsettings-local:<project>#<file>`; ціль приймається лише якщо файл git-ignored і не tracked (і для значень).
+  - Залежить від: MV0
+
+- [ ] **MV5. `status --check`: `LocalTargetNotLoaded`** (Warning, евристика)
+  - Ціль, яку застосунок, імовірно, не читає: `appsettings.local.json` / власна назва не згадується в `*.cs` проєкту;
+    user-secrets без `UserSecretsId`. Лише назви файлів у звіті; без блокування.
+  - Залежить від: MV0
+
+- [ ] **MV6. Випуск 0.9.0** — README (онбординг «clone → `az login` → `pull`», розкладки ключів), `CHANGELOG.md`, `<Version>`.
+  - Залежить від: MV3, MV4, MV5
+
 ## Поза MVP
-Без конкретного користувача з потребою не плануються:
-- Етап 11 (ADR 0014): провайдери (`IRemoteConfigProvider`, `RemoteKind`, …), `AppServiceSettingsProvider` + порт
-  `IAppSettingsStore`, `config set project.remote.<name>.<env>`, `--remote <name>`.
+Кандидати — лише з конкретним користувачем і окремим ADR:
+- Прив'язка без локальних цілей (застосунок читає App Configuration у рантаймі, azcfg — лише `edit`/`diff`/`status`).
+- Key Vault як самостійний ремоут (команди з `AddAzureKeyVault` без App Configuration) — потребує поправки ADR 0014.
+- UI «ефективна конфігурація» (read-only шари `appsettings*.json` → ціль → env vars), Container Apps як ремоут.
+- `promote --changed`, git remote як сигнал для зіставлення сервісу, ранжування vault-ів з Resource Graph, створення Key Vault.
+
+Не плануються (`docs/cli-roadmap.md` §9):
 - З ADR 0012 (поправка 2): `adopt`, discovery-сканери (`launchSettings`, `.env*`, `docker-compose*`, `.github/workflows`),
   drift-звіт, джерела/tier-и секретів/`KeySpec` у маніфесті, профілі конвенцій і `standardize`, CI/CD-модель і
   генерація GitHub Actions, `pull`/`push` за повним маніфестом.
-- `promote --key/--changed`, git remote як сигнал для зіставлення сервісу, ранжування vault-ів з Resource Graph,
-  створення Key Vault.
+- Менеджер env vars / `.env`, запис у tracked `appsettings*.json`, постійна синхронізація App Configuration → App Service.
 (`LabelResolver` реалізовано в 0.2.0 — ADR 0008; `diff` і `status --check` — етапи 8–9.)

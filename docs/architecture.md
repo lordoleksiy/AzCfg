@@ -338,9 +338,12 @@ UX: label середовища, реальні цілі, `//@global`, відфо
 Аналіз і обґрунтування — `docs/cli-roadmap.md` (§8). План UI — `docs/ui-mvp-plan.md`.
 
 ## Майбутнє
-- `promote --key/--changed` (оновлення значень, що відрізняються, а не лише додавання).
+- 0.8.0 — етап 11 (ADR 0014): провайдери віддаленої конфігурації, App Service / Function App settings, `--remote`,
+  `env@remote` у `diff`/`promote`, `promote --key`.
+- 0.9.0 — етап 12 (ADR 0015): маніфест v2 — середовища команди, розкладка ключів (`KeyLayout`), власна назва JSON-цілі.
+  Обґрунтування — `docs/cli-roadmap.md` §9.
+- `promote --changed` (оновлення значень, що відрізняються, а не лише додавання).
 - Git remote як сигнал зіставлення сервісу.
-- Етап 11 (ADR 0014, коли з'явиться потреба): провайдери віддаленої конфігурації, App Service / Function App settings.
 - Ранжування vault-ів з Resource Graph (ADR 0005, крок 4) і створення Key Vault з інструменту.
 - Проєктна конфігурація далі (поза етапом 10): `adopt`/discovery, профілі конвенцій і `standardize`, повний маніфест (sources → targets),
   віддалена частина стандартизації, дискавері `.github/workflows` (потребує YAML), модель CI/CD → генерація
