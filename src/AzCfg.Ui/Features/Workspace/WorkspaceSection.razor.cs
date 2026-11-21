@@ -115,12 +115,20 @@ public sealed partial class WorkspaceSection : IDisposable
         return $"{node.Project.Project.Name} · {binding.ActiveEnvironment ?? "no active env"}{(counters.Length > 0 ? $" {counters}" : string.Empty)}";
     }
 
-    /// <summary>"↑1 ↓2 !1" from the cached view of the active environment; empty when it is not loaded.</summary>
+    /// <summary>"↑1 ↓2 !1" from the session's summary or cached view of the active environment; empty when neither is loaded.</summary>
     private string Counters(string projectId, ProjectBinding binding)
     {
-        if (binding.ActiveEnvironment is not { } active
-            || !Sessions.TryGet(projectId, out var session)
-            || session.View is not { IsRemoteOnly: false } view
+        if (binding.ActiveEnvironment is not { } active || !Sessions.TryGet(projectId, out var session))
+        {
+            return string.Empty;
+        }
+
+        if (session.Summary is { IsActive: true } summary && string.Equals(summary.Environment, active, StringComparison.OrdinalIgnoreCase))
+        {
+            return Format(summary.LocalChanges, summary.RemoteChanges, summary.Conflicts.Count);
+        }
+
+        if (session.View is not { IsRemoteOnly: false } view
             || !string.Equals(view.Environment.Name, active, StringComparison.OrdinalIgnoreCase))
         {
             return string.Empty;
@@ -129,8 +137,11 @@ public sealed partial class WorkspaceSection : IDisposable
         var outgoing = view.Rows.Count(r => r.Status is DiffKind.LocalAdded or DiffKind.LocalModified or DiffKind.LocalDeleted);
         var incoming = view.Rows.Count(r => r.Status is DiffKind.RemoteAdded or DiffKind.RemoteModified or DiffKind.RemoteDeleted);
         var conflicts = view.Rows.Count(r => r.Status == DiffKind.Conflict);
-        return string.Join(' ', new[] { outgoing > 0 ? $"↑{outgoing}" : null, incoming > 0 ? $"↓{incoming}" : null, conflicts > 0 ? $"!{conflicts}" : null }.Where(s => s is not null));
+        return Format(outgoing, incoming, conflicts);
     }
+
+    private static string Format(int outgoing, int incoming, int conflicts) =>
+        string.Join(' ', new[] { outgoing > 0 ? $"↑{outgoing}" : null, incoming > 0 ? $"↓{incoming}" : null, conflicts > 0 ? $"!{conflicts}" : null }.Where(s => s is not null));
 
     private static string ProjectTip(ProjectNode node) =>
         node.Project.Project.IsLibrary

@@ -68,6 +68,26 @@ public sealed class ProjectTabTests : BrowseContext
     }
 
     [Fact]
+    public void Invalidate_ReloadsTheHeaderSummary()
+    {
+        Sync.Summary = new SyncSummary("dev", true, 2, 1, ["Db:Host"], [], [], 0);
+        var session = Seed(Rows());
+        var cut = Open(session);
+        cut.WaitForAssertion(() => Assert.Contains("⇡ 2", cut.Find(".az-project-summary").TextContent));
+
+        Sync.Summary = new SyncSummary("dev", true, 0, 1, [], [], [], 0);
+        session.Invalidate();
+        cut.WaitForAssertion(() =>
+        {
+            var text = cut.Find(".az-project-summary").TextContent;
+            Assert.Contains("⇡ 0", text);
+            Assert.Contains("⇣ 1", text);
+            Assert.DoesNotContain("! 1", text);
+        });
+        Assert.Equal(2, Sync.StatusCalls);
+    }
+
+    [Fact]
     public void Render_NonActiveEnvironment_HasNoSummaryAndNeverCallsStatus()
     {
         var cut = Open(Seed(Rows(), active: "dev", env: "prod"));

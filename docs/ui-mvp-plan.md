@@ -170,9 +170,9 @@ what is not verified (e.g. manual browser check).
    from `origin/master` and PRs into `master` (§0.4).
 2. **Clean-up (user's OK)** — delete `dev`, `release/*` (local + origin), `git worktree prune`, stale `worktree-agent-*`
    branches, merged `.claude/worktrees/*`, `../AzCfg-m1`, `../AzCfg-dev-docs`.
-3. **Session 1 (W3)** — U1, U2, U3, U4 in parallel, one worktree agent each (`docs/mvp-plan.md` «Сесії оркестратора»).
-   Today `--demo` shows only Welcome: opening a folder leaves the Explorer empty and "Set up environments" unticked —
-   that is U1 work (sidebar sections, environment wizard), not a bug.
+3. **Session 1 (W3)** — U1, U2, U3, U4 ✅ merged. Closed 2026-11-21 by an integrated `--demo` check (open folder →
+   project tab → Browse edit → draft → protected apply; Compare; Sync push/pull); it found stale sync counters after an
+   apply (header and sidebar), fixed together with the close-out (`ProjectSession.Summary`, §7.4).
 4. **Session 2 (CLI 0.5.1)** — LS1 merged together with U3, U4 and released as 0.5.1 (reorder 2026-11-21).
 5. **Session 3 (W4–W6)** — UX1, UX2, UX3, X1 in parallel; then Q1 → Q2 → R1 (release 0.6.0).
 6. **Session 2b (W7)** — manifest `docs/mvp-plan.md` PC1–PC5 + UX4, release 0.7.0.
@@ -1102,6 +1102,7 @@ public sealed class ProjectSession                               // one per open
     public CompareSide? CompareLeft { get; }
     public CompareSide? CompareRight { get; }
     public ComparisonView? Comparison { get; }
+    public SyncSummary? Summary { get; }                         // cached StatusAsync of the active env (header, sidebar counters)
     public IReadOnlyDictionary<string, RemoteDraft> Drafts { get; } // by env name, OrdinalIgnoreCase
     public event Action? Changed;
     public void SetEnvironment(string name);                     // a different name clears View and Comparison
@@ -1112,11 +1113,12 @@ public sealed class ProjectSession                               // one per open
     public void SetJsonView(bool on);
     public void SetView(ConfigurationView? view);
     public void SetComparison(CompareSide left, CompareSide right, ComparisonView? view);
+    public void SetSummary(SyncSummary? summary);
     public void SetDraft(string environment, RemoteDraft? draft, int pendingCount); // null removes
     public RemoteDraft? DraftFor(string environment);
     public int PendingCount(string environment);
     public int TotalPending { get; }
-    public void Invalidate();                                    // View = Comparison = null; drafts kept
+    public void Invalidate();                                    // View = Comparison = Summary = null; drafts kept
 }
 public sealed class ProjectSessions
 {
@@ -1900,7 +1902,7 @@ graph LR
 | W1 | D1, C1, C2, T1, F1 | 5 |
 | W2 | I1, P1, P2, S1, S2, S3, DH | 7 |
 | W2.5 | M1 (session 0: orchestrator merge + 1 agent for the delegation) | 1 |
-| W3 | U1, U2, U3 ✅, U4 ✅ (session 1; LS1 → CLI 0.5.1 as session 2) | 4 |
+| W3 | U1 ✅, U2 ✅, U3 ✅, U4 ✅ (session 1, closed 2026-11-21 after the integrated `--demo` check; LS1 → CLI 0.5.1 as session 2) | 4 |
 | W4 | UX1, UX2, UX3, X1 (session 3) | 4 |
 | W5 | Q1 (session 3) | 1 |
 | W6 | Q2, then R1 (session 3, orchestrator) — CLI 0.6.0 | 1 |

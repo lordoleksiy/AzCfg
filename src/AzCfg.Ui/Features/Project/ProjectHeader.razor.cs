@@ -14,17 +14,14 @@ namespace AzCfg.Ui.Features.Project;
 /// <summary>
 /// Header of a project tab (§2.4, FR-S7): project and service, environment pills (● = active, highlighted = selected), the mode
 /// switch with the pending count of Sync, the summary of the selected environment when it is active (from
-/// <see cref="ISyncService.StatusAsync"/>, reloaded when the session's view is reloaded), Refresh, the lock button of a
+/// <see cref="ISyncService.StatusAsync"/>, cached in <see cref="ProjectSession.Summary"/>, reloaded after <see cref="ProjectSession.Invalidate"/>), Refresh, the lock button of a
 /// protected environment and the overflow menu (Binding settings, Make active).
 /// </summary>
 public sealed partial class ProjectHeader : IDisposable
 {
     private readonly CancellationTokenSource _cts = new();
-    private SyncSummary? _summary;
-    private LoadKey? _loadedFor;
+    private bool _loading;
     private bool _menu;
-
-    private sealed record LoadKey(string Environment, string? Active, DateTimeOffset? Loaded);
 
     [Inject] private WorkspaceState Workspace { get; set; } = default!;
 
@@ -51,7 +48,7 @@ public sealed partial class ProjectHeader : IDisposable
         [.. (Workspace.Environments?.Environments ?? []).Select(e => new EnvPillModel(e.Name, EnvironmentRules.KindOf(e), e.IsProtected, Node.Binding is { } b && EnvironmentRules.IsActive(b, e)))];
 
     private int PendingItems =>
-        (_summary is { IsActive: true } s ? s.LocalChanges + s.RemoteChanges + s.Conflicts.Count : 0)
+        (Session.Summary is { IsActive: true } s ? s.LocalChanges + s.RemoteChanges + s.Conflicts.Count : 0)
         + (Environment is { } env ? Session.PendingCount(env.Name) : 0);
 
     private string Selected(ProjectMode mode) => IsMode(mode) == "true" ? "selected" : string.Empty;
@@ -70,29 +67,31 @@ public sealed partial class ProjectHeader : IDisposable
 
     private async Task LoadSummaryAsync(bool force)
     {
-        if (Node.Binding is not { } binding || Environment is not { } environment || !EnvironmentRules.IsActive(binding, environment))
+        if (_loading || Node.Binding is not { } binding || Environment is not { } environment || !EnvironmentRules.IsActive(binding, environment))
         {
-            _summary = null;
-            _loadedFor = null;
             return;
         }
 
-        var loaded = Session.View?.LoadedAt;
-        if (!force && _loadedFor is { } done && done.Environment == environment.Name && done.Active == binding.ActiveEnvironment
-            && (done.Loaded is null || loaded is null || done.Loaded == loaded))
+        if (!force && Session.Summary is { } cached && string.Equals(cached.Environment, environment.Name, StringComparison.OrdinalIgnoreCase))
         {
-            _loadedFor = done with { Loaded = done.Loaded ?? loaded };
             return;
         }
 
-        _loadedFor = new LoadKey(environment.Name, binding.ActiveEnvironment, loaded);
-        var result = await Runner.RunAsync($"Check status of {environment.Name}", OperationKind.Read, ct => Sync.StatusAsync(binding, environment, ct), _cts.Token);
-        _summary = result is OperationResult<SyncSummary>.Success success ? success.Value : null;
+        _loading = true;
+        try
+        {
+            var result = await Runner.RunAsync($"Check status of {environment.Name}", OperationKind.Read, ct => Sync.StatusAsync(binding, environment, ct), _cts.Token);
+            Session.SetSummary(result is OperationResult<SyncSummary>.Success success ? success.Value : null);
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private async Task RefreshAsync()
     {
-        _loadedFor = null;
+        Session.SetSummary(null);
         await Commands.ExecuteAsync(CommandIds.ProjectRefresh);
     }
 

@@ -106,13 +106,13 @@ public sealed partial class PullView : IDisposable
 
         string[] keys = [.. _selected];
         OperationResult<PullResult>? result = null;
-        await RunBusyAsync(async () => result = await Runner.RunAsync($"Pull {keys.Length} keys from {Environment.Name}", OperationKind.Write,
+        await RunBusyAsync(async () => result = await Runner.RunAsync($"Pull {keys.Length} {(keys.Length == 1 ? "key" : "keys")} from {Environment.Name}", OperationKind.Write,
             ct => Workflow.PullSelectedAsync(CurrentBinding, Environment, keys, ct), CancellationToken.None));
         Session.Invalidate();
         switch (result)
         {
             case OperationResult<PullResult>.Success { Value: var pulled }:
-                await Notifications.ToastAsync($"Pulled {pulled.ValuesWritten + pulled.SecretsWritten} keys from {Environment.Name}", ToastIntent.Success);
+                await Notifications.ToastAsync($"Pulled {pulled.ValuesWritten + pulled.SecretsWritten} {(pulled.ValuesWritten + pulled.SecretsWritten == 1 ? "key" : "keys")} from {Environment.Name}", ToastIntent.Success);
                 break;
             case OperationResult<PullResult>.Failed f:
                 await Notifications.ToastAsync($"Pull failed: {f.Message}", ToastIntent.Error);

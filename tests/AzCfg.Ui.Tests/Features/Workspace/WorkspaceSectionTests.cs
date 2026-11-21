@@ -102,6 +102,26 @@ public sealed class WorkspaceSectionTests : ShellContext
     }
 
     [Fact]
+    public void Render_SummaryWithoutLoadedView_ShowsCountersFromTheSummary()
+    {
+        SeedTree(SampleTree());
+        var cut = Render<WorkspaceSection>();
+        var session = Sessions.GetOrCreate(IdOf("Orders.Api"));
+        cut.InvokeAsync(() => session.SetSummary(new SyncSummary("dev", true, 1, 2, ["A"], [], [], 0)));
+        cut.WaitForAssertion(() => Assert.Contains(cut.FindComponents<FluentTreeItem>(), i => i.Instance.Text == "Orders.Api · dev ↑1 ↓2 !1"));
+    }
+
+    [Fact]
+    public void Render_SummaryOfAnotherEnvironment_IsIgnored()
+    {
+        SeedTree(SampleTree());
+        var cut = Render<WorkspaceSection>();
+        var session = Sessions.GetOrCreate(IdOf("Orders.Api"));
+        cut.InvokeAsync(() => session.SetSummary(new SyncSummary("prod", true, 1, 2, [], [], [], 0)));
+        cut.WaitForAssertion(() => Assert.Contains(cut.FindComponents<FluentTreeItem>(), i => i.Instance.Text == "Orders.Api · dev"));
+    }
+
+    [Fact]
     public async Task Select_BoundProject_SelectsAndOpensItsTab()
     {
         SeedTree(SampleTree());

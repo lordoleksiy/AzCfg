@@ -56,6 +56,27 @@ public sealed class ProjectSessionTests
     }
 
     [Fact]
+    public void SetSummary_StoresItAndRaisesChanged()
+    {
+        var session = new ProjectSession("p");
+        var raised = 0;
+        session.Changed += () => raised++;
+        var summary = new SyncSummary("dev", true, 1, 2, [], [], [], 0);
+        session.SetSummary(summary);
+        Assert.Same(summary, session.Summary);
+        Assert.Equal(1, raised);
+    }
+
+    [Fact]
+    public void Invalidate_ClearsSummary()
+    {
+        var session = new ProjectSession("p");
+        session.SetSummary(new SyncSummary("dev", true, 1, 2, [], [], [], 0));
+        session.Invalidate();
+        Assert.Null(session.Summary);
+    }
+
+    [Fact]
     public void SetDraft_CountsPerEnvironmentIgnoreCase()
     {
         var session = new ProjectSession("p");
