@@ -157,7 +157,7 @@ what is not verified (e.g. manual browser check).
 | U3 | UI: Compare | P1, P2, S1, S2, M1 | W3 | [x] |
 | U4 | UI: Sync + make active | P1, P2, S1, S3, M1 | W3 | [x] |
 | UX1 | UI: Problems panel | U1 | W4 | [x] |
-| UX2 | UI: consistency matrix + copy to environment | U3 | W4 | [ ] |
+| UX2 | UI: consistency matrix + copy to environment | U3 | W4 | [x] |
 | UX3 | UI: editable `local.settings.json` | U1, U2 (LS1 is in `master`, CLI 0.5.1) | W4 | [x] |
 | X1 | Distribution: `azcfg ui` in the CLI tool | M1 | W4 | [x] |
 | Q1 | Integration and security tests | I1, DH, U1–U4, UX1–UX3 | W4 | [ ] |
