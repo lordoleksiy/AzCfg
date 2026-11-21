@@ -133,4 +133,44 @@ public sealed class CompareServiceTests
         Assert.DoesNotContain("Host", view.LeftJson);
         Assert.DoesNotContain("Only", view.LeftJson);
     }
+
+    [Fact]
+    public async Task MissingKeysAsync_ThreeEnvironments_MatchesTheCoreReportAndNeverReadsSecrets()
+    {
+        using var world = new ConfigurationWorld(ignore: ["Ignored:*"]);
+        var prod = new ConfigEnvironment("prod", new Uri("https://prod.azconfig.io"), null, true);
+        world.SeedRemote(ConfigurationWorld.Dev, "crm:Same:Key", "v");
+        world.SeedRemote(ConfigurationWorld.Stg, "crm:Same:Key", "v");
+        world.SeedRemote(prod, "crm:Same:Key", "v");
+        world.SeedRemote(ConfigurationWorld.Dev, "crm:Only:Dev", "d");
+        world.SeedRemote(ConfigurationWorld.Dev, "crm:Dev:AndStg", "x");
+        world.SeedRemote(ConfigurationWorld.Stg, "crm:Dev:AndStg", "x");
+        world.SeedRemote(ConfigurationWorld.Dev, "global:Log:Level", "Info");
+        world.SeedRemote(ConfigurationWorld.Dev, "crm:Ignored:Key", "i");
+        world.SeedRemoteSecret(ConfigurationWorld.Dev);
+        ConfigEnvironment[] envs = [ConfigurationWorld.Dev, ConfigurationWorld.Stg, prod];
+
+        var view = await world.Compare.MissingKeysAsync(world.Binding, envs, default);
+
+        Assert.Equal(envs, view.Environments);
+        Assert.Equal(["Api:Key", "Dev:AndStg", "Log:Level", "Only:Dev", "Same:Key"], view.Rows.Select(r => r.Key));
+        var report = MissingKeysReport.Compute([.. await Task.WhenAll(envs.Select(e => world.Sync.ReadRemoteConfigAsync(world.Binding, e, default)))]);
+        Assert.Equal(
+            [.. report.Where(m => m.Key != "Ignored:Key").Select(m => m.Key)],
+            [.. view.Rows.Where(r => r.HasGap).Select(r => r.Key)]);
+        Assert.Equal(4, view.GapCount);
+        Assert.Equal(1, view.IgnoredCount);
+        Assert.Equal(ConfigScope.Global, Row(view, "Log:Level").Scope);
+        Assert.Equal([true, true, false], Row(view, "Dev:AndStg").Cells.Select(c => c is not null));
+        Assert.Equal("d", Row(view, "Only:Dev").Cells[0]!.Value);
+        Assert.Null(Row(view, "Only:Dev").Cells[2]);
+        var secret = Row(view, "Api:Key").Cells[0]!;
+        Assert.True(secret.IsSecret);
+        Assert.Null(secret.Value);
+        Assert.Equal("crm--Api--Key", secret.SecretName);
+        Assert.Equal(0, world.SecretStore.Gets);
+        Assert.DoesNotContain(ConfigurationWorld.Sentinel, JsonSerializer.Serialize(view));
+    }
+
+    private static MatrixRow Row(MissingKeysView view, string key) => view.Rows.Single(r => r.Key == key);
 }

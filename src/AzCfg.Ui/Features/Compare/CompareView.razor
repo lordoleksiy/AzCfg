@@ -6,41 +6,51 @@
 
 <div class="az-compare">
     <div class="az-compare-toolbar" role="toolbar" aria-label="Compare">
-        @if (Sides is { } sides)
+        <span class="az-compare-viewswitch az-compare-layout" role="group" aria-label="Layout">
+            <FluentButton Appearance="@(_matrix ? ButtonAppearance.Subtle : ButtonAppearance.Primary)" Size="ButtonSize.Small" OnClick="() => SetMatrix(false)">Pairwise</FluentButton>
+            <FluentButton Appearance="@(_matrix ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" Size="ButtonSize.Small" OnClick="() => SetMatrix(true)">Matrix</FluentButton>
+        </span>
+        @if (!_matrix)
         {
-            <select class="az-input az-compare-side" aria-label="Left side" @onchange="SetLeft">@Options(sides.Left)</select>
-            <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small" Title="Swap sides" OnClick="Swap">⇄</FluentButton>
-            <select class="az-input az-compare-side" aria-label="Right side" @onchange="SetRight">@Options(sides.Right)</select>
+            @if (Sides is { } sides)
+            {
+                <select class="az-input az-compare-side" aria-label="Left side" @onchange="SetLeft">@Options(sides.Left)</select>
+                <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small" Title="Swap sides" OnClick="Swap">⇄</FluentButton>
+                <select class="az-input az-compare-side" aria-label="Right side" @onchange="SetRight">@Options(sides.Right)</select>
+            }
+            <FluentButton Appearance="@(_differencesOnly ? ButtonAppearance.Primary : ButtonAppearance.Outline)" Size="ButtonSize.Small"
+                          aria-pressed="@(_differencesOnly ? "true" : "false")" OnClick="ToggleDifferences">Differences only</FluentButton>
         }
-        <FluentButton Appearance="@(_differencesOnly ? ButtonAppearance.Primary : ButtonAppearance.Outline)" Size="ButtonSize.Small"
-                      aria-pressed="@(_differencesOnly ? "true" : "false")" OnClick="ToggleDifferences">Differences only</FluentButton>
         <input class="az-input az-compare-search" type="search" placeholder="Filter keys…" aria-label="Filter keys"
                value="@Session.Filter.Text" @oninput="Search" @onkeydown="ClearOnEscape" />
-        @if (Session.Comparison is { } counted)
+        @if (!_matrix)
         {
-            <span class="az-compare-counts">
-                @Counts(counted)
-                @if (counted.IgnoredCount > 0)
-                {
-                    <span class="az-compare-ignored" title="Ignored keys are not compared"> · @counted.IgnoredCount ignored</span>
-                }
+            @if (Session.Comparison is { } counted)
+            {
+                <span class="az-compare-counts">
+                    @Counts(counted)
+                    @if (counted.IgnoredCount > 0)
+                    {
+                        <span class="az-compare-ignored" title="Ignored keys are not compared"> · @counted.IgnoredCount ignored</span>
+                    }
+                </span>
+            }
+            <span class="az-compare-viewswitch" role="group" aria-label="View">
+                <FluentButton Appearance="@(Session.JsonView ? ButtonAppearance.Subtle : ButtonAppearance.Primary)" Size="ButtonSize.Small"
+                              OnClick="() => Session.SetJsonView(false)">Tree</FluentButton>
+                <FluentButton Appearance="@(Session.JsonView ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" Size="ButtonSize.Small"
+                              OnClick="() => Session.SetJsonView(true)">JSON diff</FluentButton>
             </span>
         }
-        <span class="az-compare-viewswitch" role="group" aria-label="View">
-            <FluentButton Appearance="@(Session.JsonView ? ButtonAppearance.Subtle : ButtonAppearance.Primary)" Size="ButtonSize.Small"
-                          OnClick="() => Session.SetJsonView(false)">Tree</FluentButton>
-            <FluentButton Appearance="@(Session.JsonView ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" Size="ButtonSize.Small"
-                          OnClick="() => Session.SetJsonView(true)">JSON diff</FluentButton>
-        </span>
     </div>
-    @if (_loading is { } loading)
+    @if (!_matrix && _loading is { } loading)
     {
         <div class="az-compare-progress" role="status">
             <FluentSpinner Size="SpinnerSize.Tiny" />
             <span>@(loading.Left is CompareSide.Local || loading.Right is CompareSide.Local ? "Reading secrets…" : "Comparing…")</span>
         </div>
     }
-    @if (_error is { } error)
+    @if (!_matrix && _error is { } error)
     {
         <ErrorBar Message="@($"Compare failed: {error.Message}")" Details="@($"{error.Kind}: {error.Message}")" OnRetry="RetryAsync" />
     }
@@ -48,6 +58,17 @@
         @if (Binding is null)
         {
             <EmptyState Text="Bind this project to a service" />
+        }
+        else if (_matrix)
+        {
+            @if (Environments.Count == 0)
+            {
+                <EmptyState Text="Set up environments" />
+            }
+            else
+            {
+                <CompareMatrix Session="Session" Binding="Binding" Environments="Environments" />
+            }
         }
         else if (Sides is null)
         {
@@ -74,7 +95,7 @@
                     <EmptyState Text="@(string.IsNullOrEmpty(Session.Filter.Text) ? "No differences" : $"No keys match ‘{Session.Filter.Text}’")" />
                 }
             </div>
-            <CompareInspector View="view" Row="SelectedRow(view)" OnOpenInBrowse="OpenInBrowse" />
+            <CompareInspector View="view" Row="SelectedRow(view)" OnOpenInBrowse="OpenInBrowse" OnCopyToRight="CopyToRightAsync" />
         }
     </div>
 </div>

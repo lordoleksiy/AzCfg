@@ -989,7 +989,16 @@ public interface ICompareService
     /// ISecretFingerprinter.Fingerprint(local) == remote fingerprint; ignored keys excluded (IgnoredCount).
     /// Local↔Local → ArgumentException. JSON per IConfigurationService.ToJson rules.
     Task<ComparisonView> CompareAsync(ProjectBinding binding, CompareSide left, CompareSide right, CancellationToken ct);
+    /// UX2. Consistency matrix: ReadRemoteConfigAsync per environment (ignored keys dropped, as `diff --missing --all`) +
+    /// MissingKeysReport.Compute for the gaps. Every key is a row; cells hold plain values or the secret name, never a
+    /// secret value; a row is Global when any entry is global (not copied).
+    Task<MissingKeysView> MissingKeysAsync(ProjectBinding binding, IReadOnlyList<ConfigEnvironment> environments, CancellationToken ct);
 }
+/// Cells follow Environments; null = missing there. Value only for plain values.
+public sealed record MatrixCell(string? Value, bool IsSecret, string? SecretName);
+public sealed record MatrixRow(string Key, ConfigScope Scope, bool HasGap, IReadOnlyList<MatrixCell?> Cells);
+public sealed record MissingKeysView(ProjectBinding Binding, IReadOnlyList<ConfigEnvironment> Environments,
+    IReadOnlyList<MatrixRow> Rows, int IgnoredCount, DateTimeOffset LoadedAt)   // GapCount = Rows.Count(HasGap)
 public interface ILocalValuesService
 {
     /// Writes through ILocalTarget.ReadAsync/WriteAsync (full rewrite, ADR 0009 formatting) and keeps the key's scope
@@ -1774,7 +1783,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Acceptance:** (1) the check runs through the runner (Read), cancellable; (2) counts in the status bar match the
     report; (3) key finding → Browse with the key selected; (4) the sentinel secret never in markup; (5) *manual (demo)*.
 
-- [ ] **UX2 — UI: consistency matrix + copy to environment**
+- [x] **UX2 — UI: consistency matrix + copy to environment**
   - **Goal:** FR-C5, FR-C6 — see and close gaps between environments without the CLI (`diff --missing --all`, `promote`).
   - **Read:** §2.6, §7.3 (Configuration: compare, Sync: drafts), §9, Core `MissingKeysReport`, `EnvironmentComparer`.
   - **Scope:** Compare mode gets a **Matrix** view: rows = keys, columns = all environments (present / missing / KV
