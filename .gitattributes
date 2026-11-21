@@ -4,6 +4,7 @@
 * text=auto
 # .editorconfig requires CRLF; check C# out with CRLF on every OS so `dotnet format` passes in Linux CI
 *.cs text eol=crlf
+*.sh text eol=lf
 
 ###############################################################################
 # Set default behavior for command prompt diff.

@@ -88,8 +88,9 @@ public static class HostSecurityExtensions
         }
 
         var url = $"{address.TrimEnd('/')}/login?t={app.Services.GetRequiredService<AccessToken>().Value}";
-        Console.WriteLine(url);
-        if (!app.Services.GetRequiredService<UiHostOptions>().NoBrowser)
+        var options = app.Services.GetRequiredService<UiHostOptions>();
+        Console.WriteLine(options.Json ? System.Text.Json.JsonSerializer.Serialize(new { url }) : url);
+        if (!options.NoBrowser)
         {
             app.Services.GetRequiredService<BrowserLauncher>().TryOpen(url);
         }

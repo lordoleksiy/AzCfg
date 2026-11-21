@@ -31,5 +31,8 @@ jobs:
       - name: Test
         run: dotnet test AzCfg.slnx -c Release --no-build
 
+      - name: Pack smoke (azcfg ui from the packed tool)
+        run: bash .github/scripts/pack-smoke.sh
+
       - name: Format
         run: dotnet format AzCfg.slnx --verify-no-changes --no-restore

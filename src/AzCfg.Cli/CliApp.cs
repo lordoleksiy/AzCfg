@@ -39,6 +39,7 @@ public static class CliApp
         config.AddCommand<PushCommand>("push").WithDescription("Apply the local files to an environment (add/update; --delete also deletes).");
         config.AddCommand<EditCommand>("edit").WithDescription("Edit the remote config as JSON in your editor, then apply it.");
         config.AddCommand<PromoteCommand>("promote").WithDescription("Copy new keys from one environment to another via your editor, then apply them.");
+        config.AddCommand<UiCommand>("ui").WithDescription("Open the local web UI (loopback only; --demo runs on sample data).");
         config.AddBranch("ignore", ignore =>
         {
             ignore.SetDescription("Keep keys local only: pull and push skip them (per user, never in the repo).");

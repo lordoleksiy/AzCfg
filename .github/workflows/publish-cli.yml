@@ -29,6 +29,9 @@ jobs:
       - name: Pack
         run: dotnet pack src/AzCfg.Cli -c Release -o artifacts
 
+      - name: Pack smoke (azcfg ui from the packed tool)
+        run: bash .github/scripts/pack-smoke.sh artifacts
+
       - name: NuGet login (trusted publishing)
         id: login
         uses: NuGet/login@v1

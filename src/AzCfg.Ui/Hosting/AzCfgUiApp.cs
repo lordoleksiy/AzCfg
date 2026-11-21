@@ -18,11 +18,7 @@ public static class AzCfgUiApp
     /// </summary>
     public static WebApplication Build(string[] args, Action<IServiceCollection>? overrides = null)
     {
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-        {
-            Args = NormalizeArgs(args),
-            ApplicationName = typeof(AzCfgUiApp).Assembly.GetName().Name,
-        });
+        var builder = WebApplication.CreateBuilder(CreateWebOptions(args));
         var options = builder.Configuration.Get<UiHostOptions>() ?? new UiHostOptions();
         builder.Host.UseDefaultServiceProvider(o =>
         {
@@ -58,6 +54,33 @@ public static class AzCfgUiApp
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
         app.MapAzCfgEndpoints();
         return app;
+    }
+
+    /// <summary>
+    /// When the UI runs inside the <c>azcfg</c> tool the static assets live next to the binaries (<c>wwwroot</c> and
+    /// <c>&lt;entry&gt;.staticwebassets.endpoints.json</c> in the install folder), not under the current directory:
+    /// the content root and web root then point to <see cref="AppContext.BaseDirectory"/> and the application name to the
+    /// assembly that owns the endpoints manifest. Otherwise (<c>dotnet run</c>, tests) the defaults apply.
+    /// </summary>
+    internal static WebApplicationOptions CreateWebOptions(string[] args)
+    {
+        var uiName = typeof(AzCfgUiApp).Assembly.GetName().Name;
+        var options = new WebApplicationOptions { Args = NormalizeArgs(args), ApplicationName = uiName };
+        var baseDir = AppContext.BaseDirectory;
+        var hostName = new[] { uiName, System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name }
+            .FirstOrDefault(n => n is not null && File.Exists(Path.Combine(baseDir, n + ".staticwebassets.endpoints.json")));
+        if (hostName is null || !Directory.Exists(Path.Combine(baseDir, "wwwroot")))
+        {
+            return options;
+        }
+
+        return new WebApplicationOptions
+        {
+            Args = options.Args,
+            ApplicationName = hostName,
+            ContentRootPath = baseDir,
+            WebRootPath = Path.Combine(baseDir, "wwwroot"),
+        };
     }
 
     /// <summary>Bare switches get a value so the command-line provider can bind them: <c>--no-browser</c> → <c>=true</c>, <c>--demo</c> → <c>=full</c>.</summary>
