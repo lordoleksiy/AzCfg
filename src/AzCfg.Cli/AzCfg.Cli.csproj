@@ -9,10 +9,10 @@
     <EnableHotReloadInRuntimeConfigDevFile>false</EnableHotReloadInRuntimeConfigDevFile>
     <ToolCommandName>azcfg</ToolCommandName>
     <PackageId>AzCfg</PackageId>
-    <Version>0.5.1</Version>
+    <Version>0.6.0</Version>
     <Description>Local manager for Azure App Configuration and Key Vault: sync configs with local files and edit them as JSON.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>See https://github.com/lordoleksiy/AzCfg/blob/master/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>0.6.0: azcfg ui (preview) — local web UI: Problems panel, consistency matrix with copy between environments, local.settings.json target. See https://github.com/lordoleksiy/AzCfg/blob/master/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

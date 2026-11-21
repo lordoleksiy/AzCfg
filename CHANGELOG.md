@@ -7,11 +7,20 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
 ## [Unreleased]
 
 ### Planned
-- 0.6.0: UI (`azcfg ui`, preview).
 - 0.7.0 (ADR 0012, amendment 2): minimal project manifest `azcfg.json`, `project.shared`, manifest and secret-like-key
   checks in `status --check`; "share with team" in the UI.
 - 0.8.0 (ADR 0014): App Service / Function App settings as remotes (`--remote`, `env@remote`, `promote --key`).
 - 0.9.0 (ADR 0015): manifest v2 — team environments, key layout, custom JSON target file.
+
+## [0.6.0]
+### Added
+- `azcfg ui` — preview: a local web UI (Blazor Server on `127.0.0.1`, one-time browser token) for browsing, comparing
+  and syncing the configuration of a workspace. Options: `--port N`, `--no-browser`, `--demo[=empty]` (in-memory demo
+  world, no Azure), `--json` (prints `{ "url": … }` and keeps running). Same user state and auth as the CLI (ADR 0016).
+- UI: Problems panel — the `status --check` report in the sidebar and the status bar, with actions per finding.
+- UI: consistency matrix in Compare (keys × all environments, gaps only) and "Copy from ‹env›" / "Copy to right" into the
+  target environment's draft; secret values are never copied, a new value is typed instead.
+- UI: `local.settings.json` (Azure Functions) is a writable values/secrets target, as in the CLI since 0.5.1.
 
 ## [0.5.1]
 ### Added
