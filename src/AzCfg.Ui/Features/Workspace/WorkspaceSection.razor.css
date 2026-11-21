@@ -18,11 +18,6 @@
     opacity: 0.55;
 }
 
-.az-ws ::deep .az-ws-readonly {
-    color: var(--colorNeutralForeground3);
-    font-style: italic;
-}
-
 .az-ws-selected {
     display: flex;
     flex-wrap: wrap;
