@@ -13,7 +13,9 @@ using AzCfg.Ui.Tests.Features.Compare.Fakes;
 using AzCfg.Ui.Tests.Support;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.FluentUI.AspNetCore.Components;
 using DiffEditor = AzCfg.Ui.Components.Editors.DiffEditor;
+using RecordingDraftService = AzCfg.Ui.Tests.Features.Browse.Fakes.RecordingDraftService;
 
 namespace AzCfg.Ui.Tests.Features.Compare;
 
@@ -28,6 +30,7 @@ public sealed class CompareViewTests : UiTestContext
     private readonly FakeOperationRunner _runner = new();
     private readonly WorkspaceState _workspace = new();
     private readonly ProjectSession _session;
+    private readonly RecordingDraftService _drafts;
 
     public CompareViewTests()
     {
@@ -35,6 +38,8 @@ public sealed class CompareViewTests : UiTestContext
         Services.AddSingleton<IOperationRunner>(_runner);
         Services.AddSingleton(_workspace);
         Services.AddScoped<LayoutState>();
+        _drafts = CompareCopyServices.Add(Services);
+        Providers = Render<FluentProviders>();
         var node = Node(Binding("dev"));
         _workspace.SetTree(new WorkspaceTree("C:/src", [], [node]));
         _workspace.SetEnvironments(new EnvironmentsSnapshot(new UserProfile([Dev, Stage]), [Dev, Stage]));
@@ -226,6 +231,35 @@ public sealed class CompareViewTests : UiTestContext
         Assert.Contains("dev", inspector);
         ClickButton(cut, "Open in Browse");
         Assert.Equal((ProjectMode.Browse, "Db:Host"), (_session.Mode, _session.SelectedKey));
+    }
+
+    private IRenderedComponent<FluentProviders> Providers { get; }
+
+    [Fact]
+    public void Inspector_CopyToRight_AddsThePlainValueToTheRightDraft()
+    {
+        _session.Select("Db:Host");
+        var cut = RenderView();
+        ClickButton(cut, "Copy to dev");
+        cut.WaitForAssertion(() => Assert.Equal(1, _session.PendingCount("dev")));
+        Assert.Contains("SetValue Service:Db:Host=a", _drafts.Calls);
+        Assert.NotNull(_session.DraftFor("dev"));
+    }
+
+    [Fact]
+    public void Inspector_CopyToRight_IsNotOfferedForSecretsOrWhenLeftIsMissing()
+    {
+        _compare.Rows =
+        [
+            new("Db:Password", CompareResult.Different, new CompareCell(null, true, "crm--Db--Password", ConfigScope.Service, null), Plain("x")),
+            Row("Features:Old", CompareResult.OnlyRight, "a", "b") with { Left = null },
+        ];
+        _session.Select("Db:Password");
+        var cut = RenderView();
+        Assert.DoesNotContain("Copy to dev", ButtonTexts(cut));
+        cut.InvokeAsync(() => _session.Select("Features:Old"));
+        cut.WaitForAssertion(() => Assert.Contains("Open in Browse", ButtonTexts(cut)));
+        Assert.DoesNotContain("Copy to dev", ButtonTexts(cut));
     }
 
     [Fact]

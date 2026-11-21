@@ -156,10 +156,10 @@ what is not verified (e.g. manual browser check).
 | U2 | UI: project tab + Browse | P1, P2, S1, S2, S3, M1 | W3 | [x] |
 | U3 | UI: Compare | P1, P2, S1, S2, M1 | W3 | [x] |
 | U4 | UI: Sync + make active | P1, P2, S1, S3, M1 | W3 | [x] |
-| UX1 | UI: Problems panel | U1 | W4 | [ ] |
-| UX2 | UI: consistency matrix + copy to environment | U3 | W4 | [ ] |
-| UX3 | UI: editable `local.settings.json` | U1, U2 (LS1 is in `master`, CLI 0.5.1) | W4 | [ ] |
-| X1 | Distribution: `azcfg ui` in the CLI tool | M1 | W4 | [ ] |
+| UX1 | UI: Problems panel | U1 | W4 | [x] |
+| UX2 | UI: consistency matrix + copy to environment | U3 | W4 | [x] |
+| UX3 | UI: editable `local.settings.json` | U1, U2 (LS1 is in `master`, CLI 0.5.1) | W4 | [x] |
+| X1 | Distribution: `azcfg ui` in the CLI tool | M1 | W4 | [x] |
 | Q1 | Integration and security tests | I1, DH, U1–U4, UX1–UX3 | W4 | [ ] |
 | Q2 | Docs, polish, measurements, smoke checklist | Q1, X1 | W5 | [ ] |
 | R1 | Release CLI 0.6.0 (`azcfg ui` preview) | Q2 | W6 | [ ] |
@@ -989,7 +989,16 @@ public interface ICompareService
     /// ISecretFingerprinter.Fingerprint(local) == remote fingerprint; ignored keys excluded (IgnoredCount).
     /// Local↔Local → ArgumentException. JSON per IConfigurationService.ToJson rules.
     Task<ComparisonView> CompareAsync(ProjectBinding binding, CompareSide left, CompareSide right, CancellationToken ct);
+    /// UX2. Consistency matrix: ReadRemoteConfigAsync per environment (ignored keys dropped, as `diff --missing --all`) +
+    /// MissingKeysReport.Compute for the gaps. Every key is a row; cells hold plain values or the secret name, never a
+    /// secret value; a row is Global when any entry is global (not copied).
+    Task<MissingKeysView> MissingKeysAsync(ProjectBinding binding, IReadOnlyList<ConfigEnvironment> environments, CancellationToken ct);
 }
+/// Cells follow Environments; null = missing there. Value only for plain values.
+public sealed record MatrixCell(string? Value, bool IsSecret, string? SecretName);
+public sealed record MatrixRow(string Key, ConfigScope Scope, bool HasGap, IReadOnlyList<MatrixCell?> Cells);
+public sealed record MissingKeysView(ProjectBinding Binding, IReadOnlyList<ConfigEnvironment> Environments,
+    IReadOnlyList<MatrixRow> Rows, int IgnoredCount, DateTimeOffset LoadedAt)   // GapCount = Rows.Count(HasGap)
 public interface ILocalValuesService
 {
     /// Writes through ILocalTarget.ReadAsync/WriteAsync (full rewrite, ADR 0009 formatting) and keeps the key's scope
@@ -1004,6 +1013,14 @@ public interface ISecretRevealService
 {
     Task<SecretString> RevealRemoteAsync(Uri secretUri, CancellationToken ct);
     Task<SecretString?> RevealLocalAsync(ProjectBinding binding, string key, CancellationToken ct);
+}
+
+// ---- Health (problems panel, UX1) ----
+public sealed record ProblemRow(HealthSeverity Severity, HealthCheckKind Kind, string Message, string? Environment, string? Key, string? Fix);
+public sealed record ProblemsReport(IReadOnlyList<ProblemRow> Rows) { int Errors; int Warnings; }   // errors first
+public interface IProblemsService                                          // singleton; adapter over Core IHealthService, no rules of its own
+{
+    Task<ProblemsReport> CheckAsync(string repoPath, CancellationToken ct);
 }
 
 // ---- Sync (push/pull previews, drafts) ----
@@ -1749,7 +1766,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
     apply a draft with a new secret (vault picker), make `stage` active.
   - **Tests:** bUnit + fakes (`ISyncWorkflowService`, `IDraftService`, `IWorkspaceService`, `IDialogService` via Fluent).
 
-- [ ] **UX1 — UI: Problems panel**
+- [x] **UX1 — UI: Problems panel**
   - **Goal:** FR-H1 — `azcfg status --check` inside the UI.
   - **Read:** `docs/adr/0013-cli-daily-workflow-status-diff-key-selection.md` (amendment 0.5.0), ADR 0012 amendment 2
     (health checks), §2.3, §2.9, §5 (AD-6), §7.3, §9.
@@ -1766,7 +1783,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Acceptance:** (1) the check runs through the runner (Read), cancellable; (2) counts in the status bar match the
     report; (3) key finding → Browse with the key selected; (4) the sentinel secret never in markup; (5) *manual (demo)*.
 
-- [ ] **UX2 — UI: consistency matrix + copy to environment**
+- [x] **UX2 — UI: consistency matrix + copy to environment**
   - **Goal:** FR-C5, FR-C6 — see and close gaps between environments without the CLI (`diff --missing --all`, `promote`).
   - **Read:** §2.6, §7.3 (Configuration: compare, Sync: drafts), §9, Core `MissingKeysReport`, `EnvironmentComparer`.
   - **Scope:** Compare mode gets a **Matrix** view: rows = keys, columns = all environments (present / missing / KV
@@ -1781,7 +1798,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Acceptance:** (1) 3 environments: matrix and counts match `MissingKeysReport`; (2) copy adds to the right draft (bar
     count); (3) protected target requires unlock; (4) secret values never in markup; (5) *manual (demo)*.
 
-- [ ] **UX3 — UI: editable `local.settings.json`**
+- [x] **UX3 — UI: editable `local.settings.json`**
   - **Goal:** FR-W3 (writable `local.settings.json`). The "share with team" half (FR-W7) moved to UX4 (reorder 2026-11-21).
   - **Read:** `docs/mvp-plan.md` stage 10 (LS1), §2.3, §7.3 (Workspace).
   - **Scope:** `local-settings` is offered as a values/secrets target for Azure Functions projects in the binding
@@ -1826,7 +1843,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Depends on:** I1, DH, U1–U4, UX1–UX3.
   - **Acceptance:** the 13 scenarios and the invariants of §12.3 green, no network.
 
-- [ ] **X1 — Distribution: `azcfg ui` in the CLI tool**
+- [x] **X1 — Distribution: `azcfg ui` in the CLI tool**
   - **Goal:** the UI ships inside the `azcfg` dotnet tool (one package, one version, one user state).
   - **Read:** §5 (AD-1), §6, `.github/workflows/publish-cli.yml`, `docs/cli-roadmap.md` §1 (command budget).
   - **Scope:** (1) ADR (next free number) «UI distribution»: `azcfg ui [--port N] [--no-browser] [--demo[=empty]]`

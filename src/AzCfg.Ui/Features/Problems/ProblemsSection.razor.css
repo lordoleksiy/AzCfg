@@ -1,0 +1,43 @@
+.az-problems-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    font-size: 12px;
+}
+
+.az-problems-count.error {
+    color: var(--colorStatusDangerForeground1);
+}
+
+.az-problems-count.warning {
+    color: var(--colorStatusWarningForeground1);
+}
+
+.az-problems-group-title {
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--colorNeutralForeground3);
+}
+
+.az-problem {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px 8px;
+}
+
+.az-problem:hover {
+    background: var(--colorNeutralBackground1Hover);
+}
+
+.az-problem-message {
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.az-problem-actions {
+    display: flex;
+    gap: 4px;
+}

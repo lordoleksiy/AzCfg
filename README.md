@@ -257,6 +257,23 @@ ignores it). Secrets are written there only after
 azcfg plan --json
 ```
 
+## UI (preview)
+
+`azcfg ui` starts a local web UI on `127.0.0.1` and opens it in the browser with a one-time token (the server is not
+reachable from other machines). It uses the same sign-in (`az login`), RBAC roles and user state as the CLI.
+
+```bash
+azcfg ui                 # real Azure, random port, opens the browser
+azcfg ui --port 5190 --no-browser
+azcfg ui --demo          # in-memory demo world, no Azure needed (--demo=empty: no seed)
+azcfg ui --json          # prints { "url": "..." } and keeps running until Ctrl+C
+```
+
+Open a folder with your solution, bind each project (per `.csproj` folder) to its local targets, then work in three
+modes per project tab: **Browse** (local vs remote values, edits go to a draft), **Compare** (environment ↔ environment,
+local ↔ environment, consistency matrix) and **Sync** (pull / push with a plan and typed confirmation for protected
+environments). The **Problems** panel shows the `azcfg status --check` report.
+
 ## Build from source
 
 ```bash

@@ -1,0 +1,34 @@
+@implements IDisposable
+@inject ProblemsState State
+@inject LayoutState Layout
+
+@if (State.Report is { } report)
+{
+    <button type="button" class="az-problems-status" title="Show problems" @onclick="Show">
+        <FluentIcon Value="@(new Icons.Regular.Size16.ErrorCircle())" />
+        <span class="az-problems-status-errors">@report.Errors</span>
+        <FluentIcon Value="@(new Icons.Regular.Size16.Warning())" />
+        <span class="az-problems-status-warnings">@report.Warnings</span>
+    </button>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        State.Changed += OnChanged;
+        State.Start();
+    }
+
+    /// <summary>Makes the sidebar visible; the PROBLEMS section sits in it (the section itself is only collapsed by the user).</summary>
+    private void Show()
+    {
+        if (!Layout.SidebarVisible)
+        {
+            Layout.ToggleSidebar();
+        }
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnChanged;
+}

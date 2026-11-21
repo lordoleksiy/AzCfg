@@ -20,6 +20,7 @@ public static class SampleWorkspace
               <Project Path="src/Orders.Api/Orders.Api.csproj" />
               <Project Path="src/Billing.Worker/Billing.Worker.csproj" />
               <Project Path="src/Shop.Contracts/Shop.Contracts.csproj" />
+              <Project Path="src/Orders.Functions/Orders.Functions.csproj" />
             </Solution>
 
             """);
@@ -28,9 +29,40 @@ public static class SampleWorkspace
             """, withAppSettings: true);
         WriteProject(workspace, "src/Billing.Worker", "Billing.Worker", "Microsoft.NET.Sdk.Worker", "", "", withAppSettings: true);
         WriteProject(workspace, "src/Shop.Contracts", "Shop.Contracts", "Microsoft.NET.Sdk", "", "", withAppSettings: false);
+        WriteProject(workspace, "src/Orders.Functions", "Orders.Functions", "Microsoft.NET.Sdk", "<AzureFunctionsVersion>v4</AzureFunctionsVersion>", "", withAppSettings: false);
+        WriteFunctionsSettings(workspace, "src/Orders.Functions");
         WriteProject(workspace, "tests/Orders.Tests", "Orders.Tests", "Microsoft.NET.Sdk", "<IsTestProject>true</IsTestProject>", """
             <ProjectReference Include="..\..\src\Orders.Api\Orders.Api.csproj" />
             """, withAppSettings: false);
+    }
+
+    private static void WriteFunctionsSettings(string workspace, string folder)
+    {
+        var directory = Path.Combine(workspace, folder);
+        File.WriteAllText(
+            Path.Combine(directory, "host.json"),
+            """
+            {
+              "version": "2.0"
+            }
+
+            """);
+        File.WriteAllText(
+            Path.Combine(directory, "local.settings.json"),
+            """
+            {
+              "IsEncrypted": false,
+              "Values": {
+                "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+                "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+                "Orders:ProcessingDelaySeconds": "5"
+              },
+              "Host": {
+                "CORS": "*"
+              }
+            }
+
+            """);
     }
 
     private static void WriteProject(string workspace, string folder, string name, string sdk, string properties, string items, bool withAppSettings)

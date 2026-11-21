@@ -38,6 +38,10 @@
     margin-left: auto;
 }
 
+.az-compare-viewswitch.az-compare-layout {
+    margin-left: 0;
+}
+
 .az-compare-progress {
     display: flex;
     align-items: center;

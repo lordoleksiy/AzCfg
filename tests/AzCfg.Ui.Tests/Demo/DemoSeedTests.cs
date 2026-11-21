@@ -50,17 +50,17 @@ public sealed class DemoSeedTests
     }
 
     [Theory]
-    [InlineData("dev", 40)]
-    [InlineData("stage", 41)]
-    [InlineData("prod", 40)]
-    public async Task Full_EachEnvironment_HasServiceGlobalBillingKeysAndSixSecrets(string env, int orders)
+    [InlineData("dev", 41, 6)]
+    [InlineData("stage", 41, 6)]
+    [InlineData("prod", 41, 7)]
+    public async Task Full_EachEnvironment_HasServiceGlobalBillingKeysAndSecrets(string env, int orders, int secretRefs)
     {
         await using var demo = await DemoApp.StartAsync("--demo");
         var settings = demo.World.AppConfig.Settings($"https://appcs-shop-{env}.azconfig.io");
         Assert.Equal(orders, settings.Count(s => s.Key.StartsWith("orders:", StringComparison.Ordinal)));
         Assert.Equal(10, settings.Count(s => s.Key.StartsWith("global:", StringComparison.Ordinal)));
         Assert.Equal(8, settings.Count(s => s.Key.StartsWith("billing:", StringComparison.Ordinal)));
-        Assert.Equal(6, settings.Count(s => s.Text is null));
+        Assert.Equal(secretRefs, settings.Count(s => s.Text is null));
     }
 
     [Fact]
@@ -94,9 +94,11 @@ public sealed class DemoSeedTests
         Assert.True(File.Exists(Path.Combine(demo.OrdersApiFolder, "appsettings.json")));
         var projects = await new CsprojDetector().DetectAsync(shop, CancellationToken.None);
         Assert.Equal(
-            [("Billing.Worker", false), ("Orders.Api", false), ("Orders.Tests", true), ("Shop.Contracts", true)],
+            [("Billing.Worker", false), ("Orders.Api", false), ("Orders.Functions", false), ("Orders.Tests", true), ("Shop.Contracts", true)],
             projects.Select(p => (p.Name, p.IsLibrary)).Order());
         Assert.NotNull(projects.Single(p => p.Name == "Orders.Api").UserSecretsId);
+        Assert.True(projects.Single(p => p.Name == "Orders.Functions").IsAzureFunctions);
+        Assert.True(File.Exists(Path.Combine(shop, "src", "Orders.Functions", "local.settings.json")));
         Assert.Contains("tests", projects.Single(p => p.Name == "Orders.Tests").CsprojPath);
         Assert.DoesNotContain("Orders.Tests", await File.ReadAllTextAsync(Path.Combine(shop, "Shop.slnx")));
     }

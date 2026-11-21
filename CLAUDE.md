@@ -75,7 +75,8 @@ tests/AzCfg.Cli.Tests     command tests + Scenario/ (end-to-end on in-memory fak
   0008 environment modes / labels, local ignore, push modes, 0009 UX: env label, real targets, `//@global`, gitignore,
   0012 project configuration (amendment 2: minimal `azcfg.json` read by `pull`; adopt/discovery/profiles deferred),
   0013 CLI daily workflow: status, diff, key selection, safe use,
-  0014 editable project settings `config project.*`; remote providers / App Service settings deferred to stage 11)
+  0014 editable project settings `config project.*`; remote providers / App Service settings deferred to stage 11,
+  0016 UI distribution: `azcfg ui` launcher in the CLI tool, Web SDK + static web assets, pack smoke in CI)
 
 ## Skills
 - `/feature` — one task → branch from `origin/master` → tests → code → PR into `master`

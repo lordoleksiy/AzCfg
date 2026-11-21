@@ -23,10 +23,13 @@ public sealed partial class CompareView : IDisposable
     private OperationResult<ComparisonView>.Failed? _error;
     private string? _environment;
     private bool _differencesOnly = true;
+    private bool _matrix;
     private KeyTreeModel<CompareRow>? _model;
     private (ComparisonView View, bool DifferencesOnly, string? Text)? _modelSource;
 
     [Inject] private ICompareService CompareService { get; set; } = default!;
+
+    [Inject] private CompareCopier Copier { get; set; } = default!;
 
     [Inject] private IOperationRunner Runner { get; set; } = default!;
 
@@ -72,7 +75,7 @@ public sealed partial class CompareView : IDisposable
 
     private async Task LoadIfNeededAsync()
     {
-        if (Session.Comparison is not null || Binding is not { } binding || Sides is not { } sides
+        if (_matrix || Session.Comparison is not null || Binding is not { } binding || Sides is not { } sides
             || sides is { Left: CompareSide.Local, Right: CompareSide.Local } || sides.Equals(_loading) || sides.Equals(_failedFor))
         {
             return;
@@ -124,6 +127,22 @@ public sealed partial class CompareView : IDisposable
 
     private CompareSide Parse(object? value) =>
         Environments.FirstOrDefault(env => env.Name == value as string) is { } env ? new CompareSide.Environment(env) : new CompareSide.Local();
+
+    private async Task SetMatrix(bool on)
+    {
+        _matrix = on;
+        await LoadIfNeededAsync();
+    }
+
+    /// <summary>Copies the plain value of the row's left side into the draft of the right environment (FR-C5).</summary>
+    private async Task CopyToRightAsync(CompareRow row)
+    {
+        if (Binding is { } binding && Session.Comparison is { Right: CompareSide.Environment right } && row.Left is { IsSecret: false, Value: { } value, Scope: ConfigScope.Service }
+            && await Copier.CopyAsync(Session, binding, right.Env, row.Key, value, _cts.Token))
+        {
+            Session.Select(row.Key);
+        }
+    }
 
     private void ToggleDifferences() => _differencesOnly = !_differencesOnly;
 

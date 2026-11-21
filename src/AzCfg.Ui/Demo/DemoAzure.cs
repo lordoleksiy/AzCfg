@@ -7,7 +7,7 @@ namespace AzCfg.Ui.Demo;
 /// <summary>
 /// The in-memory Azure of the demo: stores <c>appcs-shop-&lt;env&gt;</c> and vaults <c>kv-shop-&lt;env&gt;</c> for <c>dev</c>, <c>stage</c>
 /// and <c>prod</c>; per environment 34 plain keys and 6 secrets of service <c>orders</c>, 10 <c>global:</c> keys and 8 keys of service
-/// <c>billing</c>. <c>stage</c> carries a duplicate-label key; <c>prod</c> differs from <c>stage</c> in exactly 5 plain keys.
+/// <c>billing</c>. <c>stage</c> carries a duplicate-label key; <c>dev</c> has one key the others lack and <c>prod</c> one dead Key Vault reference (problems panel); <c>prod</c> differs from <c>stage</c> in exactly 5 plain keys.
 /// Secret values are fake and exist only in the in-memory vault.
 /// </summary>
 public static class DemoAzure
@@ -113,5 +113,9 @@ public static class DemoAzure
         }
 
         world.AppConfig.Set(StoreUri("stage").ToString(), "orders:Timeout", "45", "Staging");
+
+        // Problems panel (UX1): a key only dev has (missing in stage and prod) and a prod reference to a secret that was never created.
+        world.AppConfig.Set(StoreUri("dev").ToString(), "orders:Features:Experiments:Enabled", "true");
+        world.AppConfig.SetSecretReference(StoreUri("prod").ToString(), "orders:Reports:StorageKey", new Uri($"{VaultUri("prod").GetLeftPart(UriPartial.Authority)}/secrets/orders--Reports--StorageKey"));
     }
 }

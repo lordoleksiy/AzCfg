@@ -1,0 +1,15 @@
+.az-problems-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.az-problems-status:hover {
+    background: var(--colorNeutralBackground1Hover);
+}

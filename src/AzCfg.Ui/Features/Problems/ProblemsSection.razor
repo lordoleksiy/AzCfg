@@ -1,0 +1,77 @@
+@implements IDisposable
+@inject ProblemsState State
+@inject ProblemActions Actions
+@inject ICommandRegistry Commands
+
+<div class="az-problems">
+    @if (State.ProjectId is null)
+    {
+        <EmptyState Text="Select a bound project to check it" />
+    }
+    else if (State.Error is not null)
+    {
+        <ErrorBar Message="@State.Error" OnRetry="State.RefreshAsync" />
+    }
+    else if (State.Report is null)
+    {
+        <FluentProgressBar />
+    }
+    else
+    {
+        <div class="az-problems-head">
+            <span class="az-problems-count error" title="Errors">@State.Report.Errors errors</span>
+            <span class="az-problems-count warning" title="Warnings">@State.Report.Warnings warnings</span>
+            <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" IconOnly="true" Title="Refresh problems"
+                          Disabled="@State.Loading" OnClick="State.RefreshAsync">
+                <FluentIcon Value="@(new Icons.Regular.Size16.ArrowClockwise())" />
+            </FluentButton>
+        </div>
+        @if (State.Report.Rows.Count == 0)
+        {
+            <EmptyState Text="No problems found" />
+        }
+
+        @foreach (var group in State.Report.Rows.GroupBy(r => r.Severity))
+        {
+            <div class="az-problems-group" data-severity="@group.Key.ToString().ToLowerInvariant()">
+                <div class="az-problems-group-title">@(group.Key == HealthSeverity.Error ? "Errors" : "Warnings") (@group.Count())</div>
+                @foreach (var row in group)
+                {
+                    <div class="az-problem" data-kind="@row.Kind">
+                        <span class="az-problem-message">@row.Message</span>
+                        <span class="az-problem-actions">
+                            @if (ProblemActions.PrimaryOf(row) is { } primary)
+                            {
+                                <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Actions.RunAsync(State.ProjectId!, row, primary)">@LabelOf(primary)</FluentButton>
+                            }
+                            @if (ProblemActions.HasCopyFix(row))
+                            {
+                                <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" Title="@row.Fix"
+                                              OnClick="() => Actions.RunAsync(State.ProjectId!, row, ProblemAction.CopyFix)">Copy fix</FluentButton>
+                            }
+                        </span>
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        State.Changed += OnChanged;
+        State.Start();
+    }
+
+    private static string LabelOf(ProblemAction action) => action switch
+    {
+        ProblemAction.OpenKey => "Open in Browse",
+        ProblemAction.OpenSettings => "Open settings",
+        _ => "Copy fix",
+    };
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnChanged;
+}

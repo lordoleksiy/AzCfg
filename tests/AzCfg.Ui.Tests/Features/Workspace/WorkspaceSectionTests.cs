@@ -72,7 +72,7 @@ public sealed class WorkspaceSectionTests : ShellContext
     }
 
     [Fact]
-    public void Render_ConfigFiles_ShowRolesAndLocalSettingsReadOnlyWithTooltip()
+    public void Render_ConfigFiles_ShowRolesAndLocalSettingsIsNotReadOnly()
     {
         var files = new[] { File("Orders.Api", ConfigFileKind.AppSettings), File("Orders.Api", ConfigFileKind.AppSettingsLocal), File("Orders.Api", ConfigFileKind.UserSecrets), File("Orders.Api", ConfigFileKind.LocalSettings) };
         SeedTree(Tree([Solution("Shop", Node("Orders.Api", Binding("Orders.Api"), false, files))]));
@@ -82,8 +82,18 @@ public sealed class WorkspaceSectionTests : ShellContext
         Assert.Contains("appsettings.local.json · values", texts);
         Assert.Contains("user-secrets · secrets", texts);
         var localSettings = Item(cut, "local.settings.json");
-        Assert.Equal("local.settings.json (read-only)", localSettings.Instance.Text);
-        Assert.Contains("title=\"read-only, not supported yet\"", localSettings.Markup);
+        Assert.Equal("local.settings.json", localSettings.Instance.Text);
+        Assert.DoesNotContain("read-only", cut.Markup);
+    }
+
+    [Fact]
+    public void Render_LocalSettingsBoundAsValues_ShowsValuesRole()
+    {
+        var functions = Binding("Orders.Api", values: LocalTargetKind.LocalSettings);
+        var files = new[] { File("Orders.Api", ConfigFileKind.LocalSettings) };
+        SeedTree(Tree([Solution("Shop", Node("Orders.Api", functions, false, files))]));
+        var cut = Render<WorkspaceSection>();
+        Assert.Equal("local.settings.json · values", Item(cut, "local.settings.json").Instance.Text);
     }
 
     [Fact]
