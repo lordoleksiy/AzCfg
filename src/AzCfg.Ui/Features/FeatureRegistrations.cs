@@ -2,6 +2,7 @@ using AzCfg.Ui.Features.Browse;
 using AzCfg.Ui.Features.Compare;
 using AzCfg.Ui.Features.Environments;
 using AzCfg.Ui.Features.Platform;
+using AzCfg.Ui.Features.Problems;
 using AzCfg.Ui.Features.Project;
 using AzCfg.Ui.Features.Sync;
 using AzCfg.Ui.Features.Workspace;
@@ -26,7 +27,8 @@ public static class FeatureRegistrations
             .AddProjectFeature()
             .AddBrowseFeature()
             .AddCompareFeature()
-            .AddSyncFeature();
+            .AddSyncFeature()
+            .AddProblemsFeature();
         services.TryAddScoped<IActivationFlow, NotAvailableActivationFlow>();
         services.TryAddScoped<IBindingFlow, NotAvailableBindingFlow>();
         return services;
