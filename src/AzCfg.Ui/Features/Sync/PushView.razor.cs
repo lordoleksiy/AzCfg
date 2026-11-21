@@ -256,7 +256,7 @@ public sealed partial class PushView : IDisposable
 
         var count = selection.Changes.Count;
         if (Environment.IsProtected
-            && !await Dialogs.ConfirmTypedAsync($"Apply to {Environment.Name}", $"Apply {count} changes to {Environment.Name}?", Environment.Name))
+            && !await Dialogs.ConfirmTypedAsync($"Apply to {Environment.Name}", $"Apply {count} {(count == 1 ? "change" : "changes")} to {Environment.Name}?", Environment.Name))
         {
             return;
         }
@@ -271,14 +271,14 @@ public sealed partial class PushView : IDisposable
         await RunBusyAsync(async () =>
         {
             _applyError = null;
-            result = await Runner.RunAsync($"Apply {count} changes to {Environment.Name}", OperationKind.Write,
+            result = await Runner.RunAsync($"Apply {count} {(count == 1 ? "change" : "changes")} to {Environment.Name}", OperationKind.Write,
                 ct => Workflow.ApplyAsync(selection, confirmation, ct), CancellationToken.None);
         });
         Session.Invalidate();
         switch (result)
         {
             case OperationResult<ApplyResult>.Success { Value.Failed.Count: 0 } ok:
-                await Notifications.ToastAsync($"Applied {ok.Value.Applied} changes to {Environment.Name}", ToastIntent.Success);
+                await Notifications.ToastAsync($"Applied {ok.Value.Applied} {(ok.Value.Applied == 1 ? "change" : "changes")} to {Environment.Name}", ToastIntent.Success);
                 if (Origin == PushOrigin.Draft)
                 {
                     ClearDraft();

@@ -30,6 +30,9 @@ public sealed class ProjectSession(string projectId)
 
     public ConfigurationView? View { get; private set; }
 
+    /// <summary>Cached <see cref="ISyncService.StatusAsync"/> result of the active environment; null until loaded or after <see cref="Invalidate"/>.</summary>
+    public SyncSummary? Summary { get; private set; }
+
     public CompareSide? CompareLeft { get; private set; }
 
     public CompareSide? CompareRight { get; private set; }
@@ -67,6 +70,8 @@ public sealed class ProjectSession(string projectId)
 
     public void SetView(ConfigurationView? view) => Update(() => View = view);
 
+    public void SetSummary(SyncSummary? summary) => Update(() => Summary = summary);
+
     public void SetComparison(CompareSide left, CompareSide right, ComparisonView? view) => Update(() =>
     {
         CompareLeft = left;
@@ -92,10 +97,11 @@ public sealed class ProjectSession(string projectId)
 
     public int PendingCount(string environment) => _pending.GetValueOrDefault(environment);
 
-    /// <summary><see cref="View"/> = <see cref="Comparison"/> = null; drafts are kept.</summary>
+    /// <summary><see cref="View"/> = <see cref="Comparison"/> = <see cref="Summary"/> = null; drafts are kept.</summary>
     public void Invalidate() => Update(() =>
     {
         View = null;
+        Summary = null;
         Comparison = null;
     });
 

@@ -20,7 +20,7 @@
         <button type="button" role="tab" class="az-project-mode @Selected(ProjectMode.Sync)" aria-selected="@IsMode(ProjectMode.Sync)"
                 @onclick="() => Session.SetMode(ProjectMode.Sync)">Sync@(PendingItems > 0 ? $" ({PendingItems})" : null)</button>
     </nav>
-    @if (_summary is { IsActive: true } summary)
+    @if (Session.Summary is { IsActive: true } summary)
     {
         <span class="az-project-summary" aria-label="Summary">
             <span class="az-project-local" title="Local changes to push">⇡ @summary.LocalChanges</span>

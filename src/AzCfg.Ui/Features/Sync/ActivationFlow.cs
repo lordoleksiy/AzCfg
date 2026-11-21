@@ -100,7 +100,7 @@ public sealed class ActivationFlow(
             case OperationResult<IReadOnlyList<string>>.Success { Value.Count: 0 }:
                 return true;
             case OperationResult<IReadOnlyList<string>>.Success { Value: var keys }:
-                return await dialogs.ConfirmAsync($"Make {env.Name} active", $"{keys.Count} local keys will be replaced by {env.Name}.", "Replace");
+                return await dialogs.ConfirmAsync($"Make {env.Name} active", $"{keys.Count} local {(keys.Count == 1 ? "key" : "keys")} will be replaced by {env.Name}.", "Replace");
             case OperationResult<IReadOnlyList<string>>.Failed failed:
                 await notifications.ToastAsync($"Could not read the local keys: {failed.Message}", ToastIntent.Error);
                 return false;
