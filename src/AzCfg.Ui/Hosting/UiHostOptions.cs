@@ -14,6 +14,9 @@ public sealed class UiHostOptions
     [ConfigurationKeyName("no-browser")]
     public bool NoBrowser { get; set; }
 
+    /// <summary>Print the login URL as one JSON line <c>{ "url": … }</c> instead of a bare URL (<c>azcfg ui --json</c>).</summary>
+    public bool Json { get; set; }
+
     public string? Demo { get; set; }
 
     [ConfigurationKeyName("state-root")]
