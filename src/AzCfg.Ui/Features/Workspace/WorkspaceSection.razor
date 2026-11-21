@@ -77,7 +77,7 @@
                          SelectedChanged="selected => OnProjectSelected(node, selected)">
             @foreach (var file in node.Project.ConfigFiles)
             {
-                <FluentTreeItem Text="@FileText(node, file)" IconStart="@FileIcon(file)" title="@FileTip(file)" Class="@(IsReadOnly(file) ? "az-ws-readonly" : null)" />
+                <FluentTreeItem Text="@FileText(node, file)" IconStart="@FileIcon(file)" title="@file.Path" />
             }
         </FluentTreeItem>;
 }

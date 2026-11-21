@@ -14,7 +14,7 @@ namespace AzCfg.Ui.Features.Workspace;
 /// WORKSPACE sidebar section (§2.3): the tree Solution → Project → config files. A bound project shows its active environment (or
 /// "not active") and, once its view is loaded, the counters ↑ local ↓ remote ! conflicts; an unbound application project shows
 /// "unbound"; libraries are dimmed. Clicking a bound project opens its tab; clicking an unbound application project starts the
-/// bind wizard first (§2.8 step 3). <c>local.settings.json</c> is listed read-only.
+/// bind wizard first (§2.8 step 3). <c>local.settings.json</c> is a bindable target like the other files.
 /// </summary>
 public sealed partial class WorkspaceSection : IDisposable
 {
@@ -148,10 +148,6 @@ public sealed partial class WorkspaceSection : IDisposable
             ? $"{node.Project.Project.CsprojPath} — library or test project: no local targets"
             : node.Binding is { } binding ? $"{node.Project.Project.CsprojPath} — service ‘{binding.Service}’" : $"{node.Project.Project.CsprojPath} — not bound to a service yet";
 
-    private static bool IsReadOnly(ConfigFileInfo file) => file.Kind == ConfigFileKind.LocalSettings;
-
-    private static string FileTip(ConfigFileInfo file) => IsReadOnly(file) ? "read-only, not supported yet" : file.Path;
-
     private static string FileText(ProjectNode node, ConfigFileInfo file)
     {
         var name = file.Kind == ConfigFileKind.UserSecrets ? "user-secrets" : Path.GetFileName(file.Path);
@@ -169,12 +165,12 @@ public sealed partial class WorkspaceSection : IDisposable
             }
         }
 
-        return $"{name}{(file.Exists ? string.Empty : " (not created)")}{(IsReadOnly(file) ? " (read-only)" : string.Empty)}{(roles.Count > 0 ? $" · {string.Join(", ", roles)}" : string.Empty)}";
+        return $"{name}{(file.Exists ? string.Empty : " (not created)")}{(roles.Count > 0 ? $" · {string.Join(", ", roles)}" : string.Empty)}";
     }
 
     private static Icon FileIcon(ConfigFileInfo file) => file.Kind == ConfigFileKind.UserSecrets
         ? new Icons.Regular.Size16.Key()
-        : IsReadOnly(file) ? new Icons.Regular.Size16.LockClosed() : new Icons.Regular.Size16.Document();
+        : new Icons.Regular.Size16.Document();
 
     private static LocalTargetKind? TargetKind(ConfigFileKind kind) => kind switch
     {

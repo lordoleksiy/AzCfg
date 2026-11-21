@@ -23,12 +23,12 @@ internal sealed class ConfigurationWorld : IDisposable
 
     private readonly string _folder = Path.Combine(Path.GetTempPath(), "azcfg-ui-tests", Guid.NewGuid().ToString("N"));
 
-    public ConfigurationWorld(string? active = "dev", IReadOnlyList<string>? ignore = null)
+    public ConfigurationWorld(string? active = "dev", IReadOnlyList<string>? ignore = null, LocalTargetKind valuesKind = LocalTargetKind.AppSettingsLocal)
     {
         Directory.CreateDirectory(_folder);
         CsprojPath = Path.Combine(_folder, "Crm.csproj");
         File.WriteAllText(CsprojPath, "<Project />");
-        Values = new(LocalTargetKind.AppSettingsLocal, CsprojPath, LocalFileFormat.NestedJson);
+        Values = new(valuesKind, CsprojPath, valuesKind == LocalTargetKind.LocalSettings ? LocalFileFormat.FlatDictionary : LocalFileFormat.NestedJson);
         Secrets = new(LocalTargetKind.UserSecrets, CsprojPath, LocalFileFormat.NestedJson);
         Binding = new(_folder, "crm", Values, Secrets, new Dictionary<string, Uri>(), active, ignore);
         SecretStore = new(World.Secrets);
@@ -54,7 +54,7 @@ internal sealed class ConfigurationWorld : IDisposable
 
     public ProjectBinding Binding { get; }
 
-    public string ValuesFile => Path.Combine(_folder, "appsettings.local.json");
+    public string ValuesFile => Path.Combine(_folder, Values.Kind == LocalTargetKind.LocalSettings ? "local.settings.json" : "appsettings.local.json");
 
     public ISyncService Sync => Provider.GetRequiredService<ISyncService>();
 
