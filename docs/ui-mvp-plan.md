@@ -1006,6 +1006,14 @@ public interface ISecretRevealService
     Task<SecretString?> RevealLocalAsync(ProjectBinding binding, string key, CancellationToken ct);
 }
 
+// ---- Health (problems panel, UX1) ----
+public sealed record ProblemRow(HealthSeverity Severity, HealthCheckKind Kind, string Message, string? Environment, string? Key, string? Fix);
+public sealed record ProblemsReport(IReadOnlyList<ProblemRow> Rows) { int Errors; int Warnings; }   // errors first
+public interface IProblemsService                                          // singleton; adapter over Core IHealthService, no rules of its own
+{
+    Task<ProblemsReport> CheckAsync(string repoPath, CancellationToken ct);
+}
+
 // ---- Sync (push/pull previews, drafts) ----
 public enum ConflictChoice { KeepLocal, KeepRemote }
 public enum PushOrigin { LocalFiles, Draft }

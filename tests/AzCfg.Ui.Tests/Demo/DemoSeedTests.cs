@@ -50,17 +50,17 @@ public sealed class DemoSeedTests
     }
 
     [Theory]
-    [InlineData("dev", 40)]
-    [InlineData("stage", 41)]
-    [InlineData("prod", 40)]
-    public async Task Full_EachEnvironment_HasServiceGlobalBillingKeysAndSixSecrets(string env, int orders)
+    [InlineData("dev", 41, 6)]
+    [InlineData("stage", 41, 6)]
+    [InlineData("prod", 41, 7)]
+    public async Task Full_EachEnvironment_HasServiceGlobalBillingKeysAndSecrets(string env, int orders, int secretRefs)
     {
         await using var demo = await DemoApp.StartAsync("--demo");
         var settings = demo.World.AppConfig.Settings($"https://appcs-shop-{env}.azconfig.io");
         Assert.Equal(orders, settings.Count(s => s.Key.StartsWith("orders:", StringComparison.Ordinal)));
         Assert.Equal(10, settings.Count(s => s.Key.StartsWith("global:", StringComparison.Ordinal)));
         Assert.Equal(8, settings.Count(s => s.Key.StartsWith("billing:", StringComparison.Ordinal)));
-        Assert.Equal(6, settings.Count(s => s.Text is null));
+        Assert.Equal(secretRefs, settings.Count(s => s.Text is null));
     }
 
     [Fact]

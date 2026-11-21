@@ -1,5 +1,6 @@
 using AzCfg.Ui.Application.Configuration;
 using AzCfg.Ui.Application.Environments;
+using AzCfg.Ui.Application.Health;
 using AzCfg.Ui.Application.Operations;
 using AzCfg.Ui.Application.State;
 using AzCfg.Ui.Application.Sync;
@@ -18,6 +19,7 @@ public static class ApplicationServices
             .AddEnvironmentServices()
             .AddConfigurationServices()
             .AddSyncServices()
+            .AddHealthServices()
             .AddScoped<WorkspaceState>()
             .AddScoped<ProjectSessions>()
             .AddScoped<ProtectedUnlockState>()
