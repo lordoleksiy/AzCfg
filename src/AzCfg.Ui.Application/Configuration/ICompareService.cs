@@ -12,4 +12,11 @@ public interface ICompareService
     /// Local↔Local → <see cref="ArgumentException"/>. JSON per <see cref="IConfigurationService.ToJson"/> rules.
     /// </summary>
     Task<ComparisonView> CompareAsync(ProjectBinding binding, CompareSide left, CompareSide right, CancellationToken ct);
+
+    /// <summary>
+    /// Consistency matrix: <c>ReadRemoteConfigAsync</c> per environment (ignored keys dropped, as <c>diff --missing --all</c>) +
+    /// <c>MissingKeysReport.Compute</c> for the gaps. Every key is a row; cells hold plain values or the secret name, never a
+    /// secret value. A row is global when any of its entries is global (such keys are not copied).
+    /// </summary>
+    Task<MissingKeysView> MissingKeysAsync(ProjectBinding binding, IReadOnlyList<ConfigEnvironment> environments, CancellationToken ct);
 }

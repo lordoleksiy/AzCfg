@@ -8,5 +8,5 @@ public static class CompareFeature
 {
     /// <summary>Compare mode of the project tab (§2.6).</summary>
     public static IServiceCollection AddCompareFeature(this IServiceCollection services) =>
-        services.AddProjectMode(ProjectMode.Compare, typeof(CompareView));
+        services.AddScoped<CompareCopier>().AddProjectMode(ProjectMode.Compare, typeof(CompareView));
 }

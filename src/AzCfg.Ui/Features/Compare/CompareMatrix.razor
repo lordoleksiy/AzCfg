@@ -1,0 +1,233 @@
+@using AzCfg.Core.Model
+@using AzCfg.Ui.Application.Operations
+@using AzCfg.Ui.Application.Configuration
+@using AzCfg.Ui.Application.Security
+@using AzCfg.Ui.Application.State
+@using AzCfg.Ui.Application.Sync
+@implements IDisposable
+
+<div class="az-matrix">
+    <div class="az-matrix-toolbar" role="toolbar" aria-label="Matrix">
+        <FluentButton Appearance="@(_gapsOnly ? ButtonAppearance.Primary : ButtonAppearance.Outline)" Size="ButtonSize.Small"
+                      aria-pressed="@(_gapsOnly ? "true" : "false")" OnClick="() => _gapsOnly = !_gapsOnly">Gaps only</FluentButton>
+        @if (_view is { } counted)
+        {
+            <span class="az-compare-counts">@counted.GapCount of @counted.Rows.Count keys with gaps@(counted.IgnoredCount > 0 ? $" · {counted.IgnoredCount} ignored" : "")</span>
+        }
+        <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small" OnClick="ReloadAsync">Refresh</FluentButton>
+    </div>
+    @if (_loading)
+    {
+        <div class="az-compare-progress" role="status">
+            <FluentSpinner Size="SpinnerSize.Tiny" />
+            <span>Comparing all environments…</span>
+        </div>
+    }
+    @if (_error is { } error)
+    {
+        <ErrorBar Message="@($"Compare failed: {error.Message}")" Details="@($"{error.Kind}: {error.Message}")" OnRetry="ReloadAsync" />
+    }
+    @if (_secretFor is { } target)
+    {
+        <div class="az-matrix-secret" role="group" aria-label="Set secret value">
+            <span>Set secret value of <strong class="az-mono">@target.Key</strong> in <strong>@target.Env.Name</strong>:</span>
+            <input class="az-input" aria-label="New secret value" type="password" autocomplete="off" value="@_secretValue"
+                   @oninput="e => _secretValue = e.Value as string ?? string.Empty" @onkeydown:stopPropagation="true" />
+            <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" Disabled="@(_secretValue.Length == 0)" OnClick="SetSecretAsync">Set secret value</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="CancelSecret">Cancel</FluentButton>
+        </div>
+    }
+    @if (_view is { } view)
+    {
+        var rows = Visible(view);
+        @if (rows.Count == 0)
+        {
+            <EmptyState Text="@(_gapsOnly && string.IsNullOrEmpty(Session.Filter.Text) ? "No gaps between environments" : "No keys match")" />
+        }
+        else
+        {
+            <div class="az-matrix-scroll">
+                <table class="az-matrix-table" aria-label="Consistency matrix">
+                    <thead>
+                        <tr>
+                            <th scope="col">Key</th>
+                            @for (var i = 0; i < view.Environments.Count; i++)
+                            {
+                                var column = i;
+                                <th scope="col">@view.Environments[i].Name <span class="az-compare-hint">@view.Rows.Count(r => r.Cells[column] is null) missing</span></th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in rows)
+                        {
+                            <tr data-path="@row.Key" class="@(row.HasGap ? "az-matrix-gap" : null)">
+                                <th scope="row" class="az-mono">@row.Key@(row.Scope == ConfigScope.Global ? " (global)" : "")</th>
+                                @for (var i = 0; i < view.Environments.Count; i++)
+                                {
+                                    <td>@Cell(view, row, i)</td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private MissingKeysView? _view;
+    private bool _loading;
+    private OperationResult<MissingKeysView>.Failed? _error;
+    private bool _gapsOnly = true;
+    private (string Key, ConfigEnvironment Env)? _secretFor;
+    private string _secretValue = string.Empty;
+
+    [Inject] private ICompareService Compare { get; set; } = default!;
+
+    [Inject] private IOperationRunner Runner { get; set; } = default!;
+
+    [Inject] private IDraftService Drafts { get; set; } = default!;
+
+    [Inject] private CompareCopier Copier { get; set; } = default!;
+
+    [Parameter, EditorRequired] public ProjectSession Session { get; set; } = default!;
+
+    [Parameter, EditorRequired] public ProjectBinding Binding { get; set; } = default!;
+
+    [Parameter, EditorRequired] public IReadOnlyList<ConfigEnvironment> Environments { get; set; } = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.Changed += OnSessionChanged;
+        await ReloadAsync();
+    }
+
+    private void OnSessionChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+        var result = await Runner.RunAsync("Compare all environments", OperationKind.Read,
+            ct => Compare.MissingKeysAsync(Binding, Environments, ct), _cts.Token);
+        _loading = false;
+        switch (result)
+        {
+            case OperationResult<MissingKeysView>.Success success:
+                _view = success.Value;
+                break;
+            case OperationResult<MissingKeysView>.Failed failed:
+                _error = failed;
+                break;
+        }
+
+        StateHasChanged();
+    }
+
+    private IReadOnlyList<MatrixRow> Visible(MissingKeysView view)
+    {
+        var text = Session.Filter.Text;
+        return [.. view.Rows.Where(r => (!_gapsOnly || r.HasGap) && (string.IsNullOrEmpty(text) || r.Key.Contains(text, StringComparison.OrdinalIgnoreCase)))];
+    }
+
+    private bool IsPending(MissingKeysView view, int column, string key) =>
+        Session.DraftFor(view.Environments[column].Name) is { } draft && Drafts.PendingKeys(draft).Any(k => k.Key == key);
+
+    private RenderFragment Cell(MissingKeysView view, MatrixRow row, int column) =>
+        @<text>
+            @if (row.Cells[column] is { } cell)
+            {
+                @if (cell.IsSecret)
+                {
+                    <span class="az-compare-secret" title="@(cell.SecretName is null ? "Secret" : $"Key Vault secret {cell.SecretName}")">
+                        <FluentIcon Value="@(new Icons.Regular.Size16.Key())" Title="Secret" />
+                        <span class="az-mono">@(cell.SecretName ?? SecretPolicy.Mask)</span>
+                    </span>
+                }
+                else
+                {
+                    <span class="az-mono az-compare-plain" title="@cell.Value">@cell.Value</span>
+                }
+            }
+            else if (IsPending(view, column, row.Key))
+            {
+                <span class="az-matrix-pending" title="Added to the draft of @view.Environments[column].Name">pending (draft)</span>
+            }
+            else
+            {
+                <span class="az-compare-missing">missing</span>
+                @if (row.Scope == ConfigScope.Service && Source(view, row) is { } source)
+                {
+                    var target = view.Environments[column];
+                    var from = view.Environments[source];
+                    @if (row.Cells[source]!.IsSecret)
+                    {
+                        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Title="@($"Type a new secret value for {target.Name}")"
+                                      OnClick="() => OpenSecret(row.Key, target)">Set secret value</FluentButton>
+                    }
+                    else
+                    {
+                        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Title="@($"Copy the value of {from.Name} into the draft of {target.Name}")"
+                                      OnClick="() => CopyAsync(view, row, source, target)">Copy from @from.Name</FluentButton>
+                    }
+                }
+            }
+        </text>;
+
+    /// <summary>The first environment (column order) holding the key; a plain value wins over a secret.</summary>
+    private static int? Source(MissingKeysView view, MatrixRow row)
+    {
+        var plain = row.Cells.Select((c, i) => (c, i)).FirstOrDefault(x => x.c is { IsSecret: false });
+        if (plain.c is not null)
+        {
+            return plain.i;
+        }
+
+        var secret = row.Cells.Select((c, i) => (c, i)).FirstOrDefault(x => x.c is not null);
+        return secret.c is null ? null : secret.i;
+    }
+
+    private async Task CopyAsync(MissingKeysView view, MatrixRow row, int source, ConfigEnvironment target)
+    {
+        if (row.Cells[source]?.Value is { } value && await Copier.CopyAsync(Session, view.Binding, target, row.Key, value, _cts.Token))
+        {
+            StateHasChanged();
+        }
+    }
+
+    private void OpenSecret(string key, ConfigEnvironment env)
+    {
+        _secretFor = (key, env);
+        _secretValue = string.Empty;
+    }
+
+    private void CancelSecret()
+    {
+        _secretFor = null;
+        _secretValue = string.Empty;
+    }
+
+    private async Task SetSecretAsync()
+    {
+        if (_secretFor is not { } target || _view is null || _secretValue.Length == 0)
+        {
+            return;
+        }
+
+        if (await Copier.SetSecretAsync(Session, _view.Binding, target.Env, target.Key, new SecretString(_secretValue), _cts.Token))
+        {
+            CancelSecret();
+        }
+    }
+
+    public void Dispose()
+    {
+        Session.Changed -= OnSessionChanged;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

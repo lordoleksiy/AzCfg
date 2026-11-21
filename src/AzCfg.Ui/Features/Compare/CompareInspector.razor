@@ -13,6 +13,11 @@
         <InspectorSection Title="@CompareSides.Name(View.Right)">@Side(Row.Right)</InspectorSection>
         <div class="az-compare-actions">
             <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => OnOpenInBrowse.InvokeAsync(Row.Key)">Open in Browse</FluentButton>
+            @if (View.Right is CompareSide.Environment right && Row.Left is { IsSecret: false, Value: not null, Scope: ConfigScope.Service })
+            {
+                <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Title="@($"Copy the value into the draft of {right.Env.Name}")"
+                              OnClick="() => OnCopyToRight.InvokeAsync(Row)">Copy to @right.Env.Name</FluentButton>
+            }
         </div>
     }
 </InspectorPane>
@@ -25,6 +30,9 @@
 
     /// <summary>Raised with the key.</summary>
     [Parameter] public EventCallback<string> OnOpenInBrowse { get; set; }
+
+    /// <summary>Raised with the row when "Copy to ‹right env›" is chosen (plain, service-scope left value, right side an environment).</summary>
+    [Parameter] public EventCallback<CompareRow> OnCopyToRight { get; set; }
 
     private static RenderFragment Side(CompareCell? cell) =>
         @<div class="az-compare-side-detail">

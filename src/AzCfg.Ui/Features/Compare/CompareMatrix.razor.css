@@ -1,0 +1,51 @@
+.az-matrix {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+}
+
+.az-matrix-toolbar,
+.az-matrix-secret {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+}
+
+.az-matrix-scroll {
+    flex: 1;
+    overflow: auto;
+}
+
+.az-matrix-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.az-matrix-table th,
+.az-matrix-table td {
+    padding: 3px 8px;
+    text-align: left;
+    font-weight: 400;
+    border-bottom: 1px solid var(--colorNeutralStroke3);
+    white-space: nowrap;
+}
+
+.az-matrix-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--colorNeutralBackground1);
+    font-weight: 600;
+}
+
+.az-matrix-table td ::deep fluent-button {
+    margin-left: 6px;
+}
+
+.az-matrix-pending {
+    color: var(--az-diff-modified);
+}

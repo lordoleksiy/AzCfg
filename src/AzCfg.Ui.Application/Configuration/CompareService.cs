@@ -24,6 +24,33 @@ internal sealed class CompareService(IConfigComparisonService comparison, ISyncS
         return new(binding, left, right, rows, result.IgnoredCount, leftSide.Json(rows, isLeft: true), rightSide.Json(rows, isLeft: false), time.GetUtcNow());
     }
 
+    public async Task<MissingKeysView> MissingKeysAsync(ProjectBinding binding, IReadOnlyList<ConfigEnvironment> environments, CancellationToken ct)
+    {
+        var configs = new List<RemoteConfig>();
+        var ignored = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var env in environments)
+        {
+            var config = await sync.ReadRemoteConfigAsync(binding, env, ct);
+            ignored.UnionWith(config.Entries.Where(e => IgnoreRules.IsIgnored(binding.Ignore, e.Key, e.Scope)).Select(e => e.Key));
+            configs.Add(config with { Entries = [.. config.Entries.Where(e => !IgnoreRules.IsIgnored(binding.Ignore, e.Key, e.Scope))] });
+        }
+
+        var gaps = MissingKeysReport.Compute(configs).Select(m => m.Key).ToHashSet(StringComparer.Ordinal);
+        var byEnv = configs.Select(c => c.Entries.GroupBy(e => e.Key, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal)).ToList();
+        var rows = byEnv.SelectMany(d => d.Keys).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)
+            .Select(key => new MatrixRow(
+                key,
+                byEnv.Any(d => d.GetValueOrDefault(key)?.Scope == ConfigScope.Global) ? ConfigScope.Global : ConfigScope.Service,
+                gaps.Contains(key),
+                [.. byEnv.Select(d => d.GetValueOrDefault(key) is { } e ? MatrixCellOf(e) : null)]))
+            .ToList();
+        return new(binding, environments, rows, ignored.Count, time.GetUtcNow());
+    }
+
+    private static MatrixCell MatrixCellOf(ConfigEntry entry) => entry.Value is ConfigValue.Plain plain
+        ? new(plain.Value, false, null)
+        : new(null, true, SecretName(entry));
+
     private async Task<Side> ReadSideAsync(ProjectBinding binding, CompareSide side, CancellationToken ct) => side switch
     {
         CompareSide.Environment r => new Side(null, (await sync.ReadRemoteConfigAsync(binding, r.Env, ct)).Entries

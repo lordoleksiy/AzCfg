@@ -19,6 +19,16 @@ internal sealed class FakeCompareService : ICompareService
 
     public Exception? Failure { get; set; }
 
+    public MissingKeysView? Matrix { get; set; }
+
+    public int MatrixCalls { get; private set; }
+
+    public Task<MissingKeysView> MissingKeysAsync(ProjectBinding binding, IReadOnlyList<ConfigEnvironment> environments, CancellationToken ct)
+    {
+        MatrixCalls++;
+        return Task.FromResult(Matrix ?? new MissingKeysView(binding, environments, [], 0, DateTimeOffset.UnixEpoch));
+    }
+
     public Task<ComparisonView> CompareAsync(ProjectBinding binding, CompareSide left, CompareSide right, CancellationToken ct)
     {
         Calls.Add((left, right));
