@@ -310,7 +310,7 @@
 | 1 | UI: основні екрани | U1 Workspace/Environments, U2 Browse ∥ (U3 Compare, U4 Sync ✅) (`docs/ui-mvp-plan.md`) | 2 | 0 |
 | 2 ✅ | CLI 0.5.1 | LS1 `local.settings.json` + випуск 0.5.1 (етап 10); злито разом з U3, U4 | 1 | 0 |
 | 3 | UI: доповнення + 0.6.0 | UX1 Problems, UX2 матриця + copy, UX3 редагований `local.settings.json`, X1 `azcfg ui` ∥, потім Q1, Q2, R1 (`docs/ui-mvp-plan.md`) | 4 → 1 | 1, 2 |
-| 2b | CLI + UI 0.7.0 — маніфест | PC1, потім PC2 → PC3 ∥ PC4, UX4 share with team (після PC3), PC5 (етап 10) | 1 → 2 → 1 | 3 |
+| 2b ✅ | CLI + UI 0.7.0 — маніфест | PC1, потім PC2 → PC3 ∥ PC4, UX4 share with team (після PC3), PC5 (етап 10) | 1 → 2 → 1 | 3 |
 | 4 | CLI 0.8.0 — App Service / Functions | RP0, потім RP1 → RP2 ∥ RP3 → RP4 → RP5, RP6 (етап 11) | 1 → 2 → 1 | 3 |
 | 5 | CLI 0.9.0 — маніфест v2 | MV0, потім MV1 ∥ MV4 ∥ MV5 → MV2 → MV3, MV6 (етап 12) | 1 → 3 → 1 | 4 |
 
@@ -440,7 +440,7 @@ CLI і UI: зміни `ProjectService`/`ProjectSettingsService` і `AzCfg.Ui.App
 - [x] **PC0. ADR 0012** (+ поправки 2026-11-20, 2026-11-21).
   - Залежить від: —
 
-- [ ] **PC1. Модель маніфесту** (`Core/Manifest`)
+- [x] **PC1. Модель маніфесту** (`Core/Manifest`)
   - `ProjectManifest(SchemaVersion, Service, ManifestTarget Values, ManifestTarget Secrets, Vaults?)`,
     `ManifestTarget(Target, Project)`; назви цілей — як у `config project.*` (`user-secrets`, `appsettings-local`,
     `local-settings`).
@@ -450,14 +450,14 @@ CLI і UI: зміни `ProjectService`/`ProjectSettingsService` і `AzCfg.Ui.App
   - Тести (TDD): round-trip, коментарі, кожне правило валідатора, канарковий `"value"` відхиляється.
   - Залежить від: —
 
-- [ ] **PC2. Сховище маніфесту** (`Infrastructure/Project`)
+- [x] **PC2. Сховище маніфесту** (`Infrastructure/Project`)
   - Порт `IProjectManifestStore` (`FindAsync(path)` → `(ProjectManifest, string FilePath)?` — найближчий `azcfg.json`
     від `path` угору до кореня git; `SaveAsync(filePath, manifest)`); `FileProjectManifestStore` (атомарний запис як
     `JsonUserStateStore`, пошкоджений файл → зрозуміла помилка з шляхом). DI в `AddAzCfg()`.
   - Тести: temp-репо, пошук із вкладеної теки, зупинка на корені git, round-trip.
   - Залежить від: PC1
 
-- [ ] **PC3. Маніфест у прив'язці** (Core + CLI)
+- [x] **PC3. Маніфест у прив'язці** (Core + CLI)
   - `ProjectService.ResolveAsync`: немає binding + є маніфест → binding з маніфесту без майстра; binding з іншим сервісом →
     правило `config set project.service` (скинути активне середовище і снапшоти). `ActiveEnvironment`, `Ignore`, снапшоти
     лишаються в стані користувача.
@@ -472,7 +472,7 @@ CLI і UI: зміни `ProjectService`/`ProjectSettingsService` і `AzCfg.Ui.App
     `AzCfg.Ui.Application` у тому самому PR.
   - Залежить від: PC2
 
-- [ ] **PC4. Перевірки в `status --check`**
+- [x] **PC4. Перевірки в `status --check`**
   - `HealthCheckKind.ManifestInvalid` (Error): нечитабельний файл, помилка схеми, непідтримувана версія.
   - `HealthCheckKind.SecretLikeKeyInTrackedFile` (Warning): новий порт `ITrackedSettingsReader.ReadKeysAsync(repoPath)` →
     `TrackedSettingKey(File, Key, bool HasValue)` для git-tracked `appsettings*.json` (Infrastructure: `git ls-files`,
@@ -497,7 +497,7 @@ CLI і UI: зміни `ProjectService`/`ProjectSettingsService` і `AzCfg.Ui.App
   - README (`local.settings.json`), `CHANGELOG.md`, `<Version>` 0.5.1; один PR у `master` разом з LS1, U3, U4.
   - Залежить від: LS1
 
-- [ ] **PC5. Випуск 0.7.0**
+- [x] **PC5. Випуск 0.7.0**
   - README (`azcfg.json`, `project.shared`, нові перевірки; UI — share with team), `CHANGELOG.md`, `<Version>` 0.7.0 +
     release notes; PR у `master`.
   - Залежить від: PC3, PC4, UX4, UI 0.6.0 (`docs/ui-mvp-plan.md` R1)

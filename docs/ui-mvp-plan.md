@@ -163,7 +163,7 @@ what is not verified (e.g. manual browser check).
 | Q1 | Integration and security tests | I1, DH, U1–U4, UX1–UX3 | W4 | [ ] |
 | Q2 | Docs, polish, measurements, smoke checklist | Q1, X1 | W5 | [ ] |
 | R1 | Release CLI 0.6.0 (`azcfg ui` preview) | Q2 | W6 | [ ] |
-| UX4 | UI: share with team (`azcfg.json`) | UX3, R1, PC3 (`docs/mvp-plan.md`) | W7 | [ ] |
+| UX4 | UI: share with team (`azcfg.json`) | UX3, R1, PC3 (`docs/mvp-plan.md`) | W7 | [x] |
 
 ### 0.8 Next steps (after M1, 2026-11-20)
 1. **Merge M1** — PR `dev` → `master` (no `<Version>` change, nothing is published). From then on every task branches
@@ -1810,7 +1810,7 @@ complete list of allowed changes (plus the task's `[x]` line here).
   - **Acceptance:** (1) Functions project binds to `local.settings.json`, a pull writes only `Values`, other sections
     kept; (2) *manual (demo)*.
 
-- [ ] **UX4 — UI: share with team (`azcfg.json`)** — session 2b, with the manifest (CLI 0.7.0)
+- [x] **UX4 — UI: share with team (`azcfg.json`)** — session 2b, with the manifest (CLI 0.7.0)
   - **Goal:** FR-W7 (`azcfg.json`).
   - **Read:** `docs/mvp-plan.md` stage 10 (PC3), ADR 0012 amendment 2, ADR 0014 amendment, §2.3, §7.3 (Workspace).
   - **Scope:** Project settings: **Share with team** → `IProjectSettingsService.SetAsync(repo, "project.shared",
