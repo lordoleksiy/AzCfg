@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Environments;
 using AzCfg.Core.Health;
+using AzCfg.Core.Manifest;
 using AzCfg.Core.Model;
 using AzCfg.Core.Security;
 using AzCfg.Core.Sync;
@@ -40,7 +41,8 @@ public sealed class HealthServiceTests
                 all,
                 Detector,
                 new FakeAccessErrorClassifier(),
-                Tracked);
+                Tracked,
+                Manifests);
         }
 
         public FakeUserStateStore State { get; }
@@ -50,13 +52,14 @@ public sealed class HealthServiceTests
         public ListDetector Detector { get; } = new([new("/repo", "/repo/Orders/Orders.csproj", "Orders", false, null)]);
         public FakeSecretStore KeyVault { get; } = new([]);
         public FakeTrackedSettingsReader Tracked { get; } = new();
+        public FakeProjectManifestStore Manifests { get; } = new();
         public FakeAzureAccountProbe Probe { get; } = new();
         public HealthService Service { get; }
 
         public Task<HealthReport> CheckAsync() => Service.CheckAsync("/repo", Ct);
 
         public HealthService With(IConfigStore store) =>
-            new(State, new SeparateStoresResolver(), store, Sync, KeyVault, Probe, [], Detector, new FakeAccessErrorClassifier(), Tracked);
+            new(State, new SeparateStoresResolver(), store, Sync, KeyVault, Probe, [], Detector, new FakeAccessErrorClassifier(), Tracked, Manifests);
     }
 
     private sealed class ListDetector(List<ProjectInfo> projects) : IProjectDetector
@@ -626,6 +629,83 @@ public sealed class HealthServiceTests
 
         Assert.Empty(report.Findings);
         Assert.DoesNotContain("CANARY", Json(report));
+    }
+
+    private const string ManifestPath = "/repo/azcfg.json";
+
+    private static string ManifestJson(string schemaVersion = "1", string extra = "") => $$"""
+        {
+          "schemaVersion": {{schemaVersion}},
+          "service": "orders",
+          "values":  { "target": "appsettings-local", "project": "Orders/Orders.csproj"{{extra}} },
+          "secrets": { "target": "user-secrets", "project": "Orders/Orders.csproj" }
+        }
+        """;
+
+    private static ManifestException Rejected(string json) =>
+        Assert.Throws<ManifestException>(() => ManifestSerializer.Deserialize(json)).WithFilePath(ManifestPath);
+
+    [Theory]
+    [InlineData("{ \"schemaVersion\": 1, ", "is unreadable", null)]
+    [InlineData("SCHEMA", "does not match the schema", null)]
+    [InlineData("VERSION", "needs a newer azcfg", "dotnet tool update --global AzCfg")]
+    public async Task CheckAsync_InvalidManifest_ReportsErrorPerKind(string json, string wording, string? fix)
+    {
+        var rig = new Rig(Binding);
+        rig.Manifests.FindError = Rejected(json switch
+        {
+            "SCHEMA" => "{ \"schemaVersion\": 1 }",
+            "VERSION" => ManifestJson("99"),
+            _ => json,
+        });
+
+        var report = await rig.CheckAsync();
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(HealthCheckKind.ManifestInvalid, finding.Kind);
+        Assert.Equal(HealthSeverity.Error, finding.Severity);
+        Assert.Contains(ManifestPath, finding.Message);
+        Assert.Contains(wording, finding.Message);
+        Assert.Equal(fix, finding.Fix);
+        Assert.True(report.HasErrors);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ValidOrAbsentManifest_NoFinding()
+    {
+        var absent = await new Rig(Binding).CheckAsync();
+        var rig = new Rig(Binding);
+        rig.Manifests.Files[ManifestPath] = ManifestSerializer.Deserialize(ManifestJson());
+
+        var valid = await rig.CheckAsync();
+
+        Assert.Empty(absent.Findings);
+        Assert.Empty(valid.Findings);
+    }
+
+    [Fact]
+    public async Task CheckAsync_NotSignedIn_StillChecksManifest()
+    {
+        var rig = new Rig(null);
+        rig.Probe.Result = new(false, null, "No credential");
+        rig.Manifests.FindError = Rejected("not json");
+
+        var report = await rig.CheckAsync();
+
+        Assert.Contains(report.Findings, f => f.Kind == HealthCheckKind.ManifestInvalid);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ManifestRejectedValueField_CanaryNotInReport()
+    {
+        const string canary = "AZCFG-CANARY-manifest-s3cret";
+        var rig = new Rig(Binding);
+        rig.Manifests.FindError = Rejected(ManifestJson(extra: $", \"value\": \"{canary}\""));
+
+        var report = await rig.CheckAsync();
+
+        Assert.Contains(report.Findings, f => f.Kind == HealthCheckKind.ManifestInvalid);
+        Assert.DoesNotContain(canary, Json(report));
     }
 
     private sealed class CancellingStore : IConfigStore

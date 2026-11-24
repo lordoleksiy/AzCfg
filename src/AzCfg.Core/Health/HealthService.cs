@@ -1,4 +1,5 @@
 using AzCfg.Core.Abstractions;
+using AzCfg.Core.Manifest;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
 using AzCfg.Core.UseCases;
@@ -22,9 +23,11 @@ public sealed class HealthService(
     IProjectDetector detector,
     IAccessErrorClassifier classifier,
     ITrackedSettingsReader trackedSettings,
+    IProjectManifestStore manifests,
     ILogger<HealthService>? logger = null) : IHealthService
 {
     private const string GitIgnoreFix = "azcfg config set gitignoreLocalFiles true";
+    private const string UpdateFix = "dotnet tool update --global AzCfg";
     private static readonly string[] SecretLikeMarkers = ["password", "secret", "token", "apikey", "connectionstring"];
     private readonly ILogger _log = logger ?? NullLogger<HealthService>.Instance;
 
@@ -46,6 +49,7 @@ public sealed class HealthService(
                 await CheckTargetProjectsAsync(binding, findings, ct);
             }
 
+            await CheckManifestAsync(repoPath, findings, ct);
             await CheckTrackedSettingsAsync(repoPath, findings, ct);
             return new(who, [.. environments.Select(e => new EnvironmentCheck(e.Name, EnvironmentAccess.AuthRequired, "Not signed in to Azure."))], findings);
         }
@@ -69,8 +73,35 @@ public sealed class HealthService(
             await CheckBindingAsync(binding, environments, reachable, findings, ct);
         }
 
+        await CheckManifestAsync(repoPath, findings, ct);
         await CheckTrackedSettingsAsync(repoPath, findings, ct);
         return new(who, checks, findings);
+    }
+
+    /// <summary>
+    /// The nearest <c>azcfg.json</c> is unreadable, fails the schema or needs a newer azcfg (ADR 0012, health). The finding carries
+    /// the file path and the manifest error messages, which never contain field values; absent or valid → no finding.
+    /// </summary>
+    private async Task CheckManifestAsync(string repoPath, List<HealthFinding> findings, CancellationToken ct)
+    {
+        try
+        {
+            await manifests.FindAsync(repoPath, ct);
+        }
+        catch (ManifestException ex)
+        {
+            var file = ex.FilePath ?? IProjectManifestStore.FileName;
+            var details = string.Join("; ", ex.Errors.Select(e => e.Message));
+            findings.Add(ex.Kind switch
+            {
+                ManifestErrorKind.Unreadable => new(HealthCheckKind.ManifestInvalid, HealthSeverity.Error, $"The project manifest '{file}' is unreadable: {details} Fix the JSON or delete the file."),
+                ManifestErrorKind.UnsupportedVersion => new(HealthCheckKind.ManifestInvalid, HealthSeverity.Error, $"The project manifest '{file}' needs a newer azcfg: {details}", Fix: UpdateFix),
+                _ => new(HealthCheckKind.ManifestInvalid, HealthSeverity.Error, $"The project manifest '{file}' does not match the schema: {details}"),
+            });
+        }
+        catch (Exception ex) when (Handled(ex, ct, "manifest"))
+        {
+        }
     }
 
     /// <summary>
