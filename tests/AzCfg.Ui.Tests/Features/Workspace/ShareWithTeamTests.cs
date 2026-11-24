@@ -248,4 +248,64 @@ public sealed class ShareWithTeamTests : ShellContext
 
         Assert.NotNull(session.View);
     }
+
+    [Fact]
+    public void WriteRunning_ShareAndApplyAreDisabled()
+    {
+        Seed(Node("Orders.Api", Binding("Orders.Api")));
+        var cut = RenderWithOrdersSelected();
+        Assert.True(ShareEnabled());
+
+        cut.InvokeAsync(() =>
+        {
+            Runner.Active.Add(new OperationInfo(Guid.NewGuid(), "Push", OperationKind.Write, DateTimeOffset.UnixEpoch));
+            Runner.RaiseChanged();
+        });
+
+        cut.WaitForAssertion(() => Assert.True(ButtonText(cut, "Share with team…").HasAttribute("disabled")));
+        Assert.False(ShareEnabled());
+    }
+
+    [Fact]
+    public async Task Apply_WriteRunning_DoesNothing()
+    {
+        Seed(Node("Orders.Api", Binding("Orders.Api")) with { ManifestPath = Manifest, ManifestChange = new ManifestChange("orders", "orders") });
+        Runner.Active.Add(new OperationInfo(Guid.NewGuid(), "Push", OperationKind.Write, DateTimeOffset.UnixEpoch));
+        _ = Providers;
+
+        Assert.False(await Services.GetRequiredService<WorkspaceActions>().ApplyManifestAsync(Orders));
+
+        Assert.DoesNotContain("Apply azcfg.json to", Providers.Markup);
+        Assert.Empty(WorkspaceService.Applied);
+    }
+
+    [Fact]
+    public async Task Apply_AlreadyAppliedWhileConfirming_SecondConfirmIsANoOp()
+    {
+        Seed(Node("Orders.Api", Binding("Orders.Api")) with { ManifestPath = Manifest, ManifestChange = new ManifestChange("orders", "orders") });
+        _ = Providers;
+
+        var task = Services.GetRequiredService<WorkspaceActions>().ApplyManifestAsync(Orders);
+        Providers.WaitForAssertion(() => Assert.Contains("Apply azcfg.json to Orders.Api?", Providers.Markup));
+        await Providers.InvokeAsync(() => SeedTree(Tree([Solution("Shop", Node("Orders.Api", Binding("Orders.Api")) with { ManifestPath = Manifest }, Node("Billing", null))])));
+        Click(Providers, "Apply");
+
+        Assert.False(await task);
+        Assert.Empty(WorkspaceService.Applied);
+    }
+
+    [Fact]
+    public async Task Share_AlreadySharedWhileConfirming_SecondConfirmIsANoOp()
+    {
+        Seed(Node("Orders.Api", Binding("Orders.Api")));
+        _ = Providers;
+
+        var task = Services.GetRequiredService<WorkspaceActions>().ShareAsync(Orders);
+        Providers.WaitForAssertion(() => Assert.Contains("Share Orders.Api with the team?", Providers.Markup));
+        await Providers.InvokeAsync(() => SeedTree(Tree([Solution("Shop", Node("Orders.Api", Binding("Orders.Api")) with { ManifestPath = Manifest }, Node("Billing", null))])));
+        Click(Providers, "Share");
+
+        Assert.False(await task);
+        Assert.Empty(WorkspaceService.Shares);
+    }
 }

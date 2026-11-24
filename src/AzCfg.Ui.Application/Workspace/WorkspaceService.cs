@@ -1,3 +1,4 @@
+using System.Xml;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Environments;
 using AzCfg.Core.Manifest;
@@ -13,7 +14,8 @@ namespace AzCfg.Ui.Application.Workspace;
 /// secrets project is that <c>.csproj</c>, or its folder holding exactly one <c>.csproj</c> (the Core lookup rule). Opening is a Read:
 /// only an unbound project named by a manifest gets bound (Core <see cref="IProjectService.ResolveAsync"/>, keyed by the manifest
 /// folder, no wizard); a bound project that differs from its manifest is only marked (<see cref="ProjectNode.ManifestChange"/>) until
-/// <see cref="ApplyManifestAsync"/>.
+/// <see cref="ApplyManifestAsync"/>. Per-project failures (an unreadable manifest or <c>.csproj</c>) are reported on that project's
+/// node and never fail the whole tree.
 /// </summary>
 public sealed class WorkspaceService(
     IWorkspaceScanner scanner,
@@ -172,8 +174,9 @@ public sealed class WorkspaceService(
         {
             return Owns(e.FilePath, info, all) ? new ProjectNode(project, binding, ManifestError: e.Message) : new ProjectNode(project, binding);
         }
-        catch (UnauthorizedAccessException e)
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException or XmlException)
         {
+            // The manifest read, or detecting the projects of a folder it names (a malformed .csproj).
             return new ProjectNode(project, binding, ManifestError: e.Message);
         }
 
@@ -184,11 +187,12 @@ public sealed class WorkspaceService(
 
         if (binding is not null)
         {
-            return new ProjectNode(project, binding, manifest.FilePath, ManifestChange: await ChangeAsync(binding, manifest, ct));
+            return new ProjectNode(project, binding, manifest.FilePath, ManifestChange: Change(binding, manifest));
         }
 
         try
         {
+            // Core may git-ignore the targets once here (ProfileGitIgnoreLocalFiles), as the CLI does on the first pull.
             var resolution = await projects.ResolveAsync(ManifestFolder(manifest), ct);
             return new ProjectNode(project, resolution.Existing, resolution.ManifestPath);
         }
@@ -200,6 +204,11 @@ public sealed class WorkspaceService(
         {
             // Core applying this manifest to a new binding: a target it names that this azcfg cannot use (or not safe for secrets).
             return new ProjectNode(project, null, ManifestError: $"'{manifest.FilePath}': {e.Message.Replace($"'{manifest.FilePath}': ", string.Empty, StringComparison.Ordinal)}");
+        }
+        catch (Exception e) when (e is IOException or XmlException or UnauthorizedAccessException)
+        {
+            // Core detecting the projects the manifest names (a malformed .csproj) or reading a target.
+            return new ProjectNode(project, null, ManifestError: e.Message);
         }
     }
 
@@ -245,22 +254,27 @@ public sealed class WorkspaceService(
     }
 
     /// <summary>
-    /// What applying the manifest would change, read-only: <c>null</c> when the binding already has its service, targets (same rule
-    /// as <see cref="ResolvesToAsync"/>) and vaults (environment names case-insensitive, root URIs without the trailing slash).
+    /// What applying the manifest would change, read-only: <c>null</c> when the binding already has its service, targets (Core
+    /// <c>ManifestBinding.Matches</c> rule) and vaults (environment names case-insensitive, root URIs without the trailing slash).
     /// </summary>
-    private async Task<ManifestChange?> ChangeAsync(ProjectBinding binding, ManifestLocation location, CancellationToken ct)
+    private static ManifestChange? Change(ProjectBinding binding, ManifestLocation location)
     {
         var manifest = location.Manifest;
         var same = string.Equals(manifest.Service, binding.Service, StringComparison.Ordinal)
-            && await TargetMatchesAsync(location, binding.ValuesTarget, manifest.Values, ct)
-            && await TargetMatchesAsync(location, binding.SecretsTarget, manifest.Secrets, ct)
+            && TargetMatches(location, binding.ValuesTarget, manifest.Values)
+            && TargetMatches(location, binding.SecretsTarget, manifest.Secrets)
             && (manifest.Vaults ?? new Dictionary<string, Uri>()).All(v => binding.VaultByEnvironment.Any(b =>
                 b.Key.Equals(v.Key, StringComparison.OrdinalIgnoreCase) && SameVault(b.Value, v.Value)));
         return same ? null : new ManifestChange(binding.Service, manifest.Service);
     }
 
-    private async Task<bool> TargetMatchesAsync(ManifestLocation location, LocalTargetBinding target, ManifestTarget shared, CancellationToken ct) =>
-        string.Equals(KindName(target), shared.Target, StringComparison.Ordinal) && await ResolvesToAsync(location, shared.Project, target.ProjectPath, ct);
+    /// <summary>Core <c>ManifestBinding.Matches</c>: same target kind, and the manifest project is the <c>.csproj</c> or its folder (no uniqueness).</summary>
+    private static bool TargetMatches(ManifestLocation location, LocalTargetBinding target, ManifestTarget shared)
+    {
+        var wanted = Path.TrimEndingDirectorySeparator(Path.GetFullPath(shared.Project, ManifestFolder(location)));
+        return string.Equals(KindName(target), shared.Target, StringComparison.Ordinal)
+            && (PathKeys.Same(wanted, target.ProjectPath) || PathKeys.Same(wanted, FolderOfPath(target.ProjectPath)));
+    }
 
     /// <summary>The <c>config project.*</c> target name (<c>user-secrets</c>, …): the part of <see cref="ProjectSettingKeys.TargetValue"/> before the path.</summary>
     private static string KindName(LocalTargetBinding target) => ProjectSettingKeys.TargetValue(target).Split(':', 2)[0];

@@ -1,5 +1,6 @@
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
+using AzCfg.Ui.Application.Operations;
 using AzCfg.Ui.Application.State;
 using AzCfg.Ui.Application.Workspace;
 using AzCfg.Ui.Shared;
@@ -44,6 +45,8 @@ public sealed partial class WorkspaceSection : IDisposable
 
     [Inject] private WorkspaceActions Actions { get; set; } = default!;
 
+    [Inject] private IOperationRunner Runner { get; set; } = default!;
+
     [Inject] private IJSRuntime JS { get; set; } = default!;
 
     private string RootName => Workspace.Tree is { } tree ? Path.GetFileName(Path.TrimEndingDirectorySeparator(tree.RootPath)) is { Length: > 0 } name ? name : tree.RootPath : "No folder open";
@@ -54,6 +57,7 @@ public sealed partial class WorkspaceSection : IDisposable
     {
         Workspace.Changed += OnChanged;
         Sessions.Changed += OnChanged;
+        Runner.Changed += OnChanged;
         Prepare();
     }
 
@@ -232,6 +236,7 @@ public sealed partial class WorkspaceSection : IDisposable
     {
         Workspace.Changed -= OnChanged;
         Sessions.Changed -= OnChanged;
+        Runner.Changed -= OnChanged;
         foreach (var session in _hooked)
         {
             session.Changed -= OnChanged;

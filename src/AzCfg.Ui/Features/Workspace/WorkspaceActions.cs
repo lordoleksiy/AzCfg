@@ -60,13 +60,16 @@ public sealed class WorkspaceActions(
         }
     }
 
+    /// <summary><c>true</c> while any Write runs: Share and Apply azcfg.json are offered only when none does.</summary>
+    public bool IsWriting => runner.Running.Any(o => o.Kind == OperationKind.Write);
+
     /// <summary>
     /// Asks Core which <c>azcfg.json</c> sharing writes, confirms with that path, shares the bound project (a Write) and refreshes;
     /// <c>false</c> when the project is not shareable (unbound, library, shared, broken manifest), cancelled or failed (a toast says why).
     /// </summary>
     public async Task<bool> ShareAsync(string projectId)
     {
-        if (workspace.FindProject(projectId) is not { Binding: { } binding, IsShared: false, ManifestError: null, Project.Project.IsLibrary: false } node)
+        if (IsWriting || Shareable(projectId) is not { Binding: { } binding } node)
         {
             return false;
         }
@@ -82,6 +85,12 @@ public sealed class WorkspaceActions(
                 $"Writes the service ‘{binding.Service}’, the local targets and the vaults (never a value) to {file}. Commit it: teammates then open the project bound, without the wizard.",
                 "Share",
                 "Cancel"))
+        {
+            return false;
+        }
+
+        // Re-checked after the confirmation: a second click (or a refresh) meanwhile may have shared it already.
+        if (IsWriting || Shareable(projectId) is null)
         {
             return false;
         }
@@ -103,16 +112,22 @@ public sealed class WorkspaceActions(
     /// </summary>
     public async Task<bool> ApplyManifestAsync(string projectId)
     {
-        if (workspace.FindProject(projectId) is not { Binding: not null, ManifestPath: { } manifest, ManifestChange: { } change } node)
+        if (IsWriting || Applicable(projectId) is not { ManifestPath: { } manifest, ManifestChange: { } change } first)
         {
             return false;
         }
 
-        var name = node.Project.Project.Name;
+        var name = first.Project.Project.Name;
         var message = change.ServiceChanged
             ? $"{manifest} sets the service ‘{change.ManifestService}’ (now ‘{change.CurrentService}’): the active environment is cleared and the sync snapshots are reset; local files are not changed. Targets and vaults are taken from it too."
             : $"The local targets and vaults are taken from {manifest}. The active environment and snapshots stay.";
         if (!await dialogs.ConfirmAsync($"Apply azcfg.json to {name}?", message, "Apply", "Cancel"))
+        {
+            return false;
+        }
+
+        // Re-fetched after the confirmation: a second click may have applied it already (then the node has no change left).
+        if (IsWriting || Applicable(projectId) is not { } node)
         {
             return false;
         }
@@ -136,6 +151,12 @@ public sealed class WorkspaceActions(
         await RefreshAsync();
         return true;
     }
+
+    private ProjectNode? Shareable(string projectId) =>
+        workspace.FindProject(projectId) is { Binding: not null, IsShared: false, ManifestError: null, Project.Project.IsLibrary: false } node ? node : null;
+
+    private ProjectNode? Applicable(string projectId) =>
+        workspace.FindProject(projectId) is { Binding: not null, ManifestPath: not null, ManifestChange: not null } node ? node : null;
 
     private async Task<T?> TryAsync<T>(OperationResult<T> result, string failure)
         where T : class
