@@ -67,6 +67,8 @@ public class ManifestValidatorTests
     [InlineData("")]
     [InlineData("  ")]
     [InlineData("orders:api")]
+    [InlineData("global")]
+    [InlineData("Global")]
     public void InvalidService_IsError(string service)
     {
         var error = Assert.Single(ManifestValidator.Validate(Valid() with { Service = service }));
@@ -129,6 +131,44 @@ public class ManifestValidatorTests
         var manifest = Valid() with { Vaults = new Dictionary<string, Uri> { [" "] = new("https://kv.vault.azure.net/") } };
 
         Assert.StartsWith("vaults", Assert.Single(ManifestValidator.Validate(manifest)).Field, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VaultEnvironmentsDifferingByCase_IsError()
+    {
+        var manifest = Valid() with
+        {
+            Vaults = new Dictionary<string, Uri>
+            {
+                ["dev"] = new("https://a.vault.azure.net/"),
+                ["Dev"] = new("https://b.vault.azure.net/"),
+            },
+        };
+
+        var error = Assert.Single(ManifestValidator.Validate(manifest));
+
+        Assert.Equal(ManifestErrorKind.Schema, error.Kind);
+    }
+
+    [Fact]
+    public void Equality_ComparesVaultsByContent()
+    {
+        var a = Valid() with
+        {
+            Vaults = new Dictionary<string, Uri> { ["dev"] = new("https://a.vault.azure.net/"), ["prod"] = new("https://p.vault.azure.net/") },
+        };
+        var b = Valid() with
+        {
+            Vaults = new Dictionary<string, Uri> { ["prod"] = new("https://p.vault.azure.net/"), ["dev"] = new("https://a.vault.azure.net/") },
+        };
+
+        Assert.Equal(a, b);
+        Assert.Equal(a.GetHashCode(), b.GetHashCode());
+        Assert.NotEqual(a, b with { Vaults = new Dictionary<string, Uri> { ["dev"] = new("https://a.vault.azure.net/") } });
+        Assert.NotEqual(a, b with { Vaults = new Dictionary<string, Uri> { ["dev"] = new("https://x.vault.azure.net/"), ["prod"] = new("https://p.vault.azure.net/") } });
+        Assert.NotEqual(a, a with { Vaults = null });
+        Assert.Equal(a with { Vaults = null }, b with { Vaults = null });
+        Assert.NotEqual(a, a with { Service = "billing-api" });
     }
 
     [Fact]

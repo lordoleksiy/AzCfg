@@ -251,6 +251,122 @@ public class ManifestSerializerTests
         Assert.Contains(ex.Errors, e => e.Field == "secrets.project");
     }
 
+    private static string WithVaults(string vaults) => $$"""
+        {
+          "schemaVersion": 1,
+          "service": "orders-api",
+          "values":  { "target": "appsettings-local", "project": "a.csproj" },
+          "secrets": { "target": "user-secrets", "project": "a.csproj" },
+          "vaults":  {{vaults}}
+        }
+        """;
+
+    [Fact]
+    public void RoundTrip_ManifestsAreEqual()
+    {
+        var original = Manifest(new Dictionary<string, Uri> { ["dev"] = new("https://orders-dev-kv.vault.azure.net/") });
+
+        Assert.Equal(original, ManifestSerializer.Deserialize(ManifestSerializer.Serialize(original)));
+    }
+
+    [Fact]
+    public void Deserialize_VaultsAreReadOnly()
+    {
+        var manifest = ManifestSerializer.Deserialize(WithVaults("{ \"dev\": \"https://kv.vault.azure.net/\" }"));
+
+        Assert.IsNotType<Dictionary<string, Uri>>(manifest.Vaults);
+        var asDictionary = manifest.Vaults as IDictionary<string, Uri>;
+        Assert.True(asDictionary is null || asDictionary.IsReadOnly);
+    }
+
+    [Fact]
+    public void Deserialize_NullVaults_IsAbsent()
+    {
+        Assert.Null(ManifestSerializer.Deserialize(WithVaults("null")).Vaults);
+    }
+
+    [Fact]
+    public void Deserialize_RelativeVaultUri_IsSchemaError()
+    {
+        var ex = Assert.Throws<ManifestException>(() => ManifestSerializer.Deserialize(WithVaults("{ \"dev\": \"kv/dev\" }")));
+
+        Assert.Equal(ManifestErrorKind.Schema, ex.Kind);
+        Assert.Equal("vaults.dev", Assert.Single(ex.Errors).Field);
+    }
+
+    [Fact]
+    public void Deserialize_EmptyVaultEnvironment_IsSchemaError()
+    {
+        var ex = Assert.Throws<ManifestException>(() =>
+            ManifestSerializer.Deserialize(WithVaults("{ \"\": \"https://kv.vault.azure.net/\" }")));
+
+        Assert.Equal(ManifestErrorKind.Schema, ex.Kind);
+        Assert.Equal("vaults", Assert.Single(ex.Errors).Field);
+    }
+
+    [Fact]
+    public void Deserialize_VaultEnvironmentsDifferingByCase_IsSchemaError()
+    {
+        var ex = Assert.Throws<ManifestException>(() => ManifestSerializer.Deserialize(
+            WithVaults("{ \"dev\": \"https://a.vault.azure.net/\", \"Dev\": \"https://b.vault.azure.net/\" }")));
+
+        Assert.Equal(ManifestErrorKind.Schema, ex.Kind);
+        Assert.StartsWith("vaults", Assert.Single(ex.Errors).Field, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Deserialize_DuplicateNestedField_IsSchemaError()
+    {
+        const string json = """
+            {
+              "schemaVersion": 1,
+              "service": "orders-api",
+              "values":  { "target": "appsettings-local", "project": "a.csproj", "project": "b.csproj" },
+              "secrets": { "target": "user-secrets", "project": "a.csproj" }
+            }
+            """;
+
+        var ex = Assert.Throws<ManifestException>(() => ManifestSerializer.Deserialize(json));
+
+        Assert.Equal(ManifestErrorKind.Schema, ex.Kind);
+        Assert.Equal("values.project", Assert.Single(ex.Errors).Field);
+    }
+
+    [Theory]
+    [InlineData("\"azcfg\"")]
+    [InlineData("null")]
+    [InlineData("42")]
+    public void Deserialize_NonObjectRoot_IsSchemaError(string json)
+    {
+        var ex = Assert.Throws<ManifestException>(() => ManifestSerializer.Deserialize(json));
+
+        Assert.Equal(ManifestErrorKind.Schema, ex.Kind);
+        Assert.Null(Assert.Single(ex.Errors).Field);
+    }
+
+    [Theory]
+    [InlineData("99999999999")]
+    [InlineData("2")]
+    public void Deserialize_VersionBeyondSupported_IsUnsupportedVersion(string version)
+    {
+        var json = $$"""{ "schemaVersion": {{version}}, "service": "orders-api" }""";
+
+        var ex = Assert.Throws<ManifestException>(() => ManifestSerializer.Deserialize(json));
+
+        Assert.Equal(ManifestErrorKind.UnsupportedVersion, ex.Kind);
+        Assert.Contains(version, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Deserialize_FractionalVersion_IsSchemaError()
+    {
+        var ex = Assert.Throws<ManifestException>(() => ManifestSerializer.Deserialize(WithVaults("null").Replace(
+            "\"schemaVersion\": 1", "\"schemaVersion\": 1.5", StringComparison.Ordinal)));
+
+        Assert.Equal(ManifestErrorKind.Schema, ex.Kind);
+        Assert.Equal("schemaVersion", Assert.Single(ex.Errors).Field);
+    }
+
     [Fact]
     public void ManifestException_WithFilePath_KeepsErrorsAndNamesThePath()
     {

@@ -119,7 +119,8 @@ public static class ManifestSerializer
         // A newer version may add fields: report only the version, not the fields this azcfg does not know yet.
         if (root.TryGetProperty(SchemaVersionField, out var versionElement)
             && versionElement.ValueKind == JsonValueKind.Number
-            && versionElement.TryGetInt32(out var newer)
+            && versionElement.TryGetDecimal(out var newer)
+            && newer == decimal.Truncate(newer)
             && newer > ManifestValidator.SupportedSchemaVersion)
         {
             errors.Add(ManifestValidator.UnsupportedVersion(newer));
@@ -129,7 +130,7 @@ public static class ManifestSerializer
         int? version = null;
         string? service = null;
         ManifestTarget? values = null, secrets = null;
-        Dictionary<string, Uri>? vaults = null;
+        IReadOnlyDictionary<string, Uri>? vaults = null;
 
         foreach (var property in Properties(root, null, errors))
         {
@@ -196,7 +197,7 @@ public static class ManifestSerializer
         return target is null || project is null ? null : new ManifestTarget(target, project);
     }
 
-    private static Dictionary<string, Uri>? Vaults(JsonElement element, List<ManifestError> errors)
+    private static IReadOnlyDictionary<string, Uri>? Vaults(JsonElement element, List<ManifestError> errors)
     {
         if (element.ValueKind == JsonValueKind.Null)
         {
@@ -205,7 +206,7 @@ public static class ManifestSerializer
 
         if (element.ValueKind != JsonValueKind.Object)
         {
-            return Invalid<Dictionary<string, Uri>>(errors, VaultsField, "an object of environment → Key Vault URI");
+            return Invalid<IReadOnlyDictionary<string, Uri>>(errors, VaultsField, "an object of environment → Key Vault URI");
         }
 
         var vaults = new Dictionary<string, Uri>(StringComparer.Ordinal);
@@ -227,7 +228,7 @@ public static class ManifestSerializer
             }
         }
 
-        return vaults;
+        return vaults.AsReadOnly();
     }
 
     /// <summary>The object's properties, reporting duplicates (each is yielded once, the first occurrence).</summary>

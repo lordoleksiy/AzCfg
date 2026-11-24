@@ -13,6 +13,9 @@ public static class ManifestValidator
     /// <summary>The newest <c>schemaVersion</c> this azcfg reads and writes.</summary>
     public const int SupportedSchemaVersion = 1;
 
+    // KeyMapper's reserved global scope name (ADR 0004); a manifest is shared, so it is rejected regardless of the store.
+    private const string GlobalServiceName = "global";
+
     /// <summary>The <c>target</c> names a manifest may use (as in <c>config project.values|secrets</c>).</summary>
     public static IReadOnlyList<string> KnownTargets { get; } = [.. ProjectLookup.KindNames.Select(k => k.Name)];
 
@@ -39,11 +42,28 @@ public static class ManifestValidator
         {
             errors.Add(Schema("service", "'service' must not contain ':'."));
         }
+        else if (manifest.Service.Equals(GlobalServiceName, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add(Schema("service", $"'service' must not be '{GlobalServiceName}' (reserved for the global scope)."));
+        }
 
         ValidateTarget(errors, "values", manifest.Values);
         ValidateTarget(errors, "secrets", manifest.Secrets);
 
-        foreach (var (environment, uri) in manifest.Vaults ?? new Dictionary<string, Uri>())
+        var vaults = manifest.Vaults ?? new Dictionary<string, Uri>();
+
+        // Environment names are case-insensitive (EnvironmentRules): "dev" and "Dev" are the same environment.
+        foreach (var duplicate in vaults.Keys
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .GroupBy(k => k, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1))
+        {
+            errors.Add(Schema(
+                $"vaults.{duplicate.Key}",
+                $"'vaults' lists environment '{duplicate.Key}' more than once (names are case-insensitive)."));
+        }
+
+        foreach (var (environment, uri) in vaults)
         {
             if (string.IsNullOrWhiteSpace(environment))
             {
@@ -58,7 +78,7 @@ public static class ManifestValidator
         return errors;
     }
 
-    internal static ManifestError UnsupportedVersion(int version) => new(
+    internal static ManifestError UnsupportedVersion(decimal version) => new(
         ManifestErrorKind.UnsupportedVersion,
         "schemaVersion",
         $"'schemaVersion' {version} is newer than supported ({SupportedSchemaVersion}); update azcfg (dotnet tool update -g azcfg).");
