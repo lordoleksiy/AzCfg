@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Environments;
 using AzCfg.Core.Health;
+using AzCfg.Core.Manifest;
 using AzCfg.Core.Model;
 using AzCfg.Core.Security;
 using AzCfg.Core.Sync;
@@ -39,7 +40,9 @@ public sealed class HealthServiceTests
                 Probe,
                 all,
                 Detector,
-                new FakeAccessErrorClassifier());
+                new FakeAccessErrorClassifier(),
+                Tracked,
+                Manifests);
         }
 
         public FakeUserStateStore State { get; }
@@ -48,13 +51,18 @@ public sealed class HealthServiceTests
         public FakeConfigStore Config { get; }
         public ListDetector Detector { get; } = new([new("/repo", "/repo/Orders/Orders.csproj", "Orders", false, null)]);
         public FakeSecretStore KeyVault { get; } = new([]);
+        public FakeTrackedSettingsReader Tracked { get; } = new();
+        public FakeProjectManifestStore Manifests { get; } = new();
         public FakeAzureAccountProbe Probe { get; } = new();
         public HealthService Service { get; }
 
         public Task<HealthReport> CheckAsync() => Service.CheckAsync("/repo", Ct);
 
         public HealthService With(IConfigStore store) =>
-            new(State, new SeparateStoresResolver(), store, Sync, KeyVault, Probe, [], Detector, new FakeAccessErrorClassifier());
+            new(State, new SeparateStoresResolver(), store, Sync, KeyVault, Probe, [], Detector, new FakeAccessErrorClassifier(), Tracked, Manifests);
+
+        public HealthService With(IProjectManifestStore manifests) =>
+            new(State, new SeparateStoresResolver(), Config, Sync, KeyVault, Probe, [new FakeLocalTarget(LocalTargetKind.UserSecrets), new FakeLocalTarget(LocalTargetKind.AppSettingsLocal)], Detector, new FakeAccessErrorClassifier(), Tracked, manifests);
     }
 
     private sealed class ListDetector(List<ProjectInfo> projects) : IProjectDetector
@@ -553,6 +561,214 @@ public sealed class HealthServiceTests
         var service = new Rig(Binding).With(new CancellingStore());
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckEnvironmentAsync(Env("dev"), "orders", cts.Token));
+    }
+
+    [Theory]
+    [InlineData("Db:Password")]
+    [InlineData("Auth:ClientSecret")]
+    [InlineData("Github:TOKEN")]
+    [InlineData("Maps:ApiKey")]
+    [InlineData("ConnectionStrings:Default")]
+    [InlineData("ApiKeys:0")]
+    [InlineData("Secrets:Github")]
+    [InlineData("Tokens:Admin")]
+    [InlineData("Secrets:Path")]
+    public async Task CheckAsync_SecretLikeKeyWithValueInTrackedFile_Warns(string key)
+    {
+        var rig = new Rig(Binding);
+        rig.Tracked.Keys.Add(new("Orders/appsettings.json", key, true));
+
+        var report = await rig.CheckAsync();
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(HealthCheckKind.SecretLikeKeyInTrackedFile, finding.Kind);
+        Assert.Equal(HealthSeverity.Warning, finding.Severity);
+        Assert.Contains("Orders/appsettings.json", finding.Message);
+        Assert.Contains(key, finding.Message);
+        Assert.Contains("user-secrets", finding.Message);
+        Assert.False(report.HasErrors);
+    }
+
+    [Theory]
+    [InlineData("Auth:Token:Issuer")]
+    [InlineData("Logging:LogLevel:Default")]
+    [InlineData("Hosts:0")]
+    public async Task CheckAsync_SecretWordOnlyInParentSegment_NoFinding(string key)
+    {
+        var rig = new Rig(Binding);
+        rig.Tracked.Keys.Add(new("appsettings.json", key, true));
+
+        var report = await rig.CheckAsync();
+
+        Assert.Empty(report.Findings);
+    }
+
+    [Fact]
+    public async Task CheckAsync_SecretLikeKeyWithoutValueOrPlainKey_NoFinding()
+    {
+        var rig = new Rig(Binding);
+        rig.Tracked.Keys.AddRange([
+            new("appsettings.json", "Db:Password", false),
+            new("appsettings.json", "Identity:PasswordRequireDigit", false), // a bool: the reader reports no value
+            new("appsettings.json", "Logging:LogLevel:Default", true)]);
+
+        var report = await rig.CheckAsync();
+
+        Assert.Empty(report.Findings);
+    }
+
+    [Fact]
+    public async Task CheckAsync_NotSignedIn_StillChecksTrackedFiles()
+    {
+        var rig = new Rig(null);
+        rig.Probe.Result = new(false, null, "No credential");
+        rig.Tracked.Keys.Add(new("appsettings.Development.json", "Api:Token", true));
+
+        var report = await rig.CheckAsync();
+
+        Assert.Contains(report.Findings, f => f.Kind == HealthCheckKind.SecretLikeKeyInTrackedFile);
+    }
+
+    [Fact]
+    public async Task CheckAsync_TrackedReaderFails_NoFindingAndNoLeak()
+    {
+        var rig = new Rig(Binding);
+        rig.Tracked.Throws = true;
+
+        var report = await rig.CheckAsync();
+
+        Assert.Empty(report.Findings);
+        Assert.DoesNotContain("CANARY", Json(report));
+    }
+
+    private const string ManifestPath = "/repo/azcfg.json";
+
+    private static string ManifestJson(string schemaVersion = "1", string extra = "") => $$"""
+        {
+          "schemaVersion": {{schemaVersion}},
+          "service": "orders",
+          "values":  { "target": "appsettings-local", "project": "Orders/Orders.csproj"{{extra}} },
+          "secrets": { "target": "user-secrets", "project": "Orders/Orders.csproj" }
+        }
+        """;
+
+    private static ManifestException Rejected(string json) =>
+        Assert.Throws<ManifestException>(() => ManifestSerializer.Deserialize(json)).WithFilePath(ManifestPath);
+
+    [Theory]
+    [InlineData("{ \"schemaVersion\": 1, ", "is unreadable", null)]
+    [InlineData("SCHEMA", "does not match the schema", null)]
+    [InlineData("VERSION", "needs a newer azcfg", "dotnet tool update --global AzCfg")]
+    public async Task CheckAsync_InvalidManifest_ReportsErrorPerKind(string json, string wording, string? fix)
+    {
+        var rig = new Rig(Binding);
+        rig.Manifests.FindError = Rejected(json switch
+        {
+            "SCHEMA" => "{ \"schemaVersion\": 1 }",
+            "VERSION" => ManifestJson("99"),
+            _ => json,
+        });
+
+        var report = await rig.CheckAsync();
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(HealthCheckKind.ManifestInvalid, finding.Kind);
+        Assert.Equal(HealthSeverity.Error, finding.Severity);
+        Assert.Contains(ManifestPath, finding.Message);
+        Assert.Contains(wording, finding.Message);
+        Assert.Equal(fix, finding.Fix);
+        Assert.True(report.HasErrors);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ValidOrAbsentManifest_NoFinding()
+    {
+        var absent = await new Rig(Binding).CheckAsync();
+        var rig = new Rig(Binding);
+        rig.Manifests.Files[ManifestPath] = ManifestSerializer.Deserialize(ManifestJson());
+
+        var valid = await rig.CheckAsync();
+
+        Assert.Empty(absent.Findings);
+        Assert.Empty(valid.Findings);
+    }
+
+    [Fact]
+    public async Task CheckAsync_NotSignedIn_StillChecksManifest()
+    {
+        var rig = new Rig(null);
+        rig.Probe.Result = new(false, null, "No credential");
+        rig.Manifests.FindError = Rejected("not json");
+
+        var report = await rig.CheckAsync();
+
+        Assert.Contains(report.Findings, f => f.Kind == HealthCheckKind.ManifestInvalid);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ManifestRejectedValueField_CanaryNotInReport()
+    {
+        const string canary = "AZCFG-CANARY-manifest-s3cret";
+        var rig = new Rig(Binding);
+        rig.Manifests.FindError = Rejected(ManifestJson(extra: $", \"value\": \"{canary}\""));
+
+        var report = await rig.CheckAsync();
+
+        Assert.Contains(report.Findings, f => f.Kind == HealthCheckKind.ManifestInvalid);
+        Assert.DoesNotContain(canary, Json(report));
+    }
+
+    [Fact]
+    public async Task CheckAsync_FromRepoRoot_FindsInvalidManifestOfBoundProject()
+    {
+        const string nested = "/repo/Orders/azcfg.json";
+        var store = new RuleManifestStore(path => path.Contains("Orders", StringComparison.Ordinal) ? Rejected("not json").WithFilePath(nested) : null);
+
+        var report = await new Rig(Binding).With(store).CheckAsync("/repo", Ct);
+
+        Assert.Contains("/repo", store.Calls);
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(HealthCheckKind.ManifestInvalid, finding.Kind);
+        Assert.Contains(nested, finding.Message);
+    }
+
+    [Fact]
+    public async Task CheckAsync_SameInvalidManifestFromSeveralPaths_ReportedOnce()
+    {
+        var store = new RuleManifestStore(_ => Rejected("not json"));
+
+        var report = await new Rig(Binding).With(store).CheckAsync("/repo", Ct);
+
+        Assert.True(store.Calls.Count >= 2);
+        Assert.Single(report.Findings, f => f.Kind == HealthCheckKind.ManifestInvalid);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ManifestStoreFails_WarnsSkippedWithTypeOnly()
+    {
+        var store = new RuleManifestStore(_ => throw new IOException("boom, value=CANARY"));
+
+        var report = await new Rig(Binding).With(store).CheckAsync("/repo", Ct);
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(HealthCheckKind.ManifestInvalid, finding.Kind);
+        Assert.Equal(HealthSeverity.Warning, finding.Severity);
+        Assert.Contains(nameof(IOException), finding.Message);
+        Assert.DoesNotContain("CANARY", Json(report));
+    }
+
+    /// <summary>Throws the exception <paramref name="rule"/> returns for a path (or what it throws); otherwise no manifest.</summary>
+    private sealed class RuleManifestStore(Func<string, ManifestException?> rule) : IProjectManifestStore
+    {
+        public List<string> Calls { get; } = [];
+
+        public Task<ManifestLocation?> FindAsync(string path, CancellationToken ct)
+        {
+            Calls.Add(path);
+            return rule(path) is { } error ? throw error : Task.FromResult<ManifestLocation?>(null);
+        }
+
+        public Task SaveAsync(string filePath, ProjectManifest manifest, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private sealed class CancellingStore : IConfigStore

@@ -10,8 +10,8 @@ public static class InMemoryServiceCollectionExtensions
 {
     /// <summary>
     /// Call after <c>AddAzCfg()</c>: replaces <see cref="IConfigStore"/>, <see cref="ISecretStore"/>, <see cref="IUserStateStore"/>,
-    /// <see cref="IProjectManifestStore"/>,
-    /// <see cref="IResourceDiscovery"/> and <see cref="TokenCredential"/> with the <paramref name="world"/>'s instances,
+    /// <see cref="IProjectManifestStore"/>, <see cref="IResourceDiscovery"/>, <see cref="ITrackedSettingsReader"/> and
+    /// <see cref="TokenCredential"/> with the <paramref name="world"/>'s instances,
     /// <see cref="IProjectDetector"/> when <see cref="InMemoryWorld.Detector"/> is set, and the <see cref="UserSecretsTarget"/>
     /// registration of <see cref="ILocalTarget"/> (in place, keeping the order) with <see cref="InMemoryWorld.UserSecrets"/>;
     /// <see cref="AppSettingsLocalTarget"/> stays real. Throws <see cref="InvalidOperationException"/> when no
@@ -25,6 +25,7 @@ public static class InMemoryServiceCollectionExtensions
         services.Replace(ServiceDescriptor.Singleton<IProjectManifestStore>(world.Manifests));
         services.Replace(ServiceDescriptor.Singleton<IResourceDiscovery>(world.Discovery));
         services.Replace(ServiceDescriptor.Singleton<TokenCredential>(world.Credential));
+        services.Replace(ServiceDescriptor.Singleton<ITrackedSettingsReader>(world.TrackedSettings));
         if (world.Detector is { } detector)
         {
             services.Replace(ServiceDescriptor.Singleton<IProjectDetector>(detector));

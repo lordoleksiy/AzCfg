@@ -81,6 +81,8 @@ public sealed class ScenarioHost
             .AddSingleton<IAzureAccountProbe>(Account)
             .AddSingleton<ISyncService, SyncService>()
             .AddSingleton<IAccessErrorClassifier, AzureAccessErrorClassifier>()
+            .AddSingleton<ITrackedSettingsReader>(new FixedTrackedSettingsReader())
+            .AddSingleton<IProjectManifestStore>(new InMemoryProjectManifestStore())
             .AddSingleton<IHealthService, HealthService>();
 
         var app = new CommandApp(new TypeRegistrar(services));
