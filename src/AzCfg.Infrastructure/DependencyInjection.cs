@@ -5,6 +5,7 @@ using AzCfg.Core.Security;
 using AzCfg.Core.UseCases;
 using AzCfg.Infrastructure.Azure;
 using AzCfg.Infrastructure.Local;
+using AzCfg.Infrastructure.Project;
 using AzCfg.Infrastructure.State;
 using Azure.Core;
 using Azure.Identity;
@@ -24,6 +25,7 @@ public static class DependencyInjection
         services.AddSingleton<ILocalTarget, AppSettingsLocalTarget>();
         services.AddSingleton<ILocalTarget, LocalSettingsTarget>();
         services.AddSingleton<IUserStateStore>(_ => new JsonUserStateStore(JsonUserStateStore.DefaultRoot));
+        services.AddSingleton<IProjectManifestStore, FileProjectManifestStore>();
         services.AddSingleton<ISecretStore>(sp =>
         {
             var credential = sp.GetRequiredService<TokenCredential>();

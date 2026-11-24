@@ -1,6 +1,7 @@
 using AzCfg.Core.Abstractions;
 using AzCfg.Infrastructure.InMemory;
 using AzCfg.Infrastructure.Local;
+using AzCfg.Infrastructure.Project;
 using Azure.Core;
 using Azure.Identity;
 using Azure.ResourceManager;
@@ -35,6 +36,10 @@ public sealed class DependencyInjectionTests
     [Fact]
     public void AddAzCfg_RegistersWorkspaceScanner() =>
         Assert.Contains(new ServiceCollection().AddAzCfg(), d => d.ServiceType == typeof(IWorkspaceScanner) && d.ImplementationType == typeof(WorkspaceScanner));
+
+    [Fact]
+    public void AddAzCfg_RegistersFileProjectManifestStore() =>
+        Assert.Contains(new ServiceCollection().AddAzCfg(), d => d.ServiceType == typeof(IProjectManifestStore) && d.ImplementationType == typeof(FileProjectManifestStore));
 
     [Fact]
     public void AddAzCfgInMemory_StillReplacesCredential()

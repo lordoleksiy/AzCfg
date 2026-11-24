@@ -26,6 +26,7 @@ public sealed class InMemoryCompositionTests
         Assert.Same(_world.AppConfig, provider.GetService(typeof(IConfigStore)));
         Assert.Same(_world.Secrets, provider.GetService(typeof(ISecretStore)));
         Assert.Same(_world.State, provider.GetService(typeof(IUserStateStore)));
+        Assert.Same(_world.Manifests, provider.GetService(typeof(IProjectManifestStore)));
         Assert.Same(_world.Discovery, provider.GetService(typeof(IResourceDiscovery)));
         Assert.Same(_world.Credential, provider.GetService(typeof(TokenCredential)));
         Assert.Same(_world.TrackedSettings, provider.GetService(typeof(ITrackedSettingsReader)));
