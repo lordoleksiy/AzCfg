@@ -39,7 +39,8 @@ public sealed class HealthServiceTests
                 Probe,
                 all,
                 Detector,
-                new FakeAccessErrorClassifier());
+                new FakeAccessErrorClassifier(),
+                Tracked);
         }
 
         public FakeUserStateStore State { get; }
@@ -48,13 +49,14 @@ public sealed class HealthServiceTests
         public FakeConfigStore Config { get; }
         public ListDetector Detector { get; } = new([new("/repo", "/repo/Orders/Orders.csproj", "Orders", false, null)]);
         public FakeSecretStore KeyVault { get; } = new([]);
+        public FakeTrackedSettingsReader Tracked { get; } = new();
         public FakeAzureAccountProbe Probe { get; } = new();
         public HealthService Service { get; }
 
         public Task<HealthReport> CheckAsync() => Service.CheckAsync("/repo", Ct);
 
         public HealthService With(IConfigStore store) =>
-            new(State, new SeparateStoresResolver(), store, Sync, KeyVault, Probe, [], Detector, new FakeAccessErrorClassifier());
+            new(State, new SeparateStoresResolver(), store, Sync, KeyVault, Probe, [], Detector, new FakeAccessErrorClassifier(), Tracked);
     }
 
     private sealed class ListDetector(List<ProjectInfo> projects) : IProjectDetector
@@ -553,6 +555,63 @@ public sealed class HealthServiceTests
         var service = new Rig(Binding).With(new CancellingStore());
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CheckEnvironmentAsync(Env("dev"), "orders", cts.Token));
+    }
+
+    [Theory]
+    [InlineData("Db:Password")]
+    [InlineData("Auth:ClientSecret")]
+    [InlineData("Github:TOKEN")]
+    [InlineData("Maps:ApiKey")]
+    [InlineData("ConnectionStrings:Default")]
+    public async Task CheckAsync_SecretLikeKeyWithValueInTrackedFile_Warns(string key)
+    {
+        var rig = new Rig(Binding);
+        rig.Tracked.Keys.Add(new("Orders/appsettings.json", key, true));
+
+        var report = await rig.CheckAsync();
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(HealthCheckKind.SecretLikeKeyInTrackedFile, finding.Kind);
+        Assert.Equal(HealthSeverity.Warning, finding.Severity);
+        Assert.Contains("Orders/appsettings.json", finding.Message);
+        Assert.Contains(key, finding.Message);
+        Assert.Contains("user-secrets", finding.Message);
+        Assert.False(report.HasErrors);
+    }
+
+    [Fact]
+    public async Task CheckAsync_SecretLikeKeyWithoutValueOrPlainKey_NoFinding()
+    {
+        var rig = new Rig(Binding);
+        rig.Tracked.Keys.AddRange([new("appsettings.json", "Db:Password", false), new("appsettings.json", "Logging:LogLevel:Default", true)]);
+
+        var report = await rig.CheckAsync();
+
+        Assert.Empty(report.Findings);
+    }
+
+    [Fact]
+    public async Task CheckAsync_NotSignedIn_StillChecksTrackedFiles()
+    {
+        var rig = new Rig(null);
+        rig.Probe.Result = new(false, null, "No credential");
+        rig.Tracked.Keys.Add(new("appsettings.Development.json", "Api:Token", true));
+
+        var report = await rig.CheckAsync();
+
+        Assert.Contains(report.Findings, f => f.Kind == HealthCheckKind.SecretLikeKeyInTrackedFile);
+    }
+
+    [Fact]
+    public async Task CheckAsync_TrackedReaderFails_NoFindingAndNoLeak()
+    {
+        var rig = new Rig(Binding);
+        rig.Tracked.Throws = true;
+
+        var report = await rig.CheckAsync();
+
+        Assert.Empty(report.Findings);
+        Assert.DoesNotContain("CANARY", Json(report));
     }
 
     private sealed class CancellingStore : IConfigStore

@@ -21,9 +21,11 @@ public sealed class HealthService(
     IEnumerable<ILocalTarget> targets,
     IProjectDetector detector,
     IAccessErrorClassifier classifier,
+    ITrackedSettingsReader trackedSettings,
     ILogger<HealthService>? logger = null) : IHealthService
 {
     private const string GitIgnoreFix = "azcfg config set gitignoreLocalFiles true";
+    private static readonly string[] SecretLikeMarkers = ["password", "secret", "token", "apikey", "connectionstring"];
     private readonly ILogger _log = logger ?? NullLogger<HealthService>.Instance;
 
     public async Task<HealthReport> CheckAsync(string repoPath, CancellationToken ct)
@@ -44,6 +46,7 @@ public sealed class HealthService(
                 await CheckTargetProjectsAsync(binding, findings, ct);
             }
 
+            await CheckTrackedSettingsAsync(repoPath, findings, ct);
             return new(who, [.. environments.Select(e => new EnvironmentCheck(e.Name, EnvironmentAccess.AuthRequired, "Not signed in to Azure."))], findings);
         }
 
@@ -66,8 +69,33 @@ public sealed class HealthService(
             await CheckBindingAsync(binding, environments, reachable, findings, ct);
         }
 
+        await CheckTrackedSettingsAsync(repoPath, findings, ct);
         return new(who, checks, findings);
     }
+
+    /// <summary>
+    /// A git-tracked <c>appsettings*.json</c> with a value under a key whose path contains a secret-like word (ADR 0012, health).
+    /// The reader never returns values; the finding names the file and the key only.
+    /// </summary>
+    private async Task CheckTrackedSettingsAsync(string repoPath, List<HealthFinding> findings, CancellationToken ct)
+    {
+        try
+        {
+            var keys = await trackedSettings.ReadKeysAsync(repoPath, ct);
+            foreach (var key in keys.Where(k => k.HasValue && IsSecretLike(k.Key)))
+            {
+                findings.Add(new(
+                    HealthCheckKind.SecretLikeKeyInTrackedFile,
+                    HealthSeverity.Warning,
+                    $"'{key.File}' is tracked by git and has a value under secret-like key '{key.Key}'. Move it to user-secrets or Key Vault."));
+            }
+        }
+        catch (Exception ex) when (Handled(ex, ct, "tracked settings"))
+        {
+        }
+    }
+
+    private static bool IsSecretLike(string key) => SecretLikeMarkers.Any(m => key.Contains(m, StringComparison.OrdinalIgnoreCase));
 
     private async Task<AzureAccountCheck> ProbeAccountAsync(CancellationToken ct)
     {

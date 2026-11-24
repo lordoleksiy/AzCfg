@@ -11,4 +11,7 @@ public enum HealthCheckKind
     SecretNotVerified,
     KeyMissingInEnvironments,
     BindingMismatch,
+
+    /// <summary>A git-tracked <c>appsettings*.json</c> has a value under a secret-like key (ADR 0012, health).</summary>
+    SecretLikeKeyInTrackedFile,
 }
