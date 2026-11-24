@@ -12,6 +12,8 @@ public sealed class InMemoryWorld
 
     public InMemoryUserStateStore State { get; } = new();
 
+    public InMemoryProjectManifestStore Manifests { get; } = new();
+
     public InMemoryLocalTarget UserSecrets { get; } = new();
 
     public FixedResourceDiscovery Discovery { get; } = new();
