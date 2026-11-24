@@ -1,3 +1,4 @@
+using AzCfg.Core.Abstractions;
 using AzCfg.Core.Manifest;
 using AzCfg.Core.Model;
 
@@ -60,31 +61,55 @@ internal static class ManifestBinding
     public static string FolderOf(string manifestPath) => Path.GetDirectoryName(Path.GetFullPath(manifestPath))!;
 
     /// <summary>
-    /// <c>true</c> when the manifest describes the project at <paramref name="projectPath"/>: the folder of one of its targets (the
-    /// <c>.csproj</c>'s folder, or the named folder) is <paramref name="projectPath"/>, lies inside it, or contains it. A manifest found
-    /// upward that names another project (e.g. a monorepo root manifest of service A, resolved from <c>services/B</c>) does not apply.
+    /// <c>true</c> when the manifest describes the project at <paramref name="projectPath"/> (a folder, or a <c>.csproj</c>: its folder).
+    /// For one of its targets, with T = the target's project folder (the <c>.csproj</c>'s folder, or the named folder): T is the
+    /// project folder; or T lies inside it (resolving from a repository root); or the project folder lies inside T and no other
+    /// <c>.csproj</c> sits between them (a subfolder of the target project, not a nested project such as <c>Orders/tests/Orders.Tests</c>).
+    /// A manifest found upward that names another project (e.g. a monorepo root manifest of service A, resolved from <c>services/B</c>)
+    /// does not apply.
     /// </summary>
-    public static bool AppliesTo(ManifestLocation location, string projectPath)
+    public static async Task<bool> AppliesToAsync(ManifestLocation location, string projectPath, IProjectDetector detector, CancellationToken ct)
     {
         var folder = FolderOf(location.FilePath);
-        var project = Path.GetFullPath(projectPath);
+        var project = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath));
         if (project.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
         {
             project = Path.GetDirectoryName(project)!;
         }
 
-        return new[] { location.Manifest.Values, location.Manifest.Secrets }.Any(target =>
+        foreach (var target in new[] { location.Manifest.Values, location.Manifest.Secrets })
         {
-            var full = ProjectLookup.Full(folder, target.Project);
+            var full = Path.TrimEndingDirectorySeparator(ProjectLookup.Full(folder, target.Project));
             var targetFolder = full.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ? Path.GetDirectoryName(full)! : full;
-            return IsSameOrUnder(targetFolder, project) || IsSameOrUnder(project, targetFolder);
-        });
+            if (IsSameOrUnder(targetFolder, project))
+            {
+                return true;
+            }
+
+            if (IsSameOrUnder(project, targetFolder))
+            {
+                // A project of its own between the target folder (exclusive) and the project folder (inclusive) makes it another project.
+                var nested = (await detector.DetectAsync(targetFolder, ct))
+                    .Select(p => Path.GetDirectoryName(Path.GetFullPath(p.CsprojPath))!)
+                    .Any(f => !ProjectLookup.SamePath(f, targetFolder) && IsSameOrUnder(f, targetFolder) && IsSameOrUnder(project, f));
+                if (!nested)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
+    /// <summary><paramref name="path"/> is <paramref name="folder"/> or inside it (file-system case rules; another drive is never inside).</summary>
     private static bool IsSameOrUnder(string path, string folder)
     {
         var relative = Path.GetRelativePath(folder, path);
-        return relative == "." || (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-            && !relative.StartsWith("../", StringComparison.Ordinal));
+        return relative == "."
+            || (!Path.IsPathRooted(relative)
+                && relative != ".."
+                && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && !relative.StartsWith("../", StringComparison.Ordinal));
     }
 }

@@ -33,7 +33,7 @@ public sealed class ProjectService(
     public async Task<ProjectResolution> ResolveAsync(string repoPath, CancellationToken ct)
     {
         var manifest = await manifests.FindAsync(repoPath, ct);
-        if (manifest is not null && !ManifestBinding.AppliesTo(manifest, repoPath))
+        if (manifest is not null && !await ManifestBinding.AppliesToAsync(manifest, repoPath, detector, ct))
         {
             manifest = null; // a manifest of another project (e.g. a monorepo root one) is ignored here
         }
