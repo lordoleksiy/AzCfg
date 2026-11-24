@@ -39,6 +39,35 @@ public sealed class InMemoryProjectManifestStoreTests
     }
 
     [Fact]
+    public async Task FindAsync_TrailingSeparatorAndRelativeSegments_MatchLikeTheFileSystem()
+    {
+        await _store.SaveAsync(Path.Combine(Repo, "Api", "..", "azcfg.json"), Manifest(), CancellationToken.None);
+
+        var found = await _store.FindAsync(Path.Combine(Repo, "Api") + Path.DirectorySeparatorChar, CancellationToken.None);
+
+        Assert.Equal(Path.Combine(Repo, "azcfg.json"), found!.FilePath);
+    }
+
+    [Fact]
+    public async Task GitRoots_WithTrailingSeparator_StillStopTheSearch()
+    {
+        await _store.SaveAsync(Path.Combine(Path.GetDirectoryName(Repo)!, "azcfg.json"), Manifest(), CancellationToken.None);
+        _store.GitRoots.Add(Repo + Path.DirectorySeparatorChar);
+
+        Assert.Null(await _store.FindAsync(Path.Combine(Repo, "Api"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Paths_CaseSensitivity_FollowsThePlatform()
+    {
+        await _store.SaveAsync(Path.Combine(Repo, "azcfg.json"), Manifest(), CancellationToken.None);
+
+        var found = await _store.FindAsync(Repo.ToUpperInvariant(), CancellationToken.None);
+
+        Assert.Equal(OperatingSystem.IsWindows(), found is not null);
+    }
+
+    [Fact]
     public async Task FindAsync_CorruptedJson_ThrowsWithPath()
     {
         var file = Path.Combine(Repo, "azcfg.json");

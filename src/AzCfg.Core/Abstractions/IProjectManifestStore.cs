@@ -13,10 +13,17 @@ public interface IProjectManifestStore
     /// folder) upwards, stopping at the git root (the folder that contains <c>.git</c>); without a git root the search goes
     /// up to the filesystem root. <c>null</c> when there is none.
     /// </summary>
-    /// <exception cref="ManifestException">The nearest file is unreadable or invalid; <see cref="ManifestException.FilePath"/> is set.</exception>
+    /// <exception cref="ManifestException">
+    /// The nearest file cannot be read (I/O or access error, invalid JSON: <see cref="ManifestErrorKind.Unreadable"/>) or is
+    /// invalid; <see cref="ManifestException.FilePath"/> is set.
+    /// </exception>
     Task<ManifestLocation?> FindAsync(string path, CancellationToken ct);
 
     /// <summary>Validates and writes <paramref name="manifest"/> to <paramref name="filePath"/>, replacing it atomically.</summary>
     /// <exception cref="ManifestException">The manifest is invalid; <see cref="ManifestException.FilePath"/> is set.</exception>
+    /// <exception cref="IOException">
+    /// The file cannot be written (I/O or access error); the message names the <c>azcfg.json</c> path and the original
+    /// exception is the inner one. No temp file is left behind.
+    /// </exception>
     Task SaveAsync(string filePath, ProjectManifest manifest, CancellationToken ct);
 }

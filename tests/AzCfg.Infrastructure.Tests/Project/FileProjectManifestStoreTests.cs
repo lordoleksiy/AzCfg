@@ -95,8 +95,54 @@ public sealed class FileProjectManifestStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task FindAsync_NoManifest_ReturnsNull() =>
+    public async Task FindAsync_NoManifest_ReturnsNull()
+    {
+        // The git marker bounds the search to the temp repo, so no azcfg.json in a %TEMP% ancestor can leak in.
+        Assert.True(Directory.Exists(Path.Combine(_repo, ".git")));
+
         Assert.Null(await _store.FindAsync(Folder("src"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task FindAsync_TrailingSeparator_FindsManifestInThatFolder()
+    {
+        var file = Path.Combine(_repo, "azcfg.json");
+        await _store.SaveAsync(file, Manifest(), CancellationToken.None);
+
+        var found = await _store.FindAsync(_repo + Path.DirectorySeparatorChar, CancellationToken.None);
+
+        Assert.Equal(file, found!.FilePath);
+    }
+
+    [Fact]
+    public async Task FindAsync_LockedFile_ThrowsUnreadableWithPath()
+    {
+        var file = Path.Combine(_repo, "azcfg.json");
+        await _store.SaveAsync(file, Manifest(), CancellationToken.None);
+
+        ManifestException e;
+        using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            e = await Assert.ThrowsAsync<ManifestException>(() => _store.FindAsync(_repo, CancellationToken.None));
+        }
+
+        Assert.Equal(ManifestErrorKind.Unreadable, e.Kind);
+        Assert.Equal(file, e.FilePath);
+        Assert.IsType<IOException>(e.InnerException, exactMatch: false);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WriteFails_ThrowsIOExceptionWithPathAndLeavesNoTempFile()
+    {
+        var file = Path.Combine(_repo, "azcfg.json");
+        Directory.CreateDirectory(file); // a folder in the way: the final move fails
+
+        var e = await Assert.ThrowsAnyAsync<IOException>(() => _store.SaveAsync(file, Manifest(), CancellationToken.None));
+
+        Assert.Contains(file, e.Message, StringComparison.Ordinal);
+        Assert.NotNull(e.InnerException);
+        Assert.Empty(Directory.GetFiles(_repo, "*.tmp"));
+    }
 
     [Fact]
     public async Task SaveAsync_ThenFind_RoundTrips()
