@@ -24,4 +24,6 @@ internal sealed class FakeWorkspaceService : IWorkspaceService
     public Task<ProjectBinding> AddIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) => throw new NotSupportedException();
 
     public Task<ProjectBinding> RemoveIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) => throw new NotSupportedException();
+
+    public Task<string> ShareAsync(ProjectNode project, CancellationToken ct) => throw new NotSupportedException();
 }

@@ -67,4 +67,27 @@ internal sealed class FakeWorkspaceService : IWorkspaceService
     public Task<ProjectBinding> AddIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) => throw new NotSupportedException();
 
     public Task<ProjectBinding> RemoveIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) => throw new NotSupportedException();
+
+    public List<string> Shares { get; } = [];
+
+    public Exception? ShareFailure { get; set; }
+
+    /// <summary>Records the share; the next <see cref="OpenAsync"/> returns the project with the manifest path (as after a real share).</summary>
+    public Task<string> ShareAsync(ProjectNode project, CancellationToken ct)
+    {
+        if (ShareFailure is not null)
+        {
+            return Task.FromException<string>(ShareFailure);
+        }
+
+        Shares.Add(project.Id);
+        var path = Path.Combine(project.Binding!.RepoPath, "azcfg.json");
+        IReadOnlyList<ProjectNode> Mark(IReadOnlyList<ProjectNode> nodes) => [.. nodes.Select(n => n.Id == project.Id ? n with { ManifestPath = path } : n)];
+        Tree = Tree with
+        {
+            Solutions = [.. Tree.Solutions.Select(s => s with { Projects = Mark(s.Projects) })],
+            LooseProjects = Mark(Tree.LooseProjects),
+        };
+        return Task.FromResult(path);
+    }
 }

@@ -43,6 +43,11 @@
         <p class="az-bind-hint">Vaults and local ignore patterns are kept. A different service clears the active environment; existing local data is not moved.</p>
     }
 
+    @if (Proposal.Resolution.ManifestPath is { } manifest)
+    {
+        <p class="az-bind-shared" role="note">Shared via <code>@manifest</code>: a change of the service or targets is written to it for the whole team — commit it.</p>
+    }
+
     <div class="az-bind-actions">
         <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" OnClick="CancelAsync">Cancel</FluentButton>
         <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" Disabled="!CanSubmit" OnClick="SubmitAsync">@(IsRebind ? "Save binding" : "Bind")</FluentButton>

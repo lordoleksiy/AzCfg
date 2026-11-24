@@ -4,7 +4,10 @@ namespace AzCfg.Ui.Application.Workspace;
 
 public interface IWorkspaceService
 {
-    /// <summary>Scan + binding lookup (G4) + registry touch.</summary>
+    /// <summary>
+    /// Scan + binding lookup (G4) + registry touch. A project named by a shared <c>azcfg.json</c> opens bound from it (Core
+    /// <c>ResolveAsync</c>, no wizard) with <see cref="ProjectNode.ManifestPath"/>; a broken manifest sets <see cref="ProjectNode.ManifestError"/>.
+    /// </summary>
     Task<WorkspaceTree> OpenAsync(string rootPath, CancellationToken ct);
 
     /// <summary><c>IProjectService.ResolveAsync</c>(folder of the .csproj) + G19 for a bound project.</summary>
@@ -24,4 +27,10 @@ public interface IWorkspaceService
 
     /// <summary>Via <c>IProjectService.RemoveIgnoreAsync</c>.</summary>
     Task<ProjectBinding> RemoveIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct);
+
+    /// <summary>
+    /// Share with the team (FR-W7): Core <c>project.shared = true</c> writes <c>azcfg.json</c> (the binding's folder unless a manifest
+    /// already names this project); returns its path. Throws when the project is unbound or another project's manifest is in effect.
+    /// </summary>
+    Task<string> ShareAsync(ProjectNode project, CancellationToken ct);
 }
