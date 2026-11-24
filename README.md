@@ -182,9 +182,12 @@ environments and a binding that no longer matches reality. Each finding comes wi
 Secrets are checked by metadata only; their values are never read.
 
 Two more checks cover the team setup: **ManifestInvalid** (error) when `azcfg.json` is unreadable, breaks the schema or
-needs a newer azcfg, and **SecretLikeKeyInTrackedFile** (warning) when a git-tracked `appsettings*.json` has a value
-under a key that looks secret (`password`, `secret`, `token`, `apikey`, `connectionstring`, or a key under a section such
-as `Secrets`). The finding names the file and the key, never the value; the check is skipped outside git.
+needs a newer azcfg (if the check itself cannot run you get a warning that it was skipped), and
+**SecretLikeKeyInTrackedFile** (warning) when a git-tracked `appsettings*.json` has a non-empty string value under a
+secret-like key: the last non-numeric key segment contains `password`, `secret`, `token`, `apikey` or
+`connectionstring` (so `Auth:Token:Issuer` does not count), or the key sits under a section named `ApiKeys`, `Secrets`,
+`Tokens`, `Passwords` or `ConnectionStrings`. Placeholders (`#{X}#`, `${X}`, `__X__`, `{X}`) are ignored. The finding
+names the file and the key, never the value; the check is skipped outside git.
 
 ### 8. Protected environments
 
@@ -261,7 +264,7 @@ azcfg config set project.secrets local-settings:src/Functions/Functions.csproj
   not empty, has no `:` and is not `global`, `target` is `user-secrets`, `appsettings-local` or `local-settings`,
   `project` is a path relative to the manifest folder that stays inside it, vault URIs are absolute https. `vaults`
   is optional. Comments and trailing commas are allowed. A file with a newer `schemaVersion` asks you to update azcfg.
-- Lookup: the nearest `azcfg.json` from the project folder upward, up to the git root.
+- Lookup: the nearest `azcfg.json` from the project folder upward, up to the git root (or the drive root outside git).
 - Shared (in the file): service, values/secrets targets, per-environment vaults. Per user (not in the file): the
   active environment, ignore patterns, snapshots and the environment profile (`azcfg init`).
 - A project without a saved binding but with a manifest is bound from the manifest, no wizard. A manifest with another
@@ -275,7 +278,12 @@ azcfg config get project.shared        # true + the manifest path, or false
 
 The first interactive `pull`/`use` also asks "Save as azcfg.json for the team?" (default no; `--yes` and `--json` never
 write it). Once the project is shared, `config set project.service|values|secrets|vault.<env>` update `azcfg.json` as
-well and print "Shared via azcfg.json - commit it". Commit the file.
+well and print "Shared via azcfg.json — commit it. (<path>)". Commit the file. `config list` shows `project.shared`
+as `invalid` when `azcfg.json` is broken (`status --check` explains why).
+
+When `azcfg.json` binds the project to another service than your saved binding, azcfg switches to the manifest's
+service, clears the active environment and snapshots, and prints a notice; it appears on `pull`, `use`, `push`, `plan`,
+`status`, `promote`, `edit` and `diff`.
 
 ## Keeping config in the project folder
 
@@ -314,9 +322,12 @@ modes per project tab: **Browse** (local vs remote values, edits go to a draft),
 local ↔ environment, consistency matrix) and **Sync** (pull / push with a plan and typed confirmation for protected
 environments). The **Problems** panel shows the `azcfg status --check` report.
 
-**Share with team** in the project settings writes `azcfg.json` (same as `config set project.shared true`); a shared
-project carries a "shared (azcfg.json)" badge, editing its service or targets tells you that `azcfg.json` changed
-("commit it"), and a project with a manifest opens as bound even with an empty user state.
+**Share with team…** in the selected project's panel in the Workspace sidebar (or the command palette entry "Share
+project with team (azcfg.json)…") writes `azcfg.json` after a confirmation, same as `config set project.shared true`.
+A shared project carries a "shared (azcfg.json)" badge, re-binding it tells you that `azcfg.json` changes ("commit
+it"), and a project with a manifest opens as bound even with an empty user state. A refresh never rewrites a bound
+project: when its binding differs from the manifest, "azcfg.json changed" offers **Apply azcfg.json**, which adopts the
+team's file only after you confirm.
 
 ## Build from source
 

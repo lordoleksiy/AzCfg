@@ -10,19 +10,19 @@ bumping `<Version>` in `src/AzCfg.Cli/AzCfg.Cli.csproj`; the NuGet release notes
 - 0.8.0 (ADR 0014): App Service / Function App settings as remotes (`--remote`, `env@remote`, `promote --key`).
 - 0.9.0 (ADR 0015): manifest v2 — team environments, key layout, custom JSON target file.
 
-## [0.7.0] - 2026-11-25
+## [0.7.0]
 ### Added
 - Project manifest `azcfg.json` (ADR 0012, amendment 2): the shared, git-tracked half of the binding (service, values and
   secrets targets, per-environment vaults), names and paths only, never a value. Strict schema, searched from the project
   folder upward to the git root. A project without a saved binding but with a manifest is bound from it, no wizard.
 - `azcfg config set project.shared true` writes the manifest from the current binding; `config list|get` show
   `project.shared`. Changes to `project.service|values|secrets|vault.<env>` of a shared project also update `azcfg.json`
-  and print "commit it". The first interactive `pull`/`use` offers to save `azcfg.json` for the team (default no; `--yes`
+  and print "Shared via azcfg.json — commit it.". The first interactive `pull`/`use` offers to save `azcfg.json` for the team (default no; `--yes`
   and `--json` never write it).
 - `status --check`: `ManifestInvalid` (error: unreadable file, schema error, unsupported version) and
   `SecretLikeKeyInTrackedFile` (warning: a git-tracked `appsettings*.json` has a value under a secret-like key; names
   only, skipped outside git).
-- UI: **Share with team** in project settings, a "shared (azcfg.json)" badge, and projects with a manifest open as bound.
+- UI: **Share with team…** in the project panel, a "shared (azcfg.json)" badge, projects with a manifest open as bound, and an explicit **Apply azcfg.json** when a bound project differs from it.
 
 ## [0.6.0]
 ### Added
