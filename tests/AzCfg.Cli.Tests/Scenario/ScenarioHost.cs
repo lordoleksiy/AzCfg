@@ -16,7 +16,7 @@ namespace AzCfg.Cli.Tests.Scenario;
 /// Runs <c>azcfg</c> commands through the production command tree (<see cref="CliApp.Configure"/>) and the real Core services,
 /// wired like <c>AddAzCfg()</c> but with in-memory edges: App Configuration, Key Vault, user state, the local user-secrets file,
 /// project detection (one project <c>Orders</c> at <c>&lt;repo&gt;/Orders/Orders.csproj</c>) and resource discovery. State lives in
-/// the fakes, so consecutive <see cref="RunAsync"/> calls form one user session. Every command gets <c>--project &lt;repo&gt;</c>;
+/// the fakes, so consecutive <see cref="RunAsync"/> calls form one user session. Every command gets <c>--project <see cref="ProjectPath"/></c>;
 /// exceptions propagate.
 /// </summary>
 public sealed class ScenarioHost
@@ -39,6 +39,7 @@ public sealed class ScenarioHost
         Manifests = teammate?.Manifests ?? new();
         Repo = Path.Combine(Path.GetTempPath(), "azcfg-scenario", "repo");
         CsprojPath = Path.Combine(Repo, "Orders", "Orders.csproj");
+        ProjectPath = Repo;
         Detector = new FixedProjectDetector(new ProjectInfo(Repo, CsprojPath, "Orders", false, "orders-user-secrets"));
     }
 
@@ -60,7 +61,11 @@ public sealed class ScenarioHost
     /// <summary>The repository's <c>azcfg.json</c> files (in memory, serialized like on disk).</summary>
     public InMemoryProjectManifestStore Manifests { get; }
 
-    public FixedProjectDetector Detector { get; }
+    /// <summary>Project detection; replace it to model another folder of a monorepo.</summary>
+    public FixedProjectDetector Detector { get; set; }
+
+    /// <summary>The <c>--project</c> path every command gets (default <see cref="Repo"/>).</summary>
+    public string ProjectPath { get; set; }
 
     /// <summary>The signed-in Azure account reported by <c>status --check</c>.</summary>
     public FixedAzureAccountProbe Account { get; } = new();
@@ -110,7 +115,7 @@ public sealed class ScenarioHost
             c.ConfigureConsole(console);
         });
 
-        var exit = await app.RunAsync([.. args, "--project", Repo]);
+        var exit = await app.RunAsync([.. args, "--project", ProjectPath]);
         return (exit, writer.ToString());
     }
 }

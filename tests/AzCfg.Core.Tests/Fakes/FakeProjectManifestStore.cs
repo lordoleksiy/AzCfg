@@ -23,10 +23,14 @@ internal sealed class FakeProjectManifestStore : IProjectManifestStore
 
         for (var directory = Path.TrimEndingDirectorySeparator(path); !string.IsNullOrEmpty(directory); directory = Path.GetDirectoryName(directory))
         {
-            var candidate = Path.Combine(directory, IProjectManifestStore.FileName);
-            if (Files.TryGetValue(candidate, out var manifest))
+            // Keys compare as full paths, so "/repo\azcfg.json" and "\repo\azcfg.json" are the same file; the stored key is returned.
+            var candidate = Path.GetFullPath(Path.Combine(directory, IProjectManifestStore.FileName));
+            foreach (var (file, manifest) in Files)
             {
-                return Task.FromResult<ManifestLocation?>(new ManifestLocation(manifest, candidate));
+                if (string.Equals(Path.GetFullPath(file), candidate, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult<ManifestLocation?>(new ManifestLocation(manifest, file));
+                }
             }
         }
 

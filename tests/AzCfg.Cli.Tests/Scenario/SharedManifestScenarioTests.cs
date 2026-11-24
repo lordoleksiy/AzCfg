@@ -91,6 +91,54 @@ public sealed class SharedManifestScenarioTests
     }
 
     [Fact]
+    public async Task A_root_manifest_of_another_service_is_ignored_in_a_sibling_project_which_shares_its_own()
+    {
+        var host = new ScenarioHost();
+        host.Discovery.AddStore("appcs-orders-dev", Store);
+        host.AppConfig.Set(Store, "orders:Timeout", "30", "Development");
+        host.AppConfig.Set(Store, "billing:Timeout", "7", "Development");
+        var orders = new AzCfg.Core.Model.ProjectInfo(host.Repo, host.CsprojPath, "Orders", false, "orders-user-secrets");
+        var billingFolder = Path.Combine(host.Repo, "Billing");
+        var billingCsproj = Path.Combine(billingFolder, "Billing.csproj");
+        var billing = new AzCfg.Core.Model.ProjectInfo(host.Repo, billingCsproj, "Billing", false, "billing-user-secrets");
+        var rootManifest = Path.Combine(host.Repo, IProjectManifestStore.FileName);
+
+        // The repository root shares Orders (monorepo root manifest).
+        Assert.Equal(0, (await host.RunAsync("init", "--yes", "--label", "Development")).Exit);
+        Assert.Equal(0, (await host.RunAsync("pull", "--yes", "--json")).Exit);
+        Assert.Equal(0, (await host.RunAsync("config", "set", "project.shared", "true")).Exit);
+        var rootJson = host.Manifests.Json(rootManifest);
+        Assert.Contains("\"service\": \"orders\"", rootJson);
+
+        // The Billing project, resolved from its own folder, finds the root manifest upward but must not take Orders' binding.
+        host.ProjectPath = billingFolder;
+        host.Detector = new(billing);
+        var (exit, output) = await host.RunAsync("pull", "--yes", "--service", "billing", "--json");
+        Assert.Equal(0, exit);
+        Assert.Equal(1, ScenarioJson.Parse(output).GetProperty("valuesWritten").GetInt32());
+        var bound = host.State.Binding(billingFolder)!;
+        Assert.Equal(("billing", billingCsproj), (bound.Service, bound.ValuesTarget.ProjectPath));
+
+        (_, output) = await host.RunAsync("config", "get", "project.shared", "--json");
+        Assert.Equal("false", ScenarioJson.Parse(output).GetProperty("value").GetString());
+        Assert.Equal(0, (await host.RunAsync("config", "set", "project.service", "billing")).Exit);
+        Assert.Equal(rootJson, host.Manifests.Json(rootManifest));
+
+        // Sharing Billing creates its own azcfg.json in its folder; the root manifest stays Orders'.
+        (_, output) = await host.RunAsync("config", "set", "project.shared", "true", "--json");
+        var own = Path.Combine(billingFolder, IProjectManifestStore.FileName);
+        Assert.Equal(own, ScenarioJson.Parse(output).GetProperty("source").GetString());
+        Assert.Contains("\"project\": \"Billing.csproj\"", host.Manifests.Json(own));
+        Assert.Equal(rootJson, host.Manifests.Json(rootManifest));
+
+        // Back at the root, Orders is still bound from the root manifest.
+        host.ProjectPath = host.Repo;
+        host.Detector = new(orders, billing);
+        Assert.Equal(0, (await host.RunAsync("status", "--json")).Exit);
+        Assert.Equal("orders", host.Binding!.Service);
+    }
+
+    [Fact]
     public async Task A_corrupted_manifest_fails_the_command_naming_the_file()
     {
         var host = new ScenarioHost();

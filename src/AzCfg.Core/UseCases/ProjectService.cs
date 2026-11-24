@@ -14,7 +14,8 @@ namespace AzCfg.Core.UseCases;
 /// for a blank pattern and <see cref="InvalidOperationException"/> when the project is not bound yet.
 /// With <see cref="UserProfile.GitIgnoreLocalFiles"/> (ADR 0009) <see cref="ResolveAsync"/> reports every option as safe for secrets,
 /// and <see cref="BindAsync"/> first asks the targets to git-ignore their files (it still throws when the target stays unsafe).
-/// A shared <c>azcfg.json</c> (ADR 0012 amendment 2) found from the project path wins over the saved binding's shared fields:
+/// A shared <c>azcfg.json</c> (ADR 0012 amendment 2) found from the project path — and naming this project in one of its targets,
+/// so a monorepo root manifest of another service is ignored — wins over the saved binding's shared fields:
 /// without a binding one is created from it (no wizard); a binding with another service takes the manifest's service, clears the
 /// active environment and drops the snapshots (the <c>config set project.service</c> rule); other targets or vaults are taken
 /// as they are. The active environment, ignore patterns, snapshots and vaults of environments the manifest does not name stay per
@@ -32,6 +33,11 @@ public sealed class ProjectService(
     public async Task<ProjectResolution> ResolveAsync(string repoPath, CancellationToken ct)
     {
         var manifest = await manifests.FindAsync(repoPath, ct);
+        if (manifest is not null && !ManifestBinding.AppliesTo(manifest, repoPath))
+        {
+            manifest = null; // a manifest of another project (e.g. a monorepo root one) is ignored here
+        }
+
         var existing = await state.LoadBindingAsync(repoPath, ct);
         if (manifest is not null)
         {

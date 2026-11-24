@@ -10,7 +10,8 @@ namespace AzCfg.Core.UseCases;
 /// Values follow the pull wizard's rules: a service name is valid for <see cref="KeyMapper"/>, a target must be registered, able to handle an
 /// existing detected project and (for secrets) safe for secrets; in the <see cref="UserProfile.GitIgnoreLocalFiles"/> mode the target's file
 /// is git-ignored first, as <see cref="ProjectService.BindAsync"/> does.
-/// When an <c>azcfg.json</c> is found from the project path (ADR 0012 amendment 2) a shared key is written to it as well — the manifest
+/// When an <c>azcfg.json</c> naming this project is found from the project path (ADR 0012 amendment 2; another project's manifest
+/// is ignored, and <c>project.shared</c> then creates the project's own file) a shared key is written to it as well — the manifest
 /// first, so a failed write leaves the binding unchanged — and the result carries <see cref="UserSetting.Source"/> (the manifest path) and
 /// <see cref="ProjectSettingKeys.SharedHint"/>. A manifest that cannot be read fails every call with its <see cref="ManifestException"/>.
 /// </summary>
@@ -31,7 +32,7 @@ public sealed class ProjectSettingsService(
         var profile = await state.LoadProfileAsync(ct);
         try
         {
-            return List(binding, profile, await manifests.FindAsync(repoPath, ct));
+            return List(binding, profile, await FindOwnAsync(repoPath, ct));
         }
         catch (ManifestException e)
         {
@@ -42,14 +43,14 @@ public sealed class ProjectSettingsService(
     public async Task<UserSetting> GetAsync(string repoPath, string key, CancellationToken ct)
     {
         var binding = await LoadAsync(repoPath, ct);
-        return Find(List(binding, await state.LoadProfileAsync(ct), await manifests.FindAsync(repoPath, ct)), key);
+        return Find(List(binding, await state.LoadProfileAsync(ct), await FindOwnAsync(repoPath, ct)), key);
     }
 
     public async Task<UserSetting> SetAsync(string repoPath, string key, string? value, CancellationToken ct)
     {
         var binding = await LoadAsync(repoPath, ct);
         var profile = await state.LoadProfileAsync(ct);
-        var shared = await manifests.FindAsync(repoPath, ct);
+        var shared = await FindOwnAsync(repoPath, ct);
 
         if (key.Equals(ProjectSettingKeys.Active, StringComparison.OrdinalIgnoreCase))
         {
@@ -274,6 +275,10 @@ public sealed class ProjectSettingsService(
         var format = kind.Kind == LocalTargetKind.LocalSettings ? LocalFileFormat.FlatDictionary : LocalFileFormat.NestedJson;
         return new(kind.Kind, project.CsprojPath, format);
     }
+
+    /// <summary>The nearest manifest when it describes this project (<see cref="ManifestBinding.AppliesTo"/>); another project's is ignored.</summary>
+    private async Task<ManifestLocation?> FindOwnAsync(string repoPath, CancellationToken ct) =>
+        await manifests.FindAsync(repoPath, ct) is { } found && ManifestBinding.AppliesTo(found, repoPath) ? found : null;
 
     private async Task<ProjectBinding> LoadAsync(string repoPath, CancellationToken ct) =>
         await state.LoadBindingAsync(repoPath, ct) ?? throw new InvalidOperationException("This project is not bound yet. Run 'azcfg pull' first.");
