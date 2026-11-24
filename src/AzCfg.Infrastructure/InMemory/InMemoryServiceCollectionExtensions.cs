@@ -10,6 +10,7 @@ public static class InMemoryServiceCollectionExtensions
 {
     /// <summary>
     /// Call after <c>AddAzCfg()</c>: replaces <see cref="IConfigStore"/>, <see cref="ISecretStore"/>, <see cref="IUserStateStore"/>,
+    /// <see cref="IProjectManifestStore"/>,
     /// <see cref="IResourceDiscovery"/> and <see cref="TokenCredential"/> with the <paramref name="world"/>'s instances,
     /// <see cref="IProjectDetector"/> when <see cref="InMemoryWorld.Detector"/> is set, and the <see cref="UserSecretsTarget"/>
     /// registration of <see cref="ILocalTarget"/> (in place, keeping the order) with <see cref="InMemoryWorld.UserSecrets"/>;
@@ -21,6 +22,7 @@ public static class InMemoryServiceCollectionExtensions
         services.Replace(ServiceDescriptor.Singleton<IConfigStore>(world.AppConfig));
         services.Replace(ServiceDescriptor.Singleton<ISecretStore>(world.Secrets));
         services.Replace(ServiceDescriptor.Singleton<IUserStateStore>(world.State));
+        services.Replace(ServiceDescriptor.Singleton<IProjectManifestStore>(world.Manifests));
         services.Replace(ServiceDescriptor.Singleton<IResourceDiscovery>(world.Discovery));
         services.Replace(ServiceDescriptor.Singleton<TokenCredential>(world.Credential));
         if (world.Detector is { } detector)
