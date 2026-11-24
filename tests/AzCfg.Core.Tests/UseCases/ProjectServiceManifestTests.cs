@@ -165,6 +165,37 @@ public sealed class ProjectServiceManifestTests
     }
 
     [Fact]
+    public async Task ManifestVaults_TakeTheProfileOrBindingEnvironmentSpellingAndTheStoredUriForm()
+    {
+        var binding = Bound() with { VaultByEnvironment = new Dictionary<string, Uri> { ["Mine"] = new("https://old.vault.azure.net") } };
+        var manifest = Shared with
+        {
+            Vaults = new Dictionary<string, Uri> { ["DEV"] = new("https://kv-dev.vault.azure.net/"), ["mine"] = new("https://mine.vault.azure.net/") },
+        };
+        var (service, state, _) = Create(binding, manifest);
+
+        var result = await service.ResolveAsync(Repo, Ct);
+
+        var vaults = result.Existing!.VaultByEnvironment;
+        Assert.Equal(["Mine", "dev"], vaults.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal("https://kv-dev.vault.azure.net", vaults["dev"].OriginalString);
+        Assert.Equal("https://mine.vault.azure.net", vaults["Mine"].OriginalString);
+        Assert.Same(result.Existing, state.Binding);
+    }
+
+    [Fact]
+    public async Task ManifestVaultWithPath_ThrowsNamingTheManifest()
+    {
+        var (service, state, _) = Create(null, Shared with { Vaults = new Dictionary<string, Uri> { ["dev"] = new("https://kv-dev.vault.azure.net/secrets") } });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResolveAsync(Repo, Ct));
+
+        Assert.Contains(ManifestPath, ex.Message);
+        Assert.Contains("vaults.dev", ex.Message);
+        Assert.Null(state.Binding);
+    }
+
+    [Fact]
     public async Task CorruptedManifest_ThrowsTheManifestError()
     {
         var binding = Bound();

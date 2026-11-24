@@ -20,10 +20,24 @@ public sealed class ProjectSettingsService(
     IEnumerable<ILocalTarget> targets,
     IProjectManifestStore manifests) : IProjectSettingsService
 {
-    public async Task<IReadOnlyList<UserSetting>> ListAsync(string repoPath, CancellationToken ct) =>
-        await state.LoadBindingAsync(repoPath, ct) is { } binding
-            ? List(binding, await state.LoadProfileAsync(ct), await manifests.FindAsync(repoPath, ct))
-            : [];
+    /// <summary>A manifest that cannot be read does not fail the list: <c>project.shared</c> is <c>invalid</c> with the file as its source.</summary>
+    public async Task<IReadOnlyList<UserSetting>> ListAsync(string repoPath, CancellationToken ct)
+    {
+        if (await state.LoadBindingAsync(repoPath, ct) is not { } binding)
+        {
+            return [];
+        }
+
+        var profile = await state.LoadProfileAsync(ct);
+        try
+        {
+            return List(binding, profile, await manifests.FindAsync(repoPath, ct));
+        }
+        catch (ManifestException e)
+        {
+            return List(binding, profile, null, new UserSetting(ProjectSettingKeys.Shared, ProjectSettingKeys.SharedInvalid) { Source = e.FilePath });
+        }
+    }
 
     public async Task<UserSetting> GetAsync(string repoPath, string key, CancellationToken ct)
     {
@@ -49,7 +63,7 @@ public sealed class ProjectSettingsService(
 
         if (key.Equals(ProjectSettingKeys.Shared, StringComparison.OrdinalIgnoreCase))
         {
-            return await ShareAsync(repoPath, binding, shared, value, ct);
+            return await ShareAsync(repoPath, binding, profile, shared, value, ct);
         }
 
         if (key.Equals(ProjectSettingKeys.Service, StringComparison.OrdinalIgnoreCase))
@@ -60,12 +74,13 @@ public sealed class ProjectSettingsService(
         if (key.Equals(ProjectSettingKeys.Values, StringComparison.OrdinalIgnoreCase))
         {
             var values = await ParseTargetAsync(binding, ProjectSettingKeys.Values, value, binding.ValuesTarget, ct);
+            var sharedValues = shared is null ? null : ManifestBinding.Target(values, shared.FilePath, "values"); // before any side effect
             if (values != binding.ValuesTarget)
             {
                 await PrepareTargetAsync(values, profile, checkSecrets: false, ct);
             }
 
-            await SaveManifestAsync(shared, (m, path) => m with { Values = ManifestBinding.Target(values, path, "values") }, ct);
+            await SaveManifestAsync(shared, (m, _) => m with { Values = sharedValues! }, ct);
             if (values != binding.ValuesTarget)
             {
                 await state.SaveBindingAsync(binding with { ValuesTarget = values }, ct);
@@ -77,12 +92,13 @@ public sealed class ProjectSettingsService(
         if (key.Equals(ProjectSettingKeys.Secrets, StringComparison.OrdinalIgnoreCase))
         {
             var secrets = await ParseTargetAsync(binding, ProjectSettingKeys.Secrets, value, binding.SecretsTarget, ct);
+            var sharedSecrets = shared is null ? null : ManifestBinding.Target(secrets, shared.FilePath, "secrets"); // before any side effect
             if (secrets != binding.SecretsTarget)
             {
                 await PrepareTargetAsync(secrets, profile, checkSecrets: true, ct);
             }
 
-            await SaveManifestAsync(shared, (m, path) => m with { Secrets = ManifestBinding.Target(secrets, path, "secrets") }, ct);
+            await SaveManifestAsync(shared, (m, _) => m with { Secrets = sharedSecrets! }, ct);
             if (secrets != binding.SecretsTarget)
             {
                 await state.SaveBindingAsync(binding with { SecretsTarget = secrets }, ct);
@@ -100,10 +116,12 @@ public sealed class ProjectSettingsService(
     }
 
     /// <summary>
-    /// <c>project.shared true</c>: writes the binding's shared fields to the manifest in effect, else to <c>azcfg.json</c> in
-    /// <paramref name="repoPath"/> (the project path); an unchanged manifest is not rewritten. Unsharing = deleting the file.
+    /// <c>project.shared true</c>: with a manifest in effect, nothing is written (the binding may be older than the committed file);
+    /// otherwise the binding's shared fields — with only the vaults of environments in the user's profile — are written to
+    /// <c>azcfg.json</c> in <paramref name="repoPath"/> (the project path). Unsharing = deleting the file.
     /// </summary>
-    private async Task<UserSetting> ShareAsync(string repoPath, ProjectBinding binding, ManifestLocation? shared, string? value, CancellationToken ct)
+    private async Task<UserSetting> ShareAsync(
+        string repoPath, ProjectBinding binding, UserProfile? profile, ManifestLocation? shared, string? value, CancellationToken ct)
     {
         if (!string.Equals(value?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
         {
@@ -112,13 +130,15 @@ public sealed class ProjectSettingsService(
                 $"Invalid value '{value}' for '{ProjectSettingKeys.Shared}': it can only be set to 'true'. To stop sharing, delete '{file}' and commit.");
         }
 
-        var path = shared?.FilePath ?? Path.Combine(repoPath, IProjectManifestStore.FileName);
-        var manifest = ManifestBinding.FromBinding(binding, path);
-        if (shared?.Manifest != manifest)
+        if (shared is not null)
         {
-            await manifests.SaveAsync(path, manifest, ct);
+            return new(ProjectSettingKeys.Shared, "true") { Source = shared.FilePath, Hint = ProjectSettingKeys.SharedHint };
         }
 
+        var path = Path.Combine(repoPath, IProjectManifestStore.FileName);
+        var environments = profile?.Environments.Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+        var vaults = binding.VaultByEnvironment.Where(p => environments.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value);
+        await manifests.SaveAsync(path, ManifestBinding.FromBinding(binding with { VaultByEnvironment = vaults }, path), ct);
         return new(ProjectSettingKeys.Shared, "true") { Source = path, Hint = ProjectSettingKeys.SharedHint };
     }
 
@@ -175,7 +195,7 @@ public sealed class ProjectSettingsService(
         var canonical = ProjectSettingKeys.VaultPrefix + name;
 
         var vaults = new Dictionary<string, Uri>(binding.VaultByEnvironment);
-        Uri? vault = string.IsNullOrWhiteSpace(value) ? null : NormalizeVault(canonical, value);
+        Uri? vault = string.IsNullOrWhiteSpace(value) ? null : VaultUri.Normalize(canonical, value);
         if (vault is null)
         {
             vaults.Remove(name);
@@ -207,22 +227,6 @@ public sealed class ProjectSettingsService(
         }
 
         return ManifestBinding.Vaults(updated);
-    }
-
-    /// <summary>A vault is its root URI: https, absolute, no path (or "/"), query, fragment or user info; stored without the trailing slash.</summary>
-    private static Uri NormalizeVault(string key, string value)
-    {
-        if (Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)
-            && uri.Scheme == Uri.UriSchemeHttps
-            && uri.AbsolutePath == "/"
-            && uri.Query.Length == 0
-            && uri.Fragment.Length == 0
-            && uri.UserInfo.Length == 0)
-        {
-            return new(uri.GetLeftPart(UriPartial.Authority));
-        }
-
-        throw Invalid(key, value, "an absolute https Key Vault root URI without path, query or fragment, e.g. https://<name>.vault.azure.net");
     }
 
     /// <summary>Git-ignores the target's file in the gitignore mode and, for secrets, rejects a target that is not safe for secrets.</summary>
@@ -274,8 +278,11 @@ public sealed class ProjectSettingsService(
     private async Task<ProjectBinding> LoadAsync(string repoPath, CancellationToken ct) =>
         await state.LoadBindingAsync(repoPath, ct) ?? throw new InvalidOperationException("This project is not bound yet. Run 'azcfg pull' first.");
 
-    private static List<UserSetting> List(ProjectBinding binding, UserProfile? profile, ManifestLocation? shared)
+    private static List<UserSetting> List(ProjectBinding binding, UserProfile? profile, ManifestLocation? shared, UserSetting? sharedSetting = null)
     {
+        sharedSetting ??= shared is null
+            ? new(ProjectSettingKeys.Shared, "false")
+            : new(ProjectSettingKeys.Shared, "true") { Source = shared.FilePath };
         var vaults = (profile?.Environments.Select(e => e.Name) ?? [])
             .Concat(binding.VaultByEnvironment.Keys)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -288,7 +295,7 @@ public sealed class ProjectSettingsService(
             new(ProjectSettingKeys.Values, Describe(binding.ValuesTarget)),
             new(ProjectSettingKeys.Secrets, Describe(binding.SecretsTarget)),
             .. vaults,
-            shared is null ? new(ProjectSettingKeys.Shared, "false") : new(ProjectSettingKeys.Shared, "true") { Source = shared.FilePath },
+            sharedSetting,
             new(ProjectSettingKeys.Active, binding.ActiveEnvironment),
             new(ProjectSettingKeys.Ignore, binding.Ignore is { Count: > 0 } ignore ? string.Join(",", ignore) : null),
         ];

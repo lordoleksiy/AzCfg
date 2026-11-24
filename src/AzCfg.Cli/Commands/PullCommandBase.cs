@@ -22,24 +22,15 @@ public abstract class PullCommandBase<TSettings>(
     ISyncService sync,
     IUserStateStore state,
     IEnvironmentResolver resolver,
-    IAnsiConsole console) : EnvironmentCommandBase<TSettings>(projects, state, resolver) where TSettings : PullSettings
+    IAnsiConsole console) : EnvironmentCommandBase<TSettings>(projects, state, resolver, console) where TSettings : PullSettings
 {
     protected ISyncService Sync { get; } = sync;
 
     protected override async Task<ProjectBinding> GetBindingAsync(string repo, ProjectResolution resolution, TSettings settings, CancellationToken ct)
     {
-        if (resolution.Existing is not { } existing)
-        {
-            return await BindAsync(repo, resolution, settings.Service, !settings.Json && !settings.Yes, ct);
-        }
-
-        if (resolution.PreviousService is { } previous && !settings.Json)
-        {
-            console.MarkupLineInterpolated(
-                $"[yellow]{resolution.ManifestPath} binds this project to service '{existing.Service}' (was '{previous}'): the active environment was cleared.[/]");
-        }
-
-        return Guard(existing, settings.Service);
+        return resolution.Existing is { } existing
+            ? Guard(existing, settings.Service)
+            : await BindAsync(repo, resolution, settings.Service, !settings.Json && !settings.Yes, ct);
     }
 
     /// <summary>A bound project keeps its service: <c>--service</c> naming another one is an error (ADR 0014), the same one is a no-op.</summary>
@@ -57,27 +48,27 @@ public abstract class PullCommandBase<TSettings>(
 
         if (settings.Json)
         {
-            console.Profile.Out.Writer.WriteLine(CliJson.Serialize(result));
+            Console.Profile.Out.Writer.WriteLine(CliJson.Serialize(result));
         }
         else if (result.Blocked)
         {
-            console.MarkupLine("[yellow]Pull blocked: local changes would be lost.[/]");
-            result.LocalChanges.ToList().ForEach(k => console.MarkupLineInterpolated($"  {k}"));
-            console.MarkupLine("Re-run with [bold]--force[/] to overwrite them.");
+            Console.MarkupLine("[yellow]Pull blocked: local changes would be lost.[/]");
+            result.LocalChanges.ToList().ForEach(k => Console.MarkupLineInterpolated($"  {k}"));
+            Console.MarkupLine("Re-run with [bold]--force[/] to overwrite them.");
         }
         else
         {
             var table = new Table().AddColumns("Environment", "Values", "Secrets");
             table.AddRow(Markup.Escape(result.Environment), result.ValuesWritten.ToString(), result.SecretsWritten.ToString());
-            console.Write(table);
+            Console.Write(table);
         }
 
         if (!settings.Json)
         {
-            WarningsView.Render(console, result.Warnings);
+            WarningsView.Render(Console, result.Warnings);
             if (result.Ignored.Count > 0)
             {
-                console.MarkupLineInterpolated($"{result.Ignored.Count} ignored key(s) kept local: {string.Join(", ", result.Ignored)}");
+                Console.MarkupLineInterpolated($"{result.Ignored.Count} ignored key(s) kept local: {string.Join(", ", result.Ignored)}");
             }
         }
 
@@ -88,7 +79,7 @@ public abstract class PullCommandBase<TSettings>(
     protected virtual async Task<PullResult> PullAsync(ProjectBinding binding, ConfigEnvironment env, TSettings settings, CancellationToken ct) =>
         settings.Json
             ? await Sync.PullAsync(binding, env, null, settings.Force, ct)
-            : await console.Status().StartAsync($"Pulling {env.Name}...", status =>
+            : await Console.Status().StartAsync($"Pulling {env.Name}...", status =>
                 Sync.PullAsync(binding, env, new Progress<SyncProgress>(p => status.Status($"{p.Stage} {p.Done}/{p.Total}")), settings.Force, ct));
 
     private async Task<ProjectBinding> BindAsync(string repo, ProjectResolution resolution, string? requested, bool interactive, CancellationToken ct)
@@ -98,7 +89,7 @@ public abstract class PullCommandBase<TSettings>(
         {
             (0, _, _) => throw new InvalidOperationException("No service keys were found in the App Configuration store for this project; pass --service <name>."),
             (_, true, _) => candidates[0],
-            (_, _, true) => console.Prompt(new SelectionPrompt<string>().Title("Service:").AddChoices(candidates)),
+            (_, _, true) => Console.Prompt(new SelectionPrompt<string>().Title("Service:").AddChoices(candidates)),
             (1, _, _) => throw new InvalidOperationException($"The only service in the App Configuration store ({candidates[0]}) does not match this project; pass --service <name> or run interactively."),
             _ => throw new InvalidOperationException($"Several services match this project ({string.Join(", ", candidates)}); pass --service <name> or run interactively."),
         };
@@ -113,15 +104,23 @@ public abstract class PullCommandBase<TSettings>(
             ? (Choose("Local target for values:", resolution.TargetOptions.Select(o => o.Target)), Choose("Local target for secrets:", safe))
             : (safe[0], safe[0]);
         var binding = await Projects.BindAsync(repo, service, values, secrets, ct);
-        if (interactive && console.Confirm("Save as azcfg.json for the team (service and targets, no values)?", false))
+        if (interactive && Console.Confirm("Save as azcfg.json for the team (service and targets, no values)?", false))
         {
-            var shared = await projectSettings.SetAsync(repo, ProjectSettingKeys.Shared, "true", ct);
-            console.MarkupLineInterpolated($"Saved {shared.Source}. {shared.Hint}");
+            // Sharing is optional: a failure (e.g. a target outside the project folder, an unwritable file) never stops the pull.
+            try
+            {
+                var shared = await projectSettings.SetAsync(repo, ProjectSettingKeys.Shared, "true", ct);
+                Console.MarkupLineInterpolated($"Saved {shared.Source}. {shared.Hint}");
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                Console.MarkupLineInterpolated($"[yellow]Could not save azcfg.json: {CliErrors.Describe(e)}[/] Retry later with 'azcfg config set project.shared true'.");
+            }
         }
 
         return binding;
     }
 
     private LocalTargetBinding Choose(string title, IEnumerable<LocalTargetBinding> options) =>
-        console.Prompt(new SelectionPrompt<LocalTargetBinding>().Title(title).AddChoices(options).UseConverter(t => Markup.Escape($"{t.Kind} ({t.ProjectPath})")));
+        Console.Prompt(new SelectionPrompt<LocalTargetBinding>().Title(title).AddChoices(options).UseConverter(t => Markup.Escape($"{t.Kind} ({t.ProjectPath})")));
 }

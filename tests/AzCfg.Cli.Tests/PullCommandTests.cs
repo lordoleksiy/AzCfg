@@ -438,6 +438,21 @@ public sealed class PullCommandTests
         }
     }
 
+    [Fact]
+    public async Task Wizard_share_failure_is_a_warning_and_the_pull_continues()
+    {
+        var s = new Stubs();
+        s.Settings.SetError = new InvalidOperationException("Cannot share 'values': project is outside the manifest folder.");
+
+        var (exit, output) = await RunWith("pull", s, "\n\ny\n");
+
+        Assert.Equal(0, exit);
+        Assert.Single(s.Settings.Sets);
+        Assert.Contains("Could not save azcfg.json", output);
+        Assert.Contains("outside the manifest folder", output);
+        Assert.NotNull(s.Pulled);
+    }
+
     [Theory]
     [InlineData("--yes")]
     [InlineData("--json")]

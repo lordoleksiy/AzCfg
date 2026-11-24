@@ -293,6 +293,22 @@ public sealed class ConfigCommandTests
     }
 
     [Fact]
+    public async Task List_WithInvalidManifest_StillListsEverythingAndShowsSharedInvalid()
+    {
+        var manifests = new InMemoryProjectManifestStore();
+        manifests.SetJson(ManifestPath, "{ not json");
+
+        var (exit, output, _) = await RunShared(manifests, Bound, "list");
+        var (_, json, _) = await RunShared(manifests, Bound, "list", "--json");
+
+        Assert.Equal(0, exit);
+        Assert.Matches(@"mode\s.*labels", output);
+        Assert.Matches(@"project\.service\s.*orders", output);
+        Assert.Contains($"invalid ({ManifestPath})", output);
+        Assert.Contains($$"""{"key":"project.shared","value":"invalid","source":{{System.Text.Json.JsonSerializer.Serialize(ManifestPath)}}}""", json);
+    }
+
+    [Fact]
     public async Task SetShared_WritesManifestAndPrintsHintWithPath_JsonCarriesSourceAndHint()
     {
         var manifests = new InMemoryProjectManifestStore();

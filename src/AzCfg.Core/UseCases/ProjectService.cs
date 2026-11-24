@@ -114,15 +114,31 @@ public sealed class ProjectService(
         var values = await ManifestTargetAsync(location, existing?.ValuesTarget, manifest.Values, "values", ct);
         var secrets = await ManifestTargetAsync(location, existing?.SecretsTarget, manifest.Secrets, "secrets", ct);
 
+        // Vault keys take the profile's (else the binding's) spelling of the environment and the URI is stored like
+        // 'config set project.vault.<env>' stores it, so lookups by environment name and URI comparisons match.
+        var profileNames = (await state.LoadProfileAsync(ct))?.Environments.Select(e => e.Name).ToList() ?? [];
         var vaults = new Dictionary<string, Uri>(existing?.VaultByEnvironment ?? new Dictionary<string, Uri>());
-        foreach (var (environment, uri) in ManifestBinding.BindingVaults(manifest))
+        foreach (var (environment, uri) in manifest.Vaults ?? new Dictionary<string, Uri>())
         {
+            var name = profileNames.FirstOrDefault(n => n.Equals(environment, StringComparison.OrdinalIgnoreCase))
+                ?? vaults.Keys.FirstOrDefault(k => k.Equals(environment, StringComparison.OrdinalIgnoreCase))
+                ?? environment;
+            Uri normalized;
+            try
+            {
+                normalized = VaultUri.Normalize($"vaults.{environment}", uri.OriginalString);
+            }
+            catch (ArgumentException e)
+            {
+                throw new InvalidOperationException($"'{location.FilePath}': {e.Message}", e);
+            }
+
             foreach (var same in vaults.Keys.Where(k => k.Equals(environment, StringComparison.OrdinalIgnoreCase)).ToList())
             {
                 vaults.Remove(same);
             }
 
-            vaults[environment] = uri;
+            vaults[name] = normalized;
         }
 
         if (existing is null)

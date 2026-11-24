@@ -87,14 +87,49 @@ public sealed class ProjectSettingsServiceManifestTests
     }
 
     [Fact]
-    public async Task SetShared_AlreadyShared_RewritesTheFoundManifestOnlyWhenItDiffers()
+    public async Task SetShared_ManifestNewerThanBinding_IsAlreadySharedAndNeverRewritten()
     {
-        var (service, _, manifests) = Create(Shared);
+        var newer = Shared with { Service = "billing", Values = new("local-settings", "Func") };
+        var (service, _, manifests) = Create(newer);
 
         var result = await service.SetAsync(Repo, "project.shared", "true", Ct);
 
-        Assert.Equal(ManifestPath, result.Source);
+        Assert.Equal(("true", ManifestPath, ProjectSettingKeys.SharedHint), (result.Value, result.Source, result.Hint));
         Assert.Empty(manifests.Saved);
+        Assert.Equal(newer, manifests.Files[ManifestPath]);
+    }
+
+    [Fact]
+    public async Task SetShared_CopiesOnlyVaultsOfProfileEnvironments()
+    {
+        var (service, state, manifests) = Create(null);
+        state.Binding = Bound() with
+        {
+            VaultByEnvironment = new Dictionary<string, Uri> { ["dev"] = new("https://kv-dev.vault.azure.net"), ["mine"] = new("https://mine.vault.azure.net") },
+        };
+
+        await service.SetAsync(Repo, "project.shared", "true", Ct);
+
+        Assert.Equal(["dev"], Assert.Single(manifests.Saved).Manifest.Vaults!.Keys);
+    }
+
+    [Fact]
+    public async Task SetValues_Shared_TargetOutsideManifestFolder_FailsBeforeAnySideEffect()
+    {
+        var outside = new FakeLocalTarget(LocalTargetKind.AppSettingsLocal);
+        var state = new FakeUserStateStore { Profile = Profile with { GitIgnoreLocalFiles = true }, Binding = Bound() };
+        var original = state.Binding;
+        var manifests = new FakeProjectManifestStore();
+        manifests.Files[ManifestPath] = Shared;
+        var detector = new FakeProjectDetector(new(Repo, Orders, "Orders", false, null), new(Repo, "/other/Ext/Ext.csproj", "Ext", false, null));
+        var service = new ProjectSettingsService(state, detector, [new FakeLocalTarget(LocalTargetKind.UserSecrets), outside], manifests);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.SetAsync(Repo, "project.values", "appsettings-local:/other/Ext/Ext.csproj", Ct));
+
+        Assert.Contains("outside the manifest folder", ex.Message);
+        Assert.Empty(outside.EnsureGitIgnoredCalls);
+        Assert.Empty(manifests.Saved);
+        Assert.Same(original, state.Binding);
     }
 
     [Theory]
@@ -208,13 +243,17 @@ public sealed class ProjectSettingsServiceManifestTests
     }
 
     [Fact]
-    public async Task CorruptedManifest_FailsListGetAndSet()
+    public async Task CorruptedManifest_ListDegradesToInvalid_GetAndSetFail()
     {
         var (service, state, manifests) = Create(null);
         var original = state.Binding;
         manifests.FindError = new ManifestException([new(ManifestErrorKind.Schema, "value", "Unknown field 'value'.")], ManifestPath);
 
-        await Assert.ThrowsAsync<ManifestException>(() => service.ListAsync(Repo, Ct));
+        var list = await service.ListAsync(Repo, Ct);
+
+        var shared = Assert.Single(list, s => s.Key == "project.shared");
+        Assert.Equal(("invalid", ManifestPath), (shared.Value, shared.Source));
+        Assert.Equal("orders", Assert.Single(list, s => s.Key == "project.service").Value);
         await Assert.ThrowsAsync<ManifestException>(() => service.GetAsync(Repo, "project.shared", Ct));
         await Assert.ThrowsAsync<ManifestException>(() => service.SetAsync(Repo, "project.service", "billing", Ct));
         Assert.Same(original, state.Binding);

@@ -51,10 +51,6 @@ internal static class ManifestBinding
         return ProjectLookup.SamePath(csproj, wanted) || ProjectLookup.SamePath(Path.GetDirectoryName(csproj) ?? "", wanted);
     }
 
-    /// <summary>The manifest's vaults stored like <c>config set project.vault.&lt;env&gt;</c> does: a root URI without the trailing slash.</summary>
-    public static Dictionary<string, Uri> BindingVaults(ProjectManifest manifest) =>
-        (manifest.Vaults ?? new Dictionary<string, Uri>()).ToDictionary(p => p.Key, p => Normalize(p.Value));
-
     /// <summary>The vaults for a manifest; <c>null</c> when there are none (the field is omitted).</summary>
     public static IReadOnlyDictionary<string, Uri>? Vaults(IReadOnlyDictionary<string, Uri> vaults) =>
         vaults.Count == 0 ? null : vaults.ToDictionary(p => p.Key, p => p.Value);
@@ -62,9 +58,4 @@ internal static class ManifestBinding
     public static string KindName(LocalTargetKind kind) => ProjectLookup.KindNames.First(k => k.Kind == kind).Name;
 
     public static string FolderOf(string manifestPath) => Path.GetDirectoryName(Path.GetFullPath(manifestPath))!;
-
-    private static Uri Normalize(Uri uri) =>
-        uri.IsAbsoluteUri && uri.AbsolutePath == "/" && uri.Query.Length == 0 && uri.Fragment.Length == 0
-            ? new(uri.GetLeftPart(UriPartial.Authority))
-            : uri;
 }
