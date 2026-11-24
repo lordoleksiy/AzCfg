@@ -35,7 +35,7 @@ public sealed class ProjectSettingsServiceTests
         var detector = new FakeProjectDetector(
             new(Repo, Orders, "Orders", false, null),
             new(Repo, Func, "Func", true, null));
-        return (new(state, detector, targets.Length > 0 ? targets : DefaultTargets()), state);
+        return (new(state, detector, targets.Length > 0 ? targets : DefaultTargets(), new FakeProjectManifestStore()), state);
     }
 
     private static FakeLocalTarget[] DefaultTargets() =>
@@ -65,6 +65,7 @@ public sealed class ProjectSettingsServiceTests
                 new("project.secrets", "user-secrets:" + Orders),
                 new("project.vault.dev", "https://kv-dev.vault.azure.net"),
                 new("project.vault.prod", null),
+                new("project.shared", "false"),
                 new("project.active", "dev"),
                 new("project.ignore", "Logging:*,Debug"),
             ],

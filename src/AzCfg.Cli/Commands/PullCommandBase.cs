@@ -11,10 +11,14 @@ namespace AzCfg.Cli.Commands;
 /// Pulls the requested environment (else the binding's active one, else <c>dev</c>) into the local targets.
 /// An unbound project is bound to <c>--service</c> when given (no detection), else to the detected service. Prompts for service and
 /// targets only when the project is not bound yet and neither <c>--json</c> nor <c>--yes</c> is set; otherwise an ambiguous project
-/// is an error naming <c>--service</c>. Human output lists warnings and ignored keys. A blocked pull exits with 1.
+/// is an error naming <c>--service</c>. The interactive wizard finally offers to save the binding as <c>azcfg.json</c> for the team
+/// (<c>project.shared</c>, default no); <c>--yes</c>/<c>--json</c> never write it. A project with a shared <c>azcfg.json</c> is bound from
+/// it without the wizard (Core); when the manifest switched the service, the human output says so (<c>config list --json</c> shows the
+/// result). Human output lists warnings and ignored keys. A blocked pull exits with 1.
 /// </summary>
 public abstract class PullCommandBase<TSettings>(
     IProjectService projects,
+    IProjectSettingsService projectSettings,
     ISyncService sync,
     IUserStateStore state,
     IEnvironmentResolver resolver,
@@ -22,10 +26,21 @@ public abstract class PullCommandBase<TSettings>(
 {
     protected ISyncService Sync { get; } = sync;
 
-    protected override async Task<ProjectBinding> GetBindingAsync(string repo, ProjectResolution resolution, TSettings settings, CancellationToken ct) =>
-        resolution.Existing is { } existing
-            ? Guard(existing, settings.Service)
-            : await BindAsync(repo, resolution, settings.Service, !settings.Json && !settings.Yes, ct);
+    protected override async Task<ProjectBinding> GetBindingAsync(string repo, ProjectResolution resolution, TSettings settings, CancellationToken ct)
+    {
+        if (resolution.Existing is not { } existing)
+        {
+            return await BindAsync(repo, resolution, settings.Service, !settings.Json && !settings.Yes, ct);
+        }
+
+        if (resolution.PreviousService is { } previous && !settings.Json)
+        {
+            console.MarkupLineInterpolated(
+                $"[yellow]{resolution.ManifestPath} binds this project to service '{existing.Service}' (was '{previous}'): the active environment was cleared.[/]");
+        }
+
+        return Guard(existing, settings.Service);
+    }
 
     /// <summary>A bound project keeps its service: <c>--service</c> naming another one is an error (ADR 0014), the same one is a no-op.</summary>
     private static ProjectBinding Guard(ProjectBinding existing, string? requested)
@@ -97,7 +112,14 @@ public abstract class PullCommandBase<TSettings>(
         var (values, secrets) = interactive
             ? (Choose("Local target for values:", resolution.TargetOptions.Select(o => o.Target)), Choose("Local target for secrets:", safe))
             : (safe[0], safe[0]);
-        return await Projects.BindAsync(repo, service, values, secrets, ct);
+        var binding = await Projects.BindAsync(repo, service, values, secrets, ct);
+        if (interactive && console.Confirm("Save as azcfg.json for the team (service and targets, no values)?", false))
+        {
+            var shared = await projectSettings.SetAsync(repo, ProjectSettingKeys.Shared, "true", ct);
+            console.MarkupLineInterpolated($"Saved {shared.Source}. {shared.Hint}");
+        }
+
+        return binding;
     }
 
     private LocalTargetBinding Choose(string title, IEnumerable<LocalTargetBinding> options) =>

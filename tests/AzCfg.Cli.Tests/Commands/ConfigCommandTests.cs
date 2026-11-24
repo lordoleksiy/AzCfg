@@ -3,6 +3,7 @@ using AzCfg.Core.Abstractions;
 using AzCfg.Core.Model;
 using AzCfg.Core.Sync;
 using AzCfg.Core.UseCases;
+using AzCfg.Infrastructure.InMemory;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -81,7 +82,11 @@ public sealed class ConfigCommandTests
 
     private static Task<(int Exit, string Output, InMemoryState State)> Run(params string[] args) => RunBound(null, args);
 
-    private static async Task<(int Exit, string Output, InMemoryState State)> RunBound(ProjectBinding? binding, params string[] args)
+    private static Task<(int Exit, string Output, InMemoryState State)> RunBound(ProjectBinding? binding, params string[] args) =>
+        RunShared(new InMemoryProjectManifestStore(), binding, args);
+
+    private static async Task<(int Exit, string Output, InMemoryState State)> RunShared(
+        InMemoryProjectManifestStore manifests, ProjectBinding? binding, params string[] args)
     {
         var state = new InMemoryState(Profile, binding);
         var writer = new StringWriter();
@@ -93,6 +98,7 @@ public sealed class ConfigCommandTests
             .AddSingleton<ILocalTarget>(new SafeTarget(LocalTargetKind.UserSecrets))
             .AddSingleton<ILocalTarget>(new SafeTarget(LocalTargetKind.AppSettingsLocal))
             .AddSingleton<IUserSettingsService, UserSettingsService>()
+            .AddSingleton<IProjectManifestStore>(manifests)
             .AddSingleton<IProjectSettingsService, ProjectSettingsService>();
         var app = new CommandApp(new TypeRegistrar(services));
         app.Configure(c =>
@@ -267,5 +273,52 @@ public sealed class ConfigCommandTests
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => RunBound(Bound, "set", "project.active", "prod"));
 
         Assert.Contains("azcfg use", ex.Message);
+    }
+
+    private static readonly string ManifestPath = Path.Combine(Repo, IProjectManifestStore.FileName);
+
+    [Fact]
+    public async Task List_ShowsProjectSharedFalseThenTrueWithPath()
+    {
+        var manifests = new InMemoryProjectManifestStore();
+        var (_, before, _) = await RunShared(manifests, Bound, "list");
+        Assert.Matches(@"project\.shared\s.*false", before);
+
+        await RunShared(manifests, Bound, "set", "project.shared", "true");
+        var (_, after, _) = await RunShared(manifests, Bound, "list");
+        var (_, json, _) = await RunShared(manifests, Bound, "get", "project.shared", "--json");
+
+        Assert.Contains($"true ({ManifestPath})", after);
+        Assert.Equal($$"""{"key":"project.shared","value":"true","source":{{System.Text.Json.JsonSerializer.Serialize(ManifestPath)}}}""", json.Trim());
+    }
+
+    [Fact]
+    public async Task SetShared_WritesManifestAndPrintsHintWithPath_JsonCarriesSourceAndHint()
+    {
+        var manifests = new InMemoryProjectManifestStore();
+
+        var (exit, human, _) = await RunShared(manifests, Bound, "set", "project.shared", "true");
+        var (_, json, _) = await RunShared(manifests, Bound, "set", "project.shared", "true", "--json");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("project.shared = true", human);
+        Assert.Contains($"{ProjectSettingKeys.SharedHint} ({ManifestPath})", human);
+        Assert.Contains("\"service\": \"orders\"", manifests.Json(ManifestPath));
+        var parsed = System.Text.Json.JsonDocument.Parse(json).RootElement;
+        Assert.Equal((ManifestPath, ProjectSettingKeys.SharedHint), (parsed.GetProperty("source").GetString(), parsed.GetProperty("hint").GetString()));
+    }
+
+    [Fact]
+    public async Task SetService_InSharedProject_UpdatesManifestAndSaysCommitIt()
+    {
+        var manifests = new InMemoryProjectManifestStore();
+        await RunShared(manifests, Bound, "set", "project.shared", "true");
+
+        var (_, output, state) = await RunShared(manifests, Bound, "set", "project.service", "billing");
+
+        Assert.Contains("azcfg use", output);
+        Assert.Contains(ProjectSettingKeys.SharedHint, output);
+        Assert.Contains("\"service\": \"billing\"", manifests.Json(ManifestPath));
+        Assert.Equal("billing", state.Binding!.Service);
     }
 }

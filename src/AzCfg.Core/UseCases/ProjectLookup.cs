@@ -21,9 +21,9 @@ internal static class ProjectLookup
             ?? (projects.Where(p => SamePath(Full(repoPath, Path.GetDirectoryName(p.CsprojPath) ?? ""), wanted)).ToList() is [var only] ? only : null);
     }
 
-    private static string Full(string repoPath, string path) => Path.GetFullPath(path, Path.GetFullPath(repoPath));
+    public static string Full(string repoPath, string path) => Path.GetFullPath(path, Path.GetFullPath(repoPath));
 
-    private static bool SamePath(string a, string b) =>
+    public static bool SamePath(string a, string b) =>
         string.Equals(
             a.TrimEnd(Path.DirectorySeparatorChar),
             b.TrimEnd(Path.DirectorySeparatorChar),

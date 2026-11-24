@@ -11,8 +11,9 @@ namespace AzCfg.Cli.Commands;
 /// (<see cref="ISyncService.PullSelectedAsync"/>): active environment only; keys with unpushed local changes block the pull
 /// unless <c>--force</c> (keep remote for those keys). Keys added locally and never pushed are left alone.
 /// </summary>
-public sealed class PullCommand(IProjectService projects, ISyncService sync, IUserStateStore state, IEnvironmentResolver resolver, IAnsiConsole console)
-    : PullCommandBase<PullFilesSettings>(projects, sync, state, resolver, console)
+public sealed class PullCommand(
+    IProjectService projects, IProjectSettingsService projectSettings, ISyncService sync, IUserStateStore state, IEnvironmentResolver resolver, IAnsiConsole console)
+    : PullCommandBase<PullFilesSettings>(projects, projectSettings, sync, state, resolver, console)
 {
     protected override async Task<PullResult> PullAsync(ProjectBinding binding, ConfigEnvironment env, PullFilesSettings settings, CancellationToken ct)
     {
