@@ -13,7 +13,7 @@ public sealed class FileProjectManifestStore : IProjectManifestStore
     public async Task<ManifestLocation?> FindAsync(string path, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        var fullPath = Path.GetFullPath(path);
+        var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
         var directory = File.Exists(fullPath) ? Path.GetDirectoryName(fullPath) : fullPath;
 
         for (; directory is not null; directory = Path.GetDirectoryName(directory))
@@ -50,22 +50,48 @@ public sealed class FileProjectManifestStore : IProjectManifestStore
             throw e.WithFilePath(fullPath);
         }
 
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         var temp = fullPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             await File.WriteAllTextAsync(temp, json, ct);
             File.Move(temp, fullPath, overwrite: true);
         }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException($"Cannot write azcfg manifest '{fullPath}': {e.Message}", e);
+        }
         finally
         {
-            File.Delete(temp);
+            TryDelete(temp);
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Best effort: never mask the original failure.
         }
     }
 
     private static async Task<ProjectManifest> ReadAsync(string filePath, CancellationToken ct)
     {
-        var json = await File.ReadAllTextAsync(filePath, ct);
+        string json;
+        try
+        {
+            json = await File.ReadAllTextAsync(filePath, ct);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new ManifestException(
+                [new ManifestError(ManifestErrorKind.Unreadable, null, $"The file cannot be read: {e.Message}")], filePath, e);
+        }
+
         try
         {
             return ManifestSerializer.Deserialize(json);
