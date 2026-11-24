@@ -120,28 +120,22 @@ public sealed class WorkspaceService(
         projects.RemoveIgnoreAsync(binding.RepoPath, pattern, ct);
 
     /// <summary>
-    /// The file sharing writes (Core <c>project.shared</c> rule): the manifest in effect when it already names this project, else
-    /// <c>azcfg.json</c> in the binding's folder. Throws when the project is unbound or another project's manifest is in effect.
+    /// The file sharing writes, as Core decides it (<c>project.shared</c>, which ignores another project's manifest): the manifest
+    /// already describing this project, else <c>azcfg.json</c> in the binding's folder. Throws when the project is unbound.
     /// </summary>
     public async Task<string> PlanShareAsync(ProjectNode project, CancellationToken ct)
     {
         var binding = project.Binding ?? throw new InvalidOperationException("Bind the project before sharing it.");
-        if (await manifests.FindAsync(binding.RepoPath, ct) is not { } existing)
-        {
-            return Path.Combine(binding.RepoPath, IProjectManifestStore.FileName);
-        }
-
-        return await NamesAsync(existing, project.Id, ct)
-            ? existing.FilePath
-            : throw new InvalidOperationException($"'{existing.FilePath}' already shares another project (service '{existing.Manifest.Service}').");
+        var shared = await settings.GetAsync(binding.RepoPath, ProjectSettingKeys.Shared, ct);
+        return shared is { Value: "true", Source: { } source } ? source : Path.Combine(binding.RepoPath, IProjectManifestStore.FileName);
     }
 
-    /// <summary>Checks <see cref="PlanShareAsync"/>, then Core <c>project.shared = true</c>; returns the manifest path.</summary>
+    /// <summary>Core <c>project.shared = true</c>; returns the manifest path it wrote (or that already shares the project).</summary>
     public async Task<string> ShareAsync(ProjectNode project, CancellationToken ct)
     {
-        var path = await PlanShareAsync(project, ct);
-        var setting = await settings.SetAsync(project.Binding!.RepoPath, ProjectSettingKeys.Shared, "true", ct);
-        return setting.Source ?? path;
+        var binding = project.Binding ?? throw new InvalidOperationException("Bind the project before sharing it.");
+        var setting = await settings.SetAsync(binding.RepoPath, ProjectSettingKeys.Shared, "true", ct);
+        return setting.Source ?? Path.Combine(binding.RepoPath, IProjectManifestStore.FileName);
     }
 
     /// <summary>

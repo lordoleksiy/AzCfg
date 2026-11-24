@@ -147,7 +147,7 @@ public sealed class SharedManifestWorkspaceTests : IDisposable
     }
 
     [Fact]
-    public async Task Share_AnotherProjectsManifestInEffect_Refused()
+    public async Task Share_AnotherProjectsManifestAbove_WritesThisProjectsOwnAzcfgJson()
     {
         var a = Developer();
         var billing = await Service(a).BindAsync(new ProjectNode(_billing, null), "billing", a.Target(_billing), a.Target(_billing), default);
@@ -155,7 +155,11 @@ public sealed class SharedManifestWorkspaceTests : IDisposable
         var json = ManifestSerializer.Serialize(new ProjectManifest(1, "crm", new("user-secrets", "src/Crm"), new("user-secrets", "src/Crm"), null));
         a.World.Manifests.SetJson(rootManifest, json);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Service(a).ShareAsync(new ProjectNode(_billing, billing), default));
+        var own = Path.Combine(Path.GetDirectoryName(_billing.Project.CsprojPath)!, "azcfg.json");
+
+        Assert.Equal(own, await Service(a).PlanShareAsync(new ProjectNode(_billing, billing), default));
+        Assert.Equal(own, await Service(a).ShareAsync(new ProjectNode(_billing, billing), default));
+        Assert.Equal("billing", ManifestSerializer.Deserialize(a.World.Manifests.Json(own)!).Service);
         Assert.Equal(json, a.World.Manifests.Json(rootManifest));
     }
 

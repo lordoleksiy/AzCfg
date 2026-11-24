@@ -84,16 +84,16 @@ public sealed class ShareWithTeamTests : ShellContext
     }
 
     [Fact]
-    public async Task Share_AnotherProjectsManifest_ToastsWithoutConfirmAndNoBadge()
+    public async Task Share_PrepareFails_ToastsWithoutConfirmAndNoBadge()
     {
         Seed(Node("Orders.Api", Binding("Orders.Api")));
-        WorkspaceService.ShareFailure = new InvalidOperationException("already shares another project");
+        WorkspaceService.ShareFailure = new InvalidOperationException("azcfg.json is unreadable");
         _ = Providers;
         Workspace.SelectProject(Orders);
 
         Assert.False(await Services.GetRequiredService<WorkspaceActions>().ShareAsync(Orders));
 
-        Providers.WaitForAssertion(() => Assert.Contains("Could not share Orders.Api: already shares another project", Providers.Markup));
+        Providers.WaitForAssertion(() => Assert.Contains("Could not share Orders.Api: azcfg.json is unreadable", Providers.Markup));
         Assert.DoesNotContain("Share Orders.Api with the team?", Providers.Markup);
         Assert.Empty(WorkspaceService.Shares);
         Assert.False(Workspace.FindProject(Orders)!.IsShared);

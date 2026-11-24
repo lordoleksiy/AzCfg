@@ -31,14 +31,14 @@ public interface IWorkspaceService
     Task<ProjectBinding> RemoveIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct);
 
     /// <summary>
-    /// The <c>azcfg.json</c> path <see cref="ShareAsync"/> would write (Read). Throws when the project is unbound or another project's
-    /// manifest is in effect.
+    /// The <c>azcfg.json</c> path <see cref="ShareAsync"/> would write (Read), as Core decides it: another project's manifest found
+    /// upward is ignored, so that is <c>&lt;project folder&gt;/azcfg.json</c>. Throws when the project is unbound.
     /// </summary>
     Task<string> PlanShareAsync(ProjectNode project, CancellationToken ct);
 
     /// <summary>
     /// Share with the team (FR-W7): Core <c>project.shared = true</c> writes <c>azcfg.json</c> (the binding's folder unless a manifest
-    /// already names this project); returns its path. Throws like <see cref="PlanShareAsync"/>.
+    /// already describes this project); returns its path. Throws when the project is unbound.
     /// </summary>
     Task<string> ShareAsync(ProjectNode project, CancellationToken ct);
 
