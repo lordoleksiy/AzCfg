@@ -1,5 +1,6 @@
 using AzCfg.Core.Environments;
 using AzCfg.Core.Model;
+using AzCfg.Core.UseCases;
 using AzCfg.Ui.Application.Operations;
 using AzCfg.Ui.Application.State;
 using AzCfg.Ui.Application.Workspace;
@@ -13,7 +14,9 @@ namespace AzCfg.Ui.Features.Workspace;
 /// Bind / re-bind wizard (FR-W5). Proposes the setup (candidates, targets with their safety for secrets), asks for the service and
 /// the two targets, binds through <see cref="IWorkspaceService.BindAsync"/> (a Write: a re-bind keeps vaults and ignore patterns, a
 /// new service clears the active environment — Core rules) and updates the tree. When the binding has no active environment
-/// afterwards, offers "Pull ‹env› now?" which runs the make-active flow (§2.8 step 3).
+/// afterwards, offers "Pull ‹env› now?" which runs the make-active flow (§2.8 step 3). A project named by a shared <c>azcfg.json</c>
+/// is bound from it by Core while preparing (ADR 0012 amendment 2): no dialog, the tree is refreshed to show it shared. Changing
+/// the service or targets of a shared project writes <c>azcfg.json</c> too, so the toast says to commit it.
 /// </summary>
 public sealed class BindingFlow(
     WorkspaceState workspace,
@@ -22,7 +25,8 @@ public sealed class BindingFlow(
     IOperationRunner runner,
     IDialogService dialogs,
     INotificationService notifications,
-    IActivationFlow activation) : IBindingFlow
+    IActivationFlow activation,
+    WorkspaceActions actions) : IBindingFlow
 {
     /// <summary><c>true</c> when the project is bound (or re-bound); <c>false</c> when cancelled or failed (a toast says why).</summary>
     public async Task<bool> BindAsync(string projectId)
@@ -42,6 +46,20 @@ public sealed class BindingFlow(
             }
 
             return false;
+        }
+
+        if (node.Binding is null && setup.Resolution is { Existing: { } fromManifest, ManifestPath: { } manifest })
+        {
+            workspace.UpdateBinding(projectId, fromManifest);
+            if (sessions.TryGet(projectId, out var boundSession))
+            {
+                boundSession.Invalidate();
+            }
+
+            await notifications.ToastAsync($"{node.Project.Project.Name} is bound to ‘{fromManifest.Service}’ from {manifest}", ToastIntent.Success);
+            await actions.RefreshAsync();
+            await OfferPullAsync(projectId, fromManifest);
+            return true;
         }
 
         var result = await dialogs.ShowDialogAsync<BindDialog>(o =>
@@ -65,7 +83,11 @@ public sealed class BindingFlow(
                     session.Invalidate();
                 }
 
-                await notifications.ToastAsync($"{node.Project.Project.Name} is bound to ‘{success.Value.Service}’", ToastIntent.Success);
+                var shared = setup.Resolution.ManifestPath is not null && node.Binding is { } old
+                    && (old.Service != choice.Service || old.ValuesTarget != choice.Values || old.SecretsTarget != choice.Secrets);
+                await notifications.ToastAsync(
+                    $"{node.Project.Project.Name} is bound to ‘{success.Value.Service}’{(shared ? $". {ProjectSettingKeys.SharedHint}" : string.Empty)}",
+                    ToastIntent.Success);
                 await OfferPullAsync(projectId, success.Value);
                 return true;
             case OperationResult<ProjectBinding>.Failed failed:

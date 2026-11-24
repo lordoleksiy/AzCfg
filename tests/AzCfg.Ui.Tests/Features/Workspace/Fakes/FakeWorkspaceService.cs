@@ -1,4 +1,5 @@
 using AzCfg.Core.Model;
+using AzCfg.Core.UseCases;
 using AzCfg.Ui.Application.Workspace;
 
 namespace AzCfg.Ui.Tests.Features.Workspace.Fakes;
@@ -67,4 +68,44 @@ internal sealed class FakeWorkspaceService : IWorkspaceService
     public Task<ProjectBinding> AddIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) => throw new NotSupportedException();
 
     public Task<ProjectBinding> RemoveIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) => throw new NotSupportedException();
+
+    public List<string> Shares { get; } = [];
+
+    public List<string> Applied { get; } = [];
+
+    /// <summary>The path <see cref="PlanShareAsync"/> returns; null = <c>&lt;RepoPath&gt;/azcfg.json</c>.</summary>
+    public string? SharePath { get; set; }
+
+    /// <summary>What <see cref="ApplyManifestAsync"/> returns (the tree for the next open is the test's to set).</summary>
+    public ProjectResolution? ApplyResult { get; set; }
+
+    public Task<string> PlanShareAsync(ProjectNode project, CancellationToken ct) =>
+        ShareFailure is not null ? Task.FromException<string>(ShareFailure) : Task.FromResult(SharePath ?? Path.Combine(project.Binding!.RepoPath, "azcfg.json"));
+
+    public Task<ProjectResolution> ApplyManifestAsync(ProjectNode project, CancellationToken ct)
+    {
+        Applied.Add(project.Id);
+        return Task.FromResult(ApplyResult ?? new ProjectResolution([], true, [], project.Binding, project.ManifestPath));
+    }
+
+    public Exception? ShareFailure { get; set; }
+
+    /// <summary>Records the share; the next <see cref="OpenAsync"/> returns the project with the manifest path (as after a real share).</summary>
+    public Task<string> ShareAsync(ProjectNode project, CancellationToken ct)
+    {
+        if (ShareFailure is not null)
+        {
+            return Task.FromException<string>(ShareFailure);
+        }
+
+        Shares.Add(project.Id);
+        var path = Path.Combine(project.Binding!.RepoPath, "azcfg.json");
+        IReadOnlyList<ProjectNode> Mark(IReadOnlyList<ProjectNode> nodes) => [.. nodes.Select(n => n.Id == project.Id ? n with { ManifestPath = path } : n)];
+        Tree = Tree with
+        {
+            Solutions = [.. Tree.Solutions.Select(s => s with { Projects = Mark(s.Projects) })],
+            LooseProjects = Mark(Tree.LooseProjects),
+        };
+        return Task.FromResult(path);
+    }
 }

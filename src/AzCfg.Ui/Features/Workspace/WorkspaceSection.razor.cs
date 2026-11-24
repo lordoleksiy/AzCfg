@@ -14,11 +14,17 @@ namespace AzCfg.Ui.Features.Workspace;
 /// WORKSPACE sidebar section (§2.3): the tree Solution → Project → config files. A bound project shows its active environment (or
 /// "not active") and, once its view is loaded, the counters ↑ local ↓ remote ! conflicts; an unbound application project shows
 /// "unbound"; libraries are dimmed. Clicking a bound project opens its tab; clicking an unbound application project starts the
-/// bind wizard first (§2.8 step 3). <c>local.settings.json</c> is a bindable target like the other files.
+/// bind wizard first (§2.8 step 3). <c>local.settings.json</c> is a bindable target like the other files. A project shared via
+/// <c>azcfg.json</c> carries the badge "shared (azcfg.json)"; one whose manifest cannot be applied shows "azcfg.json error" (the
+/// reason in its tooltip and the selection panel); one whose binding differs from its <c>azcfg.json</c> shows "azcfg.json changed"
+/// until Apply azcfg.json. The selection panel offers Share with team for a bound project not shared yet.
 /// </summary>
 public sealed partial class WorkspaceSection : IDisposable
 {
     private const string LooseId = "loose";
+    private const string SharedBadge = "shared (azcfg.json)";
+    private const string ManifestErrorBadge = "azcfg.json error";
+    private const string ManifestChangedBadge = "azcfg.json changed";
     private readonly HashSet<string> _open = new(StringComparer.Ordinal);
     private readonly HashSet<ProjectSession> _hooked = [];
     private string? _root;
@@ -35,6 +41,8 @@ public sealed partial class WorkspaceSection : IDisposable
     [Inject] private ICommandRegistry Commands { get; set; } = default!;
 
     [Inject] private IBindingFlow Binding { get; set; } = default!;
+
+    [Inject] private WorkspaceActions Actions { get; set; } = default!;
 
     [Inject] private IJSRuntime JS { get; set; } = default!;
 
@@ -106,13 +114,17 @@ public sealed partial class WorkspaceSection : IDisposable
             return node.Project.Project.Name;
         }
 
+        var badge = node.ManifestChange is not null ? $" · {SharedBadge} · {ManifestChangedBadge}"
+            : node.IsShared ? $" · {SharedBadge}"
+            : node.ManifestError is not null ? $" · {ManifestErrorBadge}"
+            : string.Empty;
         if (node.Binding is not { } binding)
         {
-            return $"{node.Project.Project.Name} · unbound";
+            return $"{node.Project.Project.Name} · unbound{badge}";
         }
 
         var counters = Counters(node.Id, binding);
-        return $"{node.Project.Project.Name} · {binding.ActiveEnvironment ?? "no active env"}{(counters.Length > 0 ? $" {counters}" : string.Empty)}";
+        return $"{node.Project.Project.Name} · {binding.ActiveEnvironment ?? "no active env"}{(counters.Length > 0 ? $" {counters}" : string.Empty)}{badge}";
     }
 
     /// <summary>"↑1 ↓2 !1" from the session's summary or cached view of the active environment; empty when neither is loaded.</summary>
@@ -143,10 +155,16 @@ public sealed partial class WorkspaceSection : IDisposable
     private static string Format(int outgoing, int incoming, int conflicts) =>
         string.Join(' ', new[] { outgoing > 0 ? $"↑{outgoing}" : null, incoming > 0 ? $"↓{incoming}" : null, conflicts > 0 ? $"!{conflicts}" : null }.Where(s => s is not null));
 
-    private static string ProjectTip(ProjectNode node) =>
-        node.Project.Project.IsLibrary
+    private static string ProjectTip(ProjectNode node)
+    {
+        var tip = node.Project.Project.IsLibrary
             ? $"{node.Project.Project.CsprojPath} — library or test project: no local targets"
             : node.Binding is { } binding ? $"{node.Project.Project.CsprojPath} — service ‘{binding.Service}’" : $"{node.Project.Project.CsprojPath} — not bound to a service yet";
+        return node.ManifestChange is { } change ? $"{tip}; {node.ManifestPath} differs (service ‘{change.ManifestService}’): apply it from the selection panel"
+            : node.ManifestPath is { } manifest ? $"{tip}; shared via {manifest}"
+            : node.ManifestError is { } error ? $"{tip}; {error}"
+            : tip;
+    }
 
     private static string FileText(ProjectNode node, ConfigFileInfo file)
     {
