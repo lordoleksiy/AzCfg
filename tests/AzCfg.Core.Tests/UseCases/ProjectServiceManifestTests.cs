@@ -196,6 +196,43 @@ public sealed class ProjectServiceManifestTests
     }
 
     [Fact]
+    public async Task ManifestOfAnotherProject_IsIgnored_AndTheWizardIsOffered()
+    {
+        // Root manifest names Orders; resolving the Func project (its own folder) must not take Orders' service and targets.
+        var (service, state, _) = Create(null, Shared);
+
+        var result = await service.ResolveAsync("/repo/Func", Ct);
+
+        Assert.Null(result.Existing);
+        Assert.Null(result.ManifestPath);
+        Assert.NotEmpty(result.TargetOptions);
+        Assert.Null(state.Binding);
+    }
+
+    [Fact]
+    public async Task ManifestOfAnotherProject_LeavesAnExistingBindingAlone()
+    {
+        var binding = Bound("billing");
+        var (service, state, _) = Create(binding, Shared);
+
+        var result = await service.ResolveAsync("/repo/Func", Ct);
+
+        Assert.Same(binding, result.Existing);
+        Assert.Null(result.ManifestPath);
+        Assert.Equal(0, state.DeleteSnapshotsCalls);
+    }
+
+    [Fact]
+    public async Task ManifestAbove_NamingThisProjectFolder_Applies()
+    {
+        var (service, _, _) = Create(null, Shared);
+
+        var result = await service.ResolveAsync("/repo/Orders", Ct);
+
+        Assert.Equal(("orders", ManifestPath), (result.Existing!.Service, result.ManifestPath));
+    }
+
+    [Fact]
     public async Task CorruptedManifest_ThrowsTheManifestError()
     {
         var binding = Bound();
