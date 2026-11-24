@@ -276,9 +276,9 @@ public sealed class ProjectSettingsService(
         return new(kind.Kind, project.CsprojPath, format);
     }
 
-    /// <summary>The nearest manifest when it describes this project (<see cref="ManifestBinding.AppliesTo"/>); another project's is ignored.</summary>
+    /// <summary>The nearest manifest when it describes this project (<see cref="ManifestBinding.AppliesToAsync"/>); another project's is ignored.</summary>
     private async Task<ManifestLocation?> FindOwnAsync(string repoPath, CancellationToken ct) =>
-        await manifests.FindAsync(repoPath, ct) is { } found && ManifestBinding.AppliesTo(found, repoPath) ? found : null;
+        await manifests.FindAsync(repoPath, ct) is { } found && await ManifestBinding.AppliesToAsync(found, repoPath, detector, ct) ? found : null;
 
     private async Task<ProjectBinding> LoadAsync(string repoPath, CancellationToken ct) =>
         await state.LoadBindingAsync(repoPath, ct) ?? throw new InvalidOperationException("This project is not bound yet. Run 'azcfg pull' first.");

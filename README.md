@@ -265,6 +265,9 @@ azcfg config set project.secrets local-settings:src/Functions/Functions.csproj
   `project` is a path relative to the manifest folder that stays inside it, vault URIs are absolute https. `vaults`
   is optional. Comments and trailing commas are allowed. A file with a newer `schemaVersion` asks you to update azcfg.
 - Lookup: the nearest `azcfg.json` from the project folder upward, up to the git root (or the drive root outside git).
+  The nearest file wins and is used only when one of its targets names this project (a monorepo root manifest of
+  another service is ignored); a nearer manifest of another project hides a farther one, so share the project to give
+  it its own file. A broken `azcfg.json` blocks every project below it until fixed; `status --check` reports it.
 - Shared (in the file): service, values/secrets targets, per-environment vaults. Per user (not in the file): the
   active environment, ignore patterns, snapshots and the environment profile (`azcfg init`).
 - A project without a saved binding but with a manifest is bound from the manifest, no wizard. A manifest with another
