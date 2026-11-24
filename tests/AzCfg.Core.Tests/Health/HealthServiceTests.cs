@@ -579,6 +579,20 @@ public sealed class HealthServiceTests
         Assert.False(report.HasErrors);
     }
 
+    [Theory]
+    [InlineData("Auth:Token:Issuer")]
+    [InlineData("Secrets:Path")]
+    [InlineData("Logging:LogLevel:Default")]
+    public async Task CheckAsync_SecretWordOnlyInParentSegment_NoFinding(string key)
+    {
+        var rig = new Rig(Binding);
+        rig.Tracked.Keys.Add(new("appsettings.json", key, true));
+
+        var report = await rig.CheckAsync();
+
+        Assert.Empty(report.Findings);
+    }
+
     [Fact]
     public async Task CheckAsync_SecretLikeKeyWithoutValueOrPlainKey_NoFinding()
     {

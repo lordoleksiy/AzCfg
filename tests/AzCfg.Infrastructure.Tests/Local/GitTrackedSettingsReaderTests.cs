@@ -37,7 +37,8 @@ public sealed class GitTrackedSettingsReaderTests : IDisposable
               // comment
               "Db": { "Password": "{{Canary}}", "Empty": "", "Null": null, "Port": 5432 },
               "Hosts": [ "a" ],
-              "Flag": false,
+              "PasswordRequireDigit": true,
+              "MaxTokens": 4000,
             }
             """);
         RunGit("add", ".");
@@ -49,12 +50,55 @@ public sealed class GitTrackedSettingsReaderTests : IDisposable
                 new("Orders/appsettings.json", "Db:Password", true),
                 new("Orders/appsettings.json", "Db:Empty", false),
                 new("Orders/appsettings.json", "Db:Null", false),
-                new("Orders/appsettings.json", "Db:Port", true),
+                new("Orders/appsettings.json", "Db:Port", false),
                 new("Orders/appsettings.json", "Hosts:0", true),
-                new("Orders/appsettings.json", "Flag", true),
+                new("Orders/appsettings.json", "PasswordRequireDigit", false),
+                new("Orders/appsettings.json", "MaxTokens", false),
             ],
             keys);
         Assert.DoesNotContain(Canary, JsonSerializer.Serialize(keys));
+    }
+
+    [Theory]
+    [InlineData("#{DbPassword}#")]
+    [InlineData("${DB_PASSWORD}")]
+    [InlineData("__DbPassword__")]
+    [InlineData("{DbPassword}")]
+    [InlineData("   ")]
+    public async Task ReadKeysAsync_Placeholder_HasNoValue(string placeholder)
+    {
+        InitRepo();
+        Write("appsettings.json", JsonSerializer.Serialize(new Dictionary<string, string> { ["Password"] = placeholder }));
+        RunGit("add", ".");
+
+        var keys = await _reader.ReadKeysAsync(_root, CancellationToken.None);
+
+        Assert.Equal([new TrackedSettingKey("appsettings.json", "Password", false)], keys);
+    }
+
+    [Fact]
+    public async Task ReadKeysAsync_NonAsciiFolder_ListsUnquotedPath()
+    {
+        InitRepo();
+        Write("Замовлення/appsettings.json", """{ "Api": { "Token": "t" } }""");
+        RunGit("add", ".");
+
+        var keys = await _reader.ReadKeysAsync(_root, CancellationToken.None);
+
+        Assert.Equal([new TrackedSettingKey("Замовлення/appsettings.json", "Api:Token", true)], keys);
+    }
+
+    [Fact]
+    public async Task ReadKeysAsync_RepoPathIsSubfolder_ListsOnlyItsFilesRelativeToIt()
+    {
+        InitRepo();
+        Write("appsettings.json", """{ "Root": { "Secret": "s" } }""");
+        Write("services/Orders/appsettings.json", """{ "Api": { "Token": "t" } }""");
+        RunGit("add", ".");
+
+        var keys = await _reader.ReadKeysAsync(Path.Combine(_root, "services"), CancellationToken.None);
+
+        Assert.Equal([new TrackedSettingKey("Orders/appsettings.json", "Api:Token", true)], keys);
     }
 
     [Fact]

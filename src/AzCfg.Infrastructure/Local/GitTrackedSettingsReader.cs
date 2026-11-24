@@ -1,19 +1,26 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Model;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AzCfg.Infrastructure.Local;
 
 /// <summary>
 /// Lists the git-tracked <c>appsettings*.json</c> files under the repository (<c>git ls-files -z</c>) and flattens their keys to
 /// <c>A:B</c> (array items by index, as .NET configuration does). Values are inspected in memory only to compute
-/// <see cref="TrackedSettingKey.HasValue"/>. Outside a git repository (or without git) the result is empty; an unreadable or
-/// invalid file is skipped.
+/// <see cref="TrackedSettingKey.HasValue"/>: a non-empty string that is not a placeholder (<c>#{X}#</c>, <c>${X}</c>,
+/// <c>__X__</c>, <c>{X}</c>). Outside a git repository (or without git, or when git fails or times out) the result is empty;
+/// an unreadable or invalid file is skipped.
 /// </summary>
-public sealed class GitTrackedSettingsReader : ITrackedSettingsReader
+public sealed class GitTrackedSettingsReader(ILogger<GitTrackedSettingsReader>? logger = null) : ITrackedSettingsReader
 {
+    private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(15);
     private static readonly JsonDocumentOptions Options = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+    private readonly ILogger _log = logger ?? NullLogger<GitTrackedSettingsReader>.Instance;
 
     public async Task<IReadOnlyList<TrackedSettingKey>> ReadKeysAsync(string repoPath, CancellationToken ct)
     {
@@ -58,7 +65,7 @@ public sealed class GitTrackedSettingsReader : ITrackedSettingsReader
                 var index = 0;
                 foreach (var item in element.EnumerateArray())
                 {
-                    Flatten(file, Join(prefix, index++.ToString(System.Globalization.CultureInfo.InvariantCulture)), item, keys);
+                    Flatten(file, Join(prefix, index++.ToString(CultureInfo.InvariantCulture)), item, keys);
                 }
 
                 break;
@@ -74,47 +81,94 @@ public sealed class GitTrackedSettingsReader : ITrackedSettingsReader
 
     private static string Join(string? prefix, string segment) => prefix is null ? segment : $"{prefix}:{segment}";
 
-    private static bool HasValue(JsonElement element) => element.ValueKind switch
-    {
-        JsonValueKind.Null or JsonValueKind.Undefined => false,
-        JsonValueKind.String => element.GetString() is { Length: > 0 },
-        _ => true,
-    };
+    /// <summary>Only a non-empty, non-placeholder string can hold a secret; numbers and booleans are settings.</summary>
+    private static bool HasValue(JsonElement element) =>
+        element.ValueKind == JsonValueKind.String && element.GetString() is { } value && !string.IsNullOrWhiteSpace(value) && !IsPlaceholder(value.Trim());
 
-    /// <summary>Paths relative to <paramref name="repoPath"/> with <c>/</c> separators; empty outside git.</summary>
-    private static async Task<IReadOnlyList<string>> ListTrackedAsync(string repoPath, CancellationToken ct)
+    private static bool IsPlaceholder(string value) =>
+        (value.StartsWith("#{", StringComparison.Ordinal) && value.EndsWith("}#", StringComparison.Ordinal))
+        || (value.StartsWith("${", StringComparison.Ordinal) && value.EndsWith('}'))
+        || (value.Length > 4 && value.StartsWith("__", StringComparison.Ordinal) && value.EndsWith("__", StringComparison.Ordinal))
+        || (value.StartsWith('{') && value.EndsWith('}'));
+
+    /// <summary>Paths relative to <paramref name="repoPath"/> with <c>/</c> separators; empty outside git or when git fails.</summary>
+    private async Task<IReadOnlyList<string>> ListTrackedAsync(string repoPath, CancellationToken ct)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(GitTimeout);
+        Process? process = null;
         try
         {
             var startInfo = new ProcessStartInfo("git")
             {
                 WorkingDirectory = repoPath,
+                RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
                 UseShellExecute = false,
             };
-            foreach (var argument in (string[])["ls-files", "-z", "--", "*.json"])
+            foreach (var argument in (string[])["-c", "core.quotepath=false", "ls-files", "-z", "--", "*.json"])
             {
                 startInfo.ArgumentList.Add(argument);
             }
 
-            using var process = new Process { StartInfo = startInfo };
+            process = new Process { StartInfo = startInfo };
             process.Start();
-            var output = process.StandardOutput.ReadToEndAsync(ct);
-            var error = process.StandardError.ReadToEndAsync(ct);
-            await process.WaitForExitAsync(ct);
+            process.StandardInput.Close();
+            var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var error = process.StandardError.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
             var files = await output;
-            await error;
-            return process.ExitCode == 0 ? files.Split('\0', StringSplitOptions.RemoveEmptyEntries) : [];
+            var stderr = await error;
+            if (process.ExitCode == 0)
+            {
+                return files.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+            }
+
+            if (!stderr.Contains("not a git repository", StringComparison.OrdinalIgnoreCase))
+            {
+                _log.LogDebug("git ls-files exited with {ExitCode}; tracked settings check skipped", process.ExitCode);
+            }
+
+            return [];
         }
         catch (OperationCanceledException)
         {
-            throw;
+            Kill(process);
+            if (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            _log.LogDebug("git ls-files timed out after {Timeout}; tracked settings check skipped", GitTimeout);
+            return [];
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // git missing, or the folder does not exist: the check is skipped.
+            _log.LogDebug("git ls-files could not run ({ExceptionType}); tracked settings check skipped", ex.GetType().Name);
             return [];
+        }
+        finally
+        {
+            process?.Dispose();
+        }
+    }
+
+    private static void Kill(Process? process)
+    {
+        try
+        {
+            if (process is { HasExited: false })
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            // Already exited or never started.
         }
     }
 }

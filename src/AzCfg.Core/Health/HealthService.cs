@@ -74,7 +74,8 @@ public sealed class HealthService(
     }
 
     /// <summary>
-    /// A git-tracked <c>appsettings*.json</c> with a value under a key whose path contains a secret-like word (ADR 0012, health).
+    /// A git-tracked <c>appsettings*.json</c> with a value under a key whose last segment contains a secret-like word, or any key
+    /// under <c>ConnectionStrings</c> (ADR 0012, health).
     /// The reader never returns values; the finding names the file and the key only.
     /// </summary>
     private async Task CheckTrackedSettingsAsync(string repoPath, List<HealthFinding> findings, CancellationToken ct)
@@ -95,7 +96,13 @@ public sealed class HealthService(
         }
     }
 
-    private static bool IsSecretLike(string key) => SecretLikeMarkers.Any(m => key.Contains(m, StringComparison.OrdinalIgnoreCase));
+    /// <summary>The last key segment names a secret, or the key sits under a <c>ConnectionStrings</c> section.</summary>
+    private static bool IsSecretLike(string key)
+    {
+        var segments = key.Split(':');
+        return segments[..^1].Any(s => s.Equals("ConnectionStrings", StringComparison.OrdinalIgnoreCase))
+            || SecretLikeMarkers.Any(m => segments[^1].Contains(m, StringComparison.OrdinalIgnoreCase));
+    }
 
     private async Task<AzureAccountCheck> ProbeAccountAsync(CancellationToken ct)
     {
