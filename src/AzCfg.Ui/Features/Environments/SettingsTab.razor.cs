@@ -87,7 +87,7 @@ public sealed partial class SettingsTab : IDisposable
     {
         Adopt();
         var node = SelectedNode();
-        if (node?.Id != _project?.Id || node?.Binding != _project?.Binding)
+        if (node?.Id != _project?.Id || node?.Binding != _project?.Binding || node?.ManifestPath != _project?.ManifestPath)
         {
             await LoadProjectAsync();
         }

@@ -1,4 +1,5 @@
 using AzCfg.Core.Model;
+using AzCfg.Core.UseCases;
 using AzCfg.Ui.Application.Workspace;
 
 namespace AzCfg.Ui.Tests.Features.Workspace.Fakes;
@@ -69,6 +70,23 @@ internal sealed class FakeWorkspaceService : IWorkspaceService
     public Task<ProjectBinding> RemoveIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) => throw new NotSupportedException();
 
     public List<string> Shares { get; } = [];
+
+    public List<string> Applied { get; } = [];
+
+    /// <summary>The path <see cref="PlanShareAsync"/> returns; null = <c>&lt;RepoPath&gt;/azcfg.json</c>.</summary>
+    public string? SharePath { get; set; }
+
+    /// <summary>What <see cref="ApplyManifestAsync"/> returns (the tree for the next open is the test's to set).</summary>
+    public ProjectResolution? ApplyResult { get; set; }
+
+    public Task<string> PlanShareAsync(ProjectNode project, CancellationToken ct) =>
+        ShareFailure is not null ? Task.FromException<string>(ShareFailure) : Task.FromResult(SharePath ?? Path.Combine(project.Binding!.RepoPath, "azcfg.json"));
+
+    public Task<ProjectResolution> ApplyManifestAsync(ProjectNode project, CancellationToken ct)
+    {
+        Applied.Add(project.Id);
+        return Task.FromResult(ApplyResult ?? new ProjectResolution([], true, [], project.Binding, project.ManifestPath));
+    }
 
     public Exception? ShareFailure { get; set; }
 

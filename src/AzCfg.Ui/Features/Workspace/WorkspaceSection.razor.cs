@@ -16,13 +16,15 @@ namespace AzCfg.Ui.Features.Workspace;
 /// "unbound"; libraries are dimmed. Clicking a bound project opens its tab; clicking an unbound application project starts the
 /// bind wizard first (§2.8 step 3). <c>local.settings.json</c> is a bindable target like the other files. A project shared via
 /// <c>azcfg.json</c> carries the badge "shared (azcfg.json)"; one whose manifest cannot be applied shows "azcfg.json error" (the
-/// reason in its tooltip and the selection panel). The selection panel offers Share with team for a bound project not shared yet.
+/// reason in its tooltip and the selection panel); one whose binding differs from its <c>azcfg.json</c> shows "azcfg.json changed"
+/// until Apply azcfg.json. The selection panel offers Share with team for a bound project not shared yet.
 /// </summary>
 public sealed partial class WorkspaceSection : IDisposable
 {
     private const string LooseId = "loose";
     private const string SharedBadge = "shared (azcfg.json)";
     private const string ManifestErrorBadge = "azcfg.json error";
+    private const string ManifestChangedBadge = "azcfg.json changed";
     private readonly HashSet<string> _open = new(StringComparer.Ordinal);
     private readonly HashSet<ProjectSession> _hooked = [];
     private string? _root;
@@ -112,7 +114,10 @@ public sealed partial class WorkspaceSection : IDisposable
             return node.Project.Project.Name;
         }
 
-        var badge = node.IsShared ? $" · {SharedBadge}" : node.ManifestError is not null ? $" · {ManifestErrorBadge}" : string.Empty;
+        var badge = node.ManifestChange is not null ? $" · {SharedBadge} · {ManifestChangedBadge}"
+            : node.IsShared ? $" · {SharedBadge}"
+            : node.ManifestError is not null ? $" · {ManifestErrorBadge}"
+            : string.Empty;
         if (node.Binding is not { } binding)
         {
             return $"{node.Project.Project.Name} · unbound{badge}";
@@ -155,7 +160,8 @@ public sealed partial class WorkspaceSection : IDisposable
         var tip = node.Project.Project.IsLibrary
             ? $"{node.Project.Project.CsprojPath} — library or test project: no local targets"
             : node.Binding is { } binding ? $"{node.Project.Project.CsprojPath} — service ‘{binding.Service}’" : $"{node.Project.Project.CsprojPath} — not bound to a service yet";
-        return node.ManifestPath is { } manifest ? $"{tip}; shared via {manifest}"
+        return node.ManifestChange is { } change ? $"{tip}; {node.ManifestPath} differs (service ‘{change.ManifestService}’): apply it from the selection panel"
+            : node.ManifestPath is { } manifest ? $"{tip}; shared via {manifest}"
             : node.ManifestError is { } error ? $"{tip}; {error}"
             : tip;
     }

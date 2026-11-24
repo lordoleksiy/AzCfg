@@ -84,19 +84,18 @@ public sealed class ShareWithTeamTests : ShellContext
     }
 
     [Fact]
-    public async Task Share_Fails_ToastsAndNoBadge()
+    public async Task Share_AnotherProjectsManifest_ToastsWithoutConfirmAndNoBadge()
     {
         Seed(Node("Orders.Api", Binding("Orders.Api")));
         WorkspaceService.ShareFailure = new InvalidOperationException("already shares another project");
         _ = Providers;
         Workspace.SelectProject(Orders);
 
-        var task = Services.GetRequiredService<WorkspaceActions>().ShareAsync(Orders);
-        Providers.WaitForAssertion(() => Assert.Contains("Share Orders.Api with the team?", Providers.Markup));
-        Click(Providers, "Share");
+        Assert.False(await Services.GetRequiredService<WorkspaceActions>().ShareAsync(Orders));
 
-        Assert.False(await task);
-        Providers.WaitForAssertion(() => Assert.Contains("Could not share Orders.Api", Providers.Markup));
+        Providers.WaitForAssertion(() => Assert.Contains("Could not share Orders.Api: already shares another project", Providers.Markup));
+        Assert.DoesNotContain("Share Orders.Api with the team?", Providers.Markup);
+        Assert.Empty(WorkspaceService.Shares);
         Assert.False(Workspace.FindProject(Orders)!.IsShared);
     }
 
@@ -163,5 +162,90 @@ public sealed class ShareWithTeamTests : ShellContext
         Assert.True(await task);
         Providers.WaitForAssertion(() => Assert.Contains(ProjectSettingKeys.SharedHint, Providers.Markup));
         Assert.True(Workspace.FindProject(Orders)!.IsShared);
+    }
+
+    [Fact]
+    public void Share_ConfirmShowsThePathCoreWillWrite()
+    {
+        Seed(Node("Orders.Api", Binding("Orders.Api")));
+        WorkspaceService.SharePath = $"{Root}/azcfg.json";
+        var cut = RenderWithOrdersSelected();
+
+        Click(cut, "Share with team…");
+        Providers.WaitForAssertion(() => Assert.Contains($"to {Root}/azcfg.json.", Providers.Markup));
+        Assert.Contains(Runner.Runs, r => r.Title == "Prepare sharing of Orders.Api" && r.Kind == OperationKind.Read);
+        Click(Providers, "Cancel");
+        Assert.Empty(WorkspaceService.Shares);
+    }
+
+    [Fact]
+    public void Command_Share_DisabledWhenTheManifestIsBroken()
+    {
+        Seed(Node("Orders.Api", Binding("Orders.Api")) with { ManifestError = "Invalid azcfg manifest" });
+        Workspace.SelectProject(Orders);
+        Assert.False(ShareEnabled());
+    }
+
+    [Fact]
+    public void Apply_ManifestChangedService_ConfirmsResetAppliesInvalidatesAndToasts()
+    {
+        var mine = Binding("Orders.Api", "orders-old", "dev");
+        Seed(Node("Orders.Api", mine) with { ManifestPath = Manifest, ManifestChange = new ManifestChange("orders-old", "orders") });
+        var applied = mine with { Service = "orders", ActiveEnvironment = null };
+        WorkspaceService.ApplyResult = new ProjectResolution([], true, [], applied, Manifest, "orders-old");
+        WorkspaceService.Tree = Tree([Solution("Shop", Node("Orders.Api", applied) with { ManifestPath = Manifest }, Node("Billing", null))]);
+        var session = Sessions.GetOrCreate(Orders);
+        session.SetView(new AzCfg.Ui.Application.Configuration.ConfigurationView(mine, Dev, false, [], [], DateTimeOffset.UnixEpoch));
+        var cut = RenderWithOrdersSelected();
+        Assert.Equal("Orders.Api · dev · shared (azcfg.json) · azcfg.json changed", Item(cut, "Orders.Api").Instance.Text);
+
+        Click(cut, "Apply azcfg.json…");
+        Providers.WaitForAssertion(() => Assert.Contains("the active environment is cleared and the sync snapshots are reset", Providers.Markup));
+        Click(Providers, "Apply");
+
+        cut.WaitForAssertion(() => Assert.Equal("Orders.Api · no active env · shared (azcfg.json)", Item(cut, "Orders.Api").Instance.Text));
+        Assert.Equal([Orders], WorkspaceService.Applied);
+        Assert.Contains(Runner.Runs, r => r.Title == "Apply azcfg.json to Orders.Api" && r.Kind == OperationKind.Write);
+        Assert.Null(session.View);
+        Providers.WaitForAssertion(() => Assert.Contains("was ‘orders-old’", Providers.Markup));
+    }
+
+    [Fact]
+    public void Apply_Cancelled_AppliesNothing()
+    {
+        Seed(Node("Orders.Api", Binding("Orders.Api")) with { ManifestPath = Manifest, ManifestChange = new ManifestChange("orders", "orders") });
+        var cut = RenderWithOrdersSelected();
+
+        Click(cut, "Apply azcfg.json…");
+        Providers.WaitForAssertion(() => Assert.Contains("The active environment and snapshots stay", Providers.Markup));
+        Click(Providers, "Cancel");
+
+        Assert.Empty(WorkspaceService.Applied);
+    }
+
+    [Fact]
+    public async Task Refresh_ProjectBoundFromManifest_InvalidatesItsSession()
+    {
+        Seed(Node("Orders.Api", null));
+        var session = Sessions.GetOrCreate(Orders);
+        session.SetView(new AzCfg.Ui.Application.Configuration.ConfigurationView(Binding("Orders.Api"), Dev, false, [], [], DateTimeOffset.UnixEpoch));
+        WorkspaceService.Tree = Tree([Solution("Shop", Node("Orders.Api", Binding("Orders.Api")) with { ManifestPath = Manifest }, Node("Billing", null))]);
+
+        Assert.True(await Services.GetRequiredService<WorkspaceActions>().RefreshAsync());
+
+        Assert.Null(session.View);
+    }
+
+    [Fact]
+    public async Task Refresh_UnchangedBindingReloaded_KeepsTheSession()
+    {
+        Seed(Node("Orders.Api", Binding("Orders.Api")));
+        var session = Sessions.GetOrCreate(Orders);
+        session.SetView(new AzCfg.Ui.Application.Configuration.ConfigurationView(Binding("Orders.Api"), Dev, false, [], [], DateTimeOffset.UnixEpoch));
+        WorkspaceService.Tree = Tree([Solution("Shop", Node("Orders.Api", Binding("Orders.Api")), Node("Billing", null))]);
+
+        Assert.True(await Services.GetRequiredService<WorkspaceActions>().RefreshAsync());
+
+        Assert.NotNull(session.View);
     }
 }

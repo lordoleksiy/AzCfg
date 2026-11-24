@@ -51,6 +51,11 @@ public sealed class BindingFlow(
         if (node.Binding is null && setup.Resolution is { Existing: { } fromManifest, ManifestPath: { } manifest })
         {
             workspace.UpdateBinding(projectId, fromManifest);
+            if (sessions.TryGet(projectId, out var boundSession))
+            {
+                boundSession.Invalidate();
+            }
+
             await notifications.ToastAsync($"{node.Project.Project.Name} is bound to ‘{fromManifest.Service}’ from {manifest}", ToastIntent.Success);
             await actions.RefreshAsync();
             await OfferPullAsync(projectId, fromManifest);

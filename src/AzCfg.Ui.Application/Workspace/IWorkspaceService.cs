@@ -1,12 +1,14 @@
 using AzCfg.Core.Model;
+using AzCfg.Core.UseCases;
 
 namespace AzCfg.Ui.Application.Workspace;
 
 public interface IWorkspaceService
 {
     /// <summary>
-    /// Scan + binding lookup (G4) + registry touch. A project named by a shared <c>azcfg.json</c> opens bound from it (Core
-    /// <c>ResolveAsync</c>, no wizard) with <see cref="ProjectNode.ManifestPath"/>; a broken manifest sets <see cref="ProjectNode.ManifestError"/>.
+    /// Scan + binding lookup (G4) + registry touch. An unbound project named by a shared <c>azcfg.json</c> opens bound from it (Core
+    /// <c>ResolveAsync</c>, no wizard); a bound one is never changed here, only marked with <see cref="ProjectNode.ManifestChange"/>.
+    /// A broken manifest sets <see cref="ProjectNode.ManifestError"/> on the project it belongs to.
     /// </summary>
     Task<WorkspaceTree> OpenAsync(string rootPath, CancellationToken ct);
 
@@ -29,8 +31,20 @@ public interface IWorkspaceService
     Task<ProjectBinding> RemoveIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct);
 
     /// <summary>
+    /// The <c>azcfg.json</c> path <see cref="ShareAsync"/> would write (Read). Throws when the project is unbound or another project's
+    /// manifest is in effect.
+    /// </summary>
+    Task<string> PlanShareAsync(ProjectNode project, CancellationToken ct);
+
+    /// <summary>
     /// Share with the team (FR-W7): Core <c>project.shared = true</c> writes <c>azcfg.json</c> (the binding's folder unless a manifest
-    /// already names this project); returns its path. Throws when the project is unbound or another project's manifest is in effect.
+    /// already names this project); returns its path. Throws like <see cref="PlanShareAsync"/>.
     /// </summary>
     Task<string> ShareAsync(ProjectNode project, CancellationToken ct);
+
+    /// <summary>
+    /// Takes the manifest's shared fields into a bound project marked with <see cref="ProjectNode.ManifestChange"/> (Core
+    /// <c>ResolveAsync</c>, a Write); <see cref="ProjectResolution.PreviousService"/> says the service changed.
+    /// </summary>
+    Task<ProjectResolution> ApplyManifestAsync(ProjectNode project, CancellationToken ct);
 }

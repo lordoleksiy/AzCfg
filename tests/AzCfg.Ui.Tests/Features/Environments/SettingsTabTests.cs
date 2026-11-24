@@ -232,6 +232,27 @@ public sealed class SettingsTabTests : ShellContext
     }
 
     [Fact]
+    public async Task ProjectSettings_AfterShareWithTeam_ShowsProjectSharedTrue()
+    {
+        var tree = Tree([Solution("Shop", Node("Orders.Api", Binding("Orders.Api")))]);
+        SeedTree(tree);
+        WorkspaceService.Tree = tree;
+        SeedEnvironments();
+        Workspace.SelectProject(Orders);
+        ProjectSettings.Settings = [new UserSetting(ProjectSettingKeys.Shared, "false")];
+        var cut = RenderTab();
+        cut.WaitForAssertion(() => Assert.Equal(["false"], cut.FindAll(".az-settings-table td").Select(t => t.TextContent)));
+        ProjectSettings.Settings = [new UserSetting(ProjectSettingKeys.Shared, "true") { Source = $"{Root}/Orders.Api/azcfg.json" }];
+
+        var share = cut.InvokeAsync(() => Services.GetRequiredService<AzCfg.Ui.Features.Workspace.WorkspaceActions>().ShareAsync(Orders));
+        Providers.WaitForAssertion(() => Assert.Contains("Share Orders.Api with the team?", Providers.Markup));
+        Click(Providers, "Share");
+
+        Assert.True(await share);
+        cut.WaitForAssertion(() => Assert.Equal(["true"], cut.FindAll(".az-settings-table td").Select(t => t.TextContent)));
+    }
+
+    [Fact]
     public void ProjectSettings_BoundSelectedProject_ListsTheCoreSettingsThroughARead()
     {
         SeedTree(Tree([Solution("Shop", Node("Orders.Api", Binding("Orders.Api")))]));

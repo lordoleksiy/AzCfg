@@ -32,9 +32,9 @@ public sealed class SharedManifestWorkspaceTests : IDisposable
     private string ManifestFile => Path.Combine(CrmFolder, "azcfg.json");
 
     /// <summary>A developer's machine: its own user state, the same workspace and a <c>dev</c> environment.</summary>
-    private WorkspaceTestWorld Developer()
+    private WorkspaceTestWorld Developer(params WorkspaceProject[] extra)
     {
-        var w = new WorkspaceTestWorld(null, [_crm, _billing], _root);
+        var w = new WorkspaceTestWorld(null, [_crm, _billing, .. extra], _root);
         w.World.State.SaveProfileAsync(new UserProfile([w.Env("dev")]), default).GetAwaiter().GetResult();
         _worlds.Add(w);
         return w;
@@ -76,6 +76,7 @@ public sealed class SharedManifestWorkspaceTests : IDisposable
         var nodes = Nodes(await Service(a).OpenAsync(_root, default));
         Assert.Equal(ManifestFile, nodes["Crm"].ManifestPath);
         Assert.True(nodes["Crm"].IsShared);
+        Assert.Null(nodes["Crm"].ManifestChange);
         Assert.False(nodes["Billing"].IsShared);
     }
 
@@ -156,5 +157,102 @@ public sealed class SharedManifestWorkspaceTests : IDisposable
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => Service(a).ShareAsync(new ProjectNode(_billing, billing), default));
         Assert.Equal(json, a.World.Manifests.Json(rootManifest));
+    }
+
+    [Fact]
+    public async Task PlanShare_ReturnsTheFileCoreWrites()
+    {
+        var a = Developer();
+        var binding = await Service(a).BindAsync(new ProjectNode(_crm, null), "crm", a.Target(_crm), a.Target(_crm), default);
+
+        Assert.Equal(ManifestFile, await Service(a).PlanShareAsync(new ProjectNode(_crm, binding), default));
+        Assert.Null(a.World.Manifests.Json(ManifestFile));
+    }
+
+    [Fact]
+    public async Task Open_BoundProjectWhoseManifestChanged_NotRewrittenOnlyMarked_ApplyResets()
+    {
+        var a = await SharedByA();
+        var b = DeveloperWithManifestOf(a);
+        var mine = new ProjectBinding(CrmFolder, "crm-old", b.Target(_crm), b.Target(_crm), new Dictionary<string, Uri>(), "dev");
+        await b.World.State.SaveBindingAsync(mine, default);
+        await b.World.State.SaveSnapshotAsync(CrmFolder, "dev", new AzCfg.Core.Sync.ConfigState(new Dictionary<string, AzCfg.Core.Sync.StateItem>()), default);
+
+        var crm = Nodes(await Service(b).OpenAsync(_root, default))["Crm"];
+
+        var saved = b.World.State.Binding(CrmFolder)!;
+        Assert.Equal(("crm-old", "dev"), (saved.Service, saved.ActiveEnvironment));
+        Assert.Empty(saved.VaultByEnvironment);
+        Assert.NotNull(await b.World.State.LoadSnapshotAsync(CrmFolder, "dev", default));
+        Assert.Equal("crm-old", crm.Binding!.Service);
+        Assert.Equal(ManifestFile, crm.ManifestPath);
+        Assert.Equal(new ManifestChange("crm-old", "crm"), crm.ManifestChange);
+        Assert.True(crm.ManifestChange!.ServiceChanged);
+
+        var resolution = await Service(b).ApplyManifestAsync(crm, default);
+
+        Assert.Equal("crm-old", resolution.PreviousService);
+        Assert.Equal("crm", b.World.State.Binding(CrmFolder)!.Service);
+        Assert.Null(b.World.State.Binding(CrmFolder)!.ActiveEnvironment);
+        Assert.Null(await b.World.State.LoadSnapshotAsync(CrmFolder, "dev", default));
+        Assert.Null(Nodes(await Service(b).OpenAsync(_root, default))["Crm"].ManifestChange);
+    }
+
+    [Fact]
+    public async Task Open_BoundProjectMissingTheManifestVault_MarkedChanged()
+    {
+        var a = await SharedByA();
+        var b = DeveloperWithManifestOf(a);
+        await b.World.State.SaveBindingAsync(new ProjectBinding(CrmFolder, "crm", b.Target(_crm), b.Target(_crm), new Dictionary<string, Uri>(), "dev"), default);
+
+        var crm = Nodes(await Service(b).OpenAsync(_root, default))["Crm"];
+
+        Assert.False(crm.ManifestChange!.ServiceChanged);
+        Assert.Empty(b.World.State.Binding(CrmFolder)!.VaultByEnvironment);
+    }
+
+    [Fact]
+    public async Task Open_MalformedRootManifestInMonorepo_NotAttributedToAnyProject()
+    {
+        var b = Developer();
+        b.World.Manifests.SetJson(Path.Combine(_root, "azcfg.json"), "{ not json");
+
+        var nodes = Nodes(await Service(b).OpenAsync(_root, default));
+
+        Assert.All(nodes.Values, n => Assert.Null(n.ManifestError));
+        Assert.All(nodes.Values, n => Assert.Null(n.Binding));
+    }
+
+    [Fact]
+    public async Task Open_ManifestNamesAFolderWithTwoProjects_NamesNeither()
+    {
+        var tests = WorkspaceTestWorld.ProjectAt(_root, "src/Crm", "Crm.Tests");
+        var b = Developer(tests);
+        b.World.Manifests.SetJson(Path.Combine(_root, "azcfg.json"),
+            ManifestSerializer.Serialize(new ProjectManifest(1, "crm", new("user-secrets", "src/Crm"), new("user-secrets", "src/Crm"), null)));
+
+        var nodes = Nodes(await Service(b).OpenAsync(_root, default));
+
+        Assert.Null(nodes["Crm"].Binding);
+        Assert.Null(nodes["Crm"].ManifestPath);
+        Assert.Null(nodes["Crm.Tests"].Binding);
+    }
+
+    [Fact]
+    public async Task ProposeThenBind_RootManifest_BindingKeyedByManifestFolderAndReusedByBind()
+    {
+        var b = Developer();
+        var rootManifest = Path.Combine(_root, "azcfg.json");
+        b.World.Manifests.SetJson(rootManifest, ManifestSerializer.Serialize(new ProjectManifest(
+            1, "crm", new("user-secrets", "src/Crm/Crm.csproj"), new("user-secrets", "src/Crm/Crm.csproj"), new Dictionary<string, Uri> { ["dev"] = Vault })));
+        var stale = new ProjectNode(_crm, null);
+
+        var proposal = await Service(b).ProposeSetupAsync(stale, default);
+        var rebound = await Service(b).BindAsync(stale, "crm", b.Target(_crm), b.Target(_crm), default);
+
+        Assert.Equal(_root, proposal.Resolution.Existing!.RepoPath);
+        Assert.Equal(_root, rebound.RepoPath);
+        Assert.Equal(Vault, rebound.VaultByEnvironment["dev"]);
+        Assert.Null(b.World.State.Binding(CrmFolder));
     }
 }

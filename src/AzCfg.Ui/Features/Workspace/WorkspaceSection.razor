@@ -65,6 +65,11 @@
                 @if (selected.ManifestPath is { } manifest)
                 {
                     <span class="az-ws-shared" title="@manifest">@SharedBadge</span>
+                    @if (selected.ManifestChange is not null)
+                    {
+                        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Title="@($"{manifest} differs from this project's binding")"
+                                      OnClick="() => Actions.ApplyManifestAsync(selected.Id)">Apply azcfg.json…</FluentButton>
+                    }
                 }
                 else if (selected.Binding is not null && selected.ManifestError is null)
                 {

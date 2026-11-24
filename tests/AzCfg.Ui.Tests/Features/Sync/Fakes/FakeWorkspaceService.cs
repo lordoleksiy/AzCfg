@@ -26,5 +26,9 @@ internal sealed class FakeWorkspaceService : IWorkspaceService
 
     public Task<ProjectBinding> RemoveIgnoreAsync(ProjectBinding binding, string pattern, CancellationToken ct) => throw new NotSupportedException();
 
+    public Task<string> PlanShareAsync(ProjectNode project, CancellationToken ct) => throw new NotSupportedException();
+
     public Task<string> ShareAsync(ProjectNode project, CancellationToken ct) => throw new NotSupportedException();
+
+    public Task<AzCfg.Core.UseCases.ProjectResolution> ApplyManifestAsync(ProjectNode project, CancellationToken ct) => throw new NotSupportedException();
 }
