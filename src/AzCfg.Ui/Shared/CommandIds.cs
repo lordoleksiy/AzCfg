@@ -25,6 +25,7 @@ public static class CommandIds
     public const string WorkspaceRefresh = "workspace.refresh";
     public const string ProjectBind = "project.bind";
     public const string ProjectSettings = "project.settings";
+    public const string ProjectShare = "project.share";
     public const string EnvSetup = "env.setup";
     public const string EnvManage = "env.manage";
     public const string EnvMakeActive = "env.makeActive";

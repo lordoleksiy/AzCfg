@@ -12,6 +12,8 @@ public sealed class InMemoryWorld
 
     public InMemoryUserStateStore State { get; } = new();
 
+    public InMemoryProjectManifestStore Manifests { get; } = new();
+
     public InMemoryLocalTarget UserSecrets { get; } = new();
 
     public FixedResourceDiscovery Discovery { get; } = new();
@@ -20,4 +22,7 @@ public sealed class InMemoryWorld
 
     /// <summary><c>null</c> keeps the real <c>CsprojDetector</c> (scans real folders).</summary>
     public FixedProjectDetector? Detector { get; init; }
+
+    /// <summary>The keys of git-tracked <c>appsettings*.json</c> files seen by the health check (none by default; no git).</summary>
+    public FixedTrackedSettingsReader TrackedSettings { get; init; } = new();
 }

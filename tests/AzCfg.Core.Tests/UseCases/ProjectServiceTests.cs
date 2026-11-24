@@ -23,7 +23,7 @@ public sealed class ProjectServiceTests
     {
         state.Profile ??= new UserProfile([Env("stage"), Env("dev")]);
         var store = new FakeConfigStore(new() { ["dev"] = devPrefixes, ["stage"] = ["other"] });
-        return new(state, new FakeProjectDetector(projects), store, new SeparateStoresResolver(), targets);
+        return new(state, new FakeProjectDetector(projects), store, new SeparateStoresResolver(), targets, new FakeProjectManifestStore());
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public sealed class ProjectServiceTests
     [Fact]
     public async Task ResolveAsync_NoProfile_HasNoCandidates()
     {
-        var service = new ProjectService(new FakeUserStateStore(), new FakeProjectDetector(), new FakeConfigStore([]), new SeparateStoresResolver(), []);
+        var service = new ProjectService(new FakeUserStateStore(), new FakeProjectDetector(), new FakeConfigStore([]), new SeparateStoresResolver(), [], new FakeProjectManifestStore());
 
         var result = await service.ResolveAsync(Repo, Ct);
 

@@ -181,6 +181,14 @@ azcfg status --check               # configuration health; exit code 1 on errors
 environments and a binding that no longer matches reality. Each finding comes with the command that fixes it.
 Secrets are checked by metadata only; their values are never read.
 
+Two more checks cover the team setup: **ManifestInvalid** (error) when `azcfg.json` is unreadable, breaks the schema or
+needs a newer azcfg (if the check itself cannot run you get a warning that it was skipped), and
+**SecretLikeKeyInTrackedFile** (warning) when a git-tracked `appsettings*.json` has a non-empty string value under a
+secret-like key: the last non-numeric key segment contains `password`, `secret`, `token`, `apikey` or
+`connectionstring` (so `Auth:Token:Issuer` does not count), or the key sits under a section named `ApiKeys`, `Secrets`,
+`Tokens`, `Passwords` or `ConnectionStrings`. Placeholders (`#{X}#`, `${X}`, `__X__`, `{X}`) are ignored. The finding
+names the file and the key, never the value; the check is skipped outside git.
+
 ### 8. Protected environments
 
 Applying to a protected environment (by default `prod`, `production`, `prd`) requires typing its name, or
@@ -237,6 +245,49 @@ azcfg config set project.values local-settings
 azcfg config set project.secrets local-settings:src/Functions/Functions.csproj
 ```
 
+## Sharing the project with the team: `azcfg.json`
+
+`azcfg.json` is a small, git-tracked file that holds the shared half of a project's binding, so a new teammate runs
+`azcfg pull` without the first-run wizard. It contains names and paths only, never a value (plain or secret):
+
+```json
+{
+  "schemaVersion": 1,
+  "service": "orders-api",
+  "values":  { "target": "appsettings-local", "project": "src/Api" },
+  "secrets": { "target": "user-secrets",      "project": "src/Api/Api.csproj" },
+  "vaults":  { "dev": "https://my-kv.vault.azure.net" }
+}
+```
+
+- The schema is strict: an unknown field is an error (a `value` or `password` field is rejected by name), `service` is
+  not empty, has no `:` and is not `global`, `target` is `user-secrets`, `appsettings-local` or `local-settings`,
+  `project` is a path relative to the manifest folder that stays inside it, vault URIs are absolute https. `vaults`
+  is optional. Comments and trailing commas are allowed. A file with a newer `schemaVersion` asks you to update azcfg.
+- Lookup: the nearest `azcfg.json` from the project folder upward, up to the git root (or the drive root outside git).
+  The nearest file wins and is used only when one of its targets names this project (a monorepo root manifest of
+  another service is ignored); a nearer manifest of another project hides a farther one, so share the project to give
+  it its own file. A broken `azcfg.json` blocks every project below it until fixed; `status --check` reports it.
+- Shared (in the file): service, values/secrets targets, per-environment vaults. Per user (not in the file): the
+  active environment, ignore patterns, snapshots and the environment profile (`azcfg init`).
+- A project without a saved binding but with a manifest is bound from the manifest, no wizard. A manifest with another
+  service than the saved binding follows the `config set project.service` rule (the active environment and snapshots
+  are reset).
+
+```bash
+azcfg config set project.shared true   # write azcfg.json from the current binding (only `true` is accepted)
+azcfg config get project.shared        # true + the manifest path, or false
+```
+
+The first interactive `pull`/`use` also asks "Save as azcfg.json for the team?" (default no; `--yes` and `--json` never
+write it). Once the project is shared, `config set project.service|values|secrets|vault.<env>` update `azcfg.json` as
+well and print "Shared via azcfg.json — commit it. (<path>)". Commit the file. `config list` shows `project.shared`
+as `invalid` when `azcfg.json` is broken (`status --check` explains why).
+
+When `azcfg.json` binds the project to another service than your saved binding, azcfg switches to the manifest's
+service, clears the active environment and snapshots, and prints a notice; it appears on `pull`, `use`, `push`, `plan`,
+`status`, `promote`, `edit` and `diff`.
+
 ## Keeping config in the project folder
 
 ```bash
@@ -273,6 +324,13 @@ Open a folder with your solution, bind each project (per `.csproj` folder) to it
 modes per project tab: **Browse** (local vs remote values, edits go to a draft), **Compare** (environment ↔ environment,
 local ↔ environment, consistency matrix) and **Sync** (pull / push with a plan and typed confirmation for protected
 environments). The **Problems** panel shows the `azcfg status --check` report.
+
+**Share with team…** in the selected project's panel in the Workspace sidebar (or the command palette entry "Share
+project with team (azcfg.json)…") writes `azcfg.json` after a confirmation, same as `config set project.shared true`.
+A shared project carries a "shared (azcfg.json)" badge, re-binding it tells you that `azcfg.json` changes ("commit
+it"), and a project with a manifest opens as bound even with an empty user state. A refresh never rewrites a bound
+project: when its binding differs from the manifest, "azcfg.json changed" offers **Apply azcfg.json**, which adopts the
+team's file only after you confirm.
 
 ## Build from source
 

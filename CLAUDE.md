@@ -63,7 +63,7 @@ tests/AzCfg.Cli.Tests     command tests + Scenario/ (end-to-end on in-memory fak
 ## Documentation
 - Full architecture, models, ports, CLI: `docs/architecture.md`
 - CLI plan: `docs/mvp-plan.md` (stages 1–9 done, CLI 0.1.0–0.5.0; 0.5.1 = `local.settings.json`; reorder 2026-11-21:
-  0.6.0 = UI (`azcfg ui`), 0.7.0 = stage 10 manifest for CLI + UI; orchestrator sessions and branching; where it
+  0.6.0 = UI (`azcfg ui`), 0.7.0 = stage 10 manifest for CLI + UI (done); orchestrator sessions and branching; where it
   differs from later ADRs, the ADR wins, except release numbers — `docs/cli-roadmap.md` §8.1)
 - Branching: one trunk `master` — `feature/<id>-<slug>` from `origin/master`, PR into `master`; a release is a PR that
   changes `<Version>` (NuGet publishes only then, `--skip-duplicate`). No `dev`/`release/*` branches after session 0.

@@ -28,4 +28,10 @@ internal sealed class FakeWorkspaceService : IWorkspaceService
         throw new NotSupportedException();
 
     public Task<ProjectBinding> SetVaultAsync(ProjectBinding binding, string environment, Uri? vault, CancellationToken ct) => throw new NotSupportedException();
+
+    public Task<string> PlanShareAsync(ProjectNode project, CancellationToken ct) => throw new NotSupportedException();
+
+    public Task<string> ShareAsync(ProjectNode project, CancellationToken ct) => throw new NotSupportedException();
+
+    public Task<AzCfg.Core.UseCases.ProjectResolution> ApplyManifestAsync(ProjectNode project, CancellationToken ct) => throw new NotSupportedException();
 }

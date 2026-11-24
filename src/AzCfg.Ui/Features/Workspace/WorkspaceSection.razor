@@ -62,6 +62,25 @@
                 <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => Commands.ExecuteAsync(CommandIds.ProjectBind)">
                     @(selected.Binding is null ? "Bind…" : "Binding settings…")
                 </FluentButton>
+                @if (selected.ManifestPath is { } manifest)
+                {
+                    <span class="az-ws-shared" title="@manifest">@SharedBadge</span>
+                    @if (selected.ManifestChange is not null)
+                    {
+                        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" Title="@($"{manifest} differs from this project's binding")" Disabled="@Actions.IsWriting"
+                                      OnClick="() => Actions.ApplyManifestAsync(selected.Id)">Apply azcfg.json…</FluentButton>
+                    }
+                }
+                else if (selected.Binding is not null && selected.ManifestError is null)
+                {
+                    <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" Title="Write azcfg.json so teammates open this project bound" Disabled="@Actions.IsWriting"
+                                  OnClick="() => Actions.ShareAsync(selected.Id)">Share with team…</FluentButton>
+                }
+
+                @if (selected.ManifestError is { } error)
+                {
+                    <span class="az-ws-error" role="alert">@error</span>
+                }
             }
 
             <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small" OnClick="() => CopyPathAsync(selected)">Copy path</FluentButton>

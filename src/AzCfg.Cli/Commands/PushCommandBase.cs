@@ -9,10 +9,8 @@ namespace AzCfg.Cli.Commands;
 
 /// <summary>Plans a <see cref="PushSource"/> and applies it with the confirmations described on <see cref="PushCommand"/>.</summary>
 public abstract class PushCommandBase<TSettings>(IProjectService projects, ISyncService sync, IUserStateStore state, IEnvironmentResolver resolver, IResourceDiscovery discovery, IAnsiConsole console)
-    : EnvironmentCommandBase<TSettings>(projects, state, resolver) where TSettings : PushSettings
+    : EnvironmentCommandBase<TSettings>(projects, state, resolver, console) where TSettings : PushSettings
 {
-    protected IAnsiConsole Console { get; } = console;
-
     protected ISyncService Sync { get; } = sync;
 
     /// <summary>Plans <paramref name="source"/>; a derived command overrides it to restrict or prepare the plan (<c>--key</c>).</summary>
