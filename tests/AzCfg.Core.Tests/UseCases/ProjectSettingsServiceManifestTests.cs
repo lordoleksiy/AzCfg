@@ -100,6 +100,31 @@ public sealed class ProjectSettingsServiceManifestTests
     }
 
     [Fact]
+    public async Task ManifestOfAnotherProject_IsNotSharedNotWritten_AndSharingCreatesTheProjectsOwnFile()
+    {
+        // Root manifest names Orders; the Func project (resolved from its own folder) is not shared by it.
+        const string FuncFolder = "/repo/Func";
+        var (service, state, manifests) = Create(Shared);
+        state.Binding = Bound() with
+        {
+            RepoPath = FuncFolder,
+            ValuesTarget = new(LocalTargetKind.LocalSettings, Func, LocalFileFormat.FlatDictionary),
+            SecretsTarget = new(LocalTargetKind.UserSecrets, Func, LocalFileFormat.NestedJson),
+        };
+
+        var before = await service.GetAsync(FuncFolder, "project.shared", Ct);
+        var set = await service.SetAsync(FuncFolder, "project.service", "func", Ct);
+        var shared = await service.SetAsync(FuncFolder, "project.shared", "true", Ct);
+
+        Assert.Equal(("false", (string?)null), (before.Value, set.Source));
+        var own = Path.Combine(FuncFolder, IProjectManifestStore.FileName);
+        Assert.Equal(own, shared.Source);
+        var (path, manifest) = Assert.Single(manifests.Saved);
+        Assert.Equal((own, "func", "Func.csproj"), (path, manifest.Service, manifest.Values.Project));
+        Assert.Equal(Shared, manifests.Files[ManifestPath]);
+    }
+
+    [Fact]
     public async Task SetShared_CopiesOnlyVaultsOfProfileEnvironments()
     {
         var (service, state, manifests) = Create(null);

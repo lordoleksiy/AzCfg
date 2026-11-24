@@ -58,4 +58,33 @@ internal static class ManifestBinding
     public static string KindName(LocalTargetKind kind) => ProjectLookup.KindNames.First(k => k.Kind == kind).Name;
 
     public static string FolderOf(string manifestPath) => Path.GetDirectoryName(Path.GetFullPath(manifestPath))!;
+
+    /// <summary>
+    /// <c>true</c> when the manifest describes the project at <paramref name="projectPath"/>: the folder of one of its targets (the
+    /// <c>.csproj</c>'s folder, or the named folder) is <paramref name="projectPath"/>, lies inside it, or contains it. A manifest found
+    /// upward that names another project (e.g. a monorepo root manifest of service A, resolved from <c>services/B</c>) does not apply.
+    /// </summary>
+    public static bool AppliesTo(ManifestLocation location, string projectPath)
+    {
+        var folder = FolderOf(location.FilePath);
+        var project = Path.GetFullPath(projectPath);
+        if (project.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+        {
+            project = Path.GetDirectoryName(project)!;
+        }
+
+        return new[] { location.Manifest.Values, location.Manifest.Secrets }.Any(target =>
+        {
+            var full = ProjectLookup.Full(folder, target.Project);
+            var targetFolder = full.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ? Path.GetDirectoryName(full)! : full;
+            return IsSameOrUnder(targetFolder, project) || IsSameOrUnder(project, targetFolder);
+        });
+    }
+
+    private static bool IsSameOrUnder(string path, string folder)
+    {
+        var relative = Path.GetRelativePath(folder, path);
+        return relative == "." || (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            && !relative.StartsWith("../", StringComparison.Ordinal));
+    }
 }
