@@ -19,6 +19,9 @@ public static class ProjectSettingKeys
     /// </summary>
     public const string Shared = "project.shared";
 
+    /// <summary>The <c>project.shared</c> value in <c>config list</c> when the manifest cannot be read (its path is the source).</summary>
+    public const string SharedInvalid = "invalid";
+
     /// <summary>The <see cref="UserSetting.Hint"/> of a change written to the shared <c>azcfg.json</c>.</summary>
     public const string SharedHint = "Shared via azcfg.json — commit it.";
 

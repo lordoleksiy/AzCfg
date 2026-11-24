@@ -12,7 +12,7 @@ namespace AzCfg.Cli.Commands;
 /// With <c>--check</c> it reports configuration health instead (<see cref="IHealthService"/>) and exits 1 when there are errors.
 /// </summary>
 public sealed class StatusCommand(IProjectService projects, ISyncService sync, IUserStateStore state, IEnvironmentResolver resolver, IHealthService health, IAnsiConsole console)
-    : EnvironmentCommandBase<StatusSettings>(projects, state, resolver)
+    : EnvironmentCommandBase<StatusSettings>(projects, state, resolver, console)
 {
     public override async Task<int> ExecuteAsync(CommandContext context, StatusSettings settings, CancellationToken ct)
     {
@@ -33,11 +33,11 @@ public sealed class StatusCommand(IProjectService projects, ISyncService sync, I
 
         if (settings.Json)
         {
-            console.Profile.Out.Writer.WriteLine(CliJson.Serialize(report));
+            Console.Profile.Out.Writer.WriteLine(CliJson.Serialize(report));
             return 0;
         }
 
-        StatusView.Render(console, report);
+        StatusView.Render(Console, report);
         return 0;
     }
 
@@ -47,11 +47,11 @@ public sealed class StatusCommand(IProjectService projects, ISyncService sync, I
         var report = await health.CheckAsync(Path.GetFullPath(settings.Project), ct);
         if (settings.Json)
         {
-            console.Profile.Out.Writer.WriteLine(CliJson.Serialize(report));
+            Console.Profile.Out.Writer.WriteLine(CliJson.Serialize(report));
         }
         else
         {
-            HealthView.Render(console, report);
+            HealthView.Render(Console, report);
         }
 
         return report.HasErrors ? 1 : 0;

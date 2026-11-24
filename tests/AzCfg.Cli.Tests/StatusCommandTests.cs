@@ -21,6 +21,7 @@ public sealed class StatusCommandTests
     {
         public UserProfile? Profile { get; init; } = new([Env("dev"), Env("prod", true)]);
         public ProjectBinding? Existing { get; init; } = Binding("dev");
+        public string? PreviousService { get; init; }
         public Func<ConfigEnvironment, SyncSummary> SummaryFor { get; init; } = e => new(e.Name, true, 0, 0, [], [], [], 0);
         public List<(ProjectBinding Binding, ConfigEnvironment Env)> Asked { get; } = [];
         public HealthReport Report { get; init; } = new(new(true, "dev@contoso.com", null), [new("dev", EnvironmentAccess.Ok, null), new("prod", EnvironmentAccess.Ok, null)], []);
@@ -52,7 +53,7 @@ public sealed class StatusCommandTests
 
     private sealed class StubProjects(Stubs s) : IProjectService
     {
-        public Task<ProjectResolution> ResolveAsync(string repoPath, CancellationToken ct) => Task.FromResult(new ProjectResolution([], true, [], s.Existing));
+        public Task<ProjectResolution> ResolveAsync(string repoPath, CancellationToken ct) => Task.FromResult(new ProjectResolution([], true, [], s.Existing, s.PreviousService is null ? null : "/r/azcfg.json", s.PreviousService));
         public Task<ProjectBinding> BindAsync(string repoPath, string service, LocalTargetBinding valuesTarget, LocalTargetBinding secretsTarget, CancellationToken ct) => throw new NotSupportedException();
         public Task<ProjectBinding> AddIgnoreAsync(string repoPath, string pattern, CancellationToken ct) => throw new NotSupportedException();
         public Task<ProjectBinding> RemoveIgnoreAsync(string repoPath, string pattern, CancellationToken ct) => throw new NotSupportedException();
@@ -110,6 +111,20 @@ public sealed class StatusCommandTests
         Assert.Contains("azcfg pull", (await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new Stubs { Existing = null }))).Message);
         Assert.Contains("azcfg init", (await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new Stubs { Profile = null }))).Message);
         Assert.Contains("nope", (await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new Stubs(), "--env", "nope"))).Message);
+    }
+
+    [Fact]
+    public async Task Service_switched_by_manifest_is_noted_in_human_output_and_json_shows_the_result()
+    {
+        var s = new Stubs { Existing = Binding(null), PreviousService = "billing" };
+
+        var (_, human) = await Run(s);
+        var (_, json) = await Run(s, "--json");
+
+        Assert.Contains("/r/azcfg.json binds this project to service 'orders' (was 'billing')", human);
+        Assert.DoesNotContain("was 'billing'", json);
+        var report = System.Text.Json.JsonDocument.Parse(json).RootElement;
+        Assert.Equal(("orders", System.Text.Json.JsonValueKind.Null), (report.GetProperty("service").GetString(), report.GetProperty("activeEnvironment").ValueKind));
     }
 
     [Theory]
