@@ -147,7 +147,7 @@ public sealed class SharedManifestWorkspaceTests : IDisposable
     }
 
     [Fact]
-    public async Task Share_AnotherProjectsManifestInEffect_Refused()
+    public async Task Share_AnotherProjectsManifestAbove_WritesThisProjectsOwnAzcfgJson()
     {
         var a = Developer();
         var billing = await Service(a).BindAsync(new ProjectNode(_billing, null), "billing", a.Target(_billing), a.Target(_billing), default);
@@ -155,7 +155,11 @@ public sealed class SharedManifestWorkspaceTests : IDisposable
         var json = ManifestSerializer.Serialize(new ProjectManifest(1, "crm", new("user-secrets", "src/Crm"), new("user-secrets", "src/Crm"), null));
         a.World.Manifests.SetJson(rootManifest, json);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Service(a).ShareAsync(new ProjectNode(_billing, billing), default));
+        var own = Path.Combine(Path.GetDirectoryName(_billing.Project.CsprojPath)!, "azcfg.json");
+
+        Assert.Equal(own, await Service(a).PlanShareAsync(new ProjectNode(_billing, billing), default));
+        Assert.Equal(own, await Service(a).ShareAsync(new ProjectNode(_billing, billing), default));
+        Assert.Equal("billing", ManifestSerializer.Deserialize(a.World.Manifests.Json(own)!).Service);
         Assert.Equal(json, a.World.Manifests.Json(rootManifest));
     }
 
@@ -254,5 +258,52 @@ public sealed class SharedManifestWorkspaceTests : IDisposable
         Assert.Equal(_root, rebound.RepoPath);
         Assert.Equal(Vault, rebound.VaultByEnvironment["dev"]);
         Assert.Null(b.World.State.Binding(CrmFolder));
+    }
+
+    [Fact]
+    public async Task Open_MalformedCsprojWhileResolvingManifestFolder_ReportedOnTheNodeTreeStillOpens()
+    {
+        var b = MalformedWorld();
+        b.World.Manifests.SetJson(ManifestFile, ManifestSerializer.Serialize(new ProjectManifest(1, "crm", new("user-secrets", "."), new("user-secrets", "."), null)));
+
+        var nodes = Nodes(await Service(b).OpenAsync(_root, default));
+
+        Assert.Contains("Malformed project file", nodes["Crm"].ManifestError);
+        Assert.Null(nodes["Crm"].Binding);
+        Assert.Null(nodes["Billing"].ManifestError);
+    }
+
+    [Fact]
+    public async Task Open_MalformedCsprojWhileCoreBindsFromManifest_ReportedOnTheNode()
+    {
+        var b = MalformedWorld();
+        b.World.Manifests.SetJson(ManifestFile, ManifestSerializer.Serialize(new ProjectManifest(1, "crm", new("user-secrets", "Crm.csproj"), new("user-secrets", "Crm.csproj"), null)));
+
+        var nodes = Nodes(await Service(b).OpenAsync(_root, default));
+
+        Assert.Contains("Malformed project file", nodes["Crm"].ManifestError);
+        Assert.Null(nodes["Crm"].Binding);
+    }
+
+    [Fact]
+    public async Task Open_TargetNamedByAmbiguousFolderButCsprojNamedElsewhere_NoChangeBadge()
+    {
+        var tests = WorkspaceTestWorld.ProjectAt(_root, "src/Crm", "Crm.Tests");
+        var b = Developer(tests);
+        await b.World.State.SaveBindingAsync(new ProjectBinding(CrmFolder, "crm", b.Target(_crm), b.Target(_crm), new Dictionary<string, Uri>()), default);
+        b.World.Manifests.SetJson(ManifestFile, ManifestSerializer.Serialize(new ProjectManifest(1, "crm", new("user-secrets", "Crm.csproj"), new("user-secrets", "."), null)));
+
+        var crm = Nodes(await Service(b).OpenAsync(_root, default))["Crm"];
+
+        Assert.Equal(ManifestFile, crm.ManifestPath);
+        Assert.Null(crm.ManifestChange);
+    }
+
+    private WorkspaceTestWorld MalformedWorld()
+    {
+        var w = new WorkspaceTestWorld(null, [_crm, _billing], _root, new Fakes.MalformedCsprojDetector());
+        w.World.State.SaveProfileAsync(new UserProfile([w.Env("dev")]), default).GetAwaiter().GetResult();
+        _worlds.Add(w);
+        return w;
     }
 }

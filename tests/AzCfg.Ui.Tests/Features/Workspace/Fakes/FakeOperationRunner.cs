@@ -5,7 +5,12 @@ namespace AzCfg.Ui.Tests.Features.Workspace.Fakes;
 /// <summary>Runs the work inline with the given token and records title and kind; exceptions become <c>Failed</c>.</summary>
 internal sealed class FakeOperationRunner : IOperationRunner
 {
-    public IReadOnlyList<OperationInfo> Running => [];
+    /// <summary>Operations reported as running (a test adds one and calls <see cref="RaiseChanged"/>).</summary>
+    public List<OperationInfo> Active { get; } = [];
+
+    public IReadOnlyList<OperationInfo> Running => Active;
+
+    public void RaiseChanged() => Changed?.Invoke();
 
     public IReadOnlyList<OperationOutcome> Recent => [];
 

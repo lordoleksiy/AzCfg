@@ -12,7 +12,7 @@ namespace AzCfg.Ui.Tests.Application.Workspace;
 /// <summary>Real Core services over the in-memory Azure and a temp state folder; a fixed workspace scan.</summary>
 public sealed class WorkspaceTestWorld : IDisposable
 {
-    public WorkspaceTestWorld(IReadOnlyList<SolutionInfo>? solutions = null, IReadOnlyList<WorkspaceProject>? projects = null, string? root = null)
+    public WorkspaceTestWorld(IReadOnlyList<SolutionInfo>? solutions = null, IReadOnlyList<WorkspaceProject>? projects = null, string? root = null, IProjectDetector? detector = null)
     {
         Root = root ?? NewRoot();
         Directory.CreateDirectory(Root);
@@ -25,6 +25,11 @@ public sealed class WorkspaceTestWorld : IDisposable
             .AddSingleton(new UiStatePaths(Path.Combine(Root, "state")))
             .AddWorkspaceServices()
             .AddEnvironmentServices();
+        if (detector is not null)
+        {
+            services.AddSingleton(detector);
+        }
+
         Provider = services.BuildServiceProvider();
     }
 

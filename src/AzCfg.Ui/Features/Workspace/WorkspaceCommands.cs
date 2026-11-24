@@ -30,7 +30,7 @@ public sealed class WorkspaceCommands(WorkspaceActions actions, WorkspaceState w
         ActiveProject.IdOf(tabs, workspace) is { } id && workspace.FindProject(id) is { Project.Project.IsLibrary: false } ? id : null;
 
     private string? Shareable() =>
-        Bindable() is { } id && workspace.FindProject(id) is { Binding: not null, IsShared: false, ManifestError: null } ? id : null;
+        !actions.IsWriting && Bindable() is { } id && workspace.FindProject(id) is { Binding: not null, IsShared: false, ManifestError: null } ? id : null;
 
     private Task ShareAsync() => Shareable() is { } id ? actions.ShareAsync(id) : Task.CompletedTask;
 
