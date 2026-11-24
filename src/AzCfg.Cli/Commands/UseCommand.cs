@@ -18,8 +18,9 @@ public sealed class UseCommand : PullCommandBase<UseSettings>
     private readonly ISyncService sync;
     private readonly IAnsiConsole console;
 
-    public UseCommand(IProjectService projects, ISyncService sync, IUserStateStore state, IEnvironmentResolver resolver, IAnsiConsole console)
-        : base(projects, sync, state, resolver, console)
+    public UseCommand(
+        IProjectService projects, IProjectSettingsService projectSettings, ISyncService sync, IUserStateStore state, IEnvironmentResolver resolver, IAnsiConsole console)
+        : base(projects, projectSettings, sync, state, resolver, console)
     {
         this.sync = sync;
         this.console = console;

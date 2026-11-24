@@ -22,7 +22,21 @@ namespace AzCfg.Cli.Tests.Scenario;
 public sealed class ScenarioHost
 {
     public ScenarioHost()
+        : this(null)
     {
+    }
+
+    /// <summary>
+    /// A second developer on the same repository and Azure: shares <see cref="AppConfig"/>, <see cref="Secrets"/>,
+    /// <see cref="Discovery"/> and the repository's <see cref="Manifests"/> with <paramref name="teammate"/>, but has their own
+    /// user state and local files.
+    /// </summary>
+    public ScenarioHost(ScenarioHost? teammate)
+    {
+        AppConfig = teammate?.AppConfig ?? new();
+        Secrets = teammate?.Secrets ?? new();
+        Discovery = teammate?.Discovery ?? new();
+        Manifests = teammate?.Manifests ?? new();
         Repo = Path.Combine(Path.GetTempPath(), "azcfg-scenario", "repo");
         CsprojPath = Path.Combine(Repo, "Orders", "Orders.csproj");
         Detector = new FixedProjectDetector(new ProjectInfo(Repo, CsprojPath, "Orders", false, "orders-user-secrets"));
@@ -33,15 +47,18 @@ public sealed class ScenarioHost
 
     public string CsprojPath { get; }
 
-    public InMemoryAppConfig AppConfig { get; } = new();
+    public InMemoryAppConfig AppConfig { get; }
 
-    public InMemorySecretStore Secrets { get; } = new();
+    public InMemorySecretStore Secrets { get; }
 
     public InMemoryUserStateStore State { get; } = new();
 
     public InMemoryLocalTarget Files { get; } = new();
 
-    public FixedResourceDiscovery Discovery { get; } = new();
+    public FixedResourceDiscovery Discovery { get; }
+
+    /// <summary>The repository's <c>azcfg.json</c> files (in memory, serialized like on disk).</summary>
+    public InMemoryProjectManifestStore Manifests { get; }
 
     public FixedProjectDetector Detector { get; }
 
@@ -82,7 +99,7 @@ public sealed class ScenarioHost
             .AddSingleton<ISyncService, SyncService>()
             .AddSingleton<IAccessErrorClassifier, AzureAccessErrorClassifier>()
             .AddSingleton<ITrackedSettingsReader>(new FixedTrackedSettingsReader())
-            .AddSingleton<IProjectManifestStore>(new InMemoryProjectManifestStore())
+            .AddSingleton<IProjectManifestStore>(Manifests)
             .AddSingleton<IHealthService, HealthService>();
 
         var app = new CommandApp(new TypeRegistrar(services));

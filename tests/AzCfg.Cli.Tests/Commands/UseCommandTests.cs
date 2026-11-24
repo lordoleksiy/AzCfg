@@ -8,7 +8,6 @@ using AzCfg.Core.UseCases;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Spectre.Console.Cli;
-using Spectre.Console.Rendering;
 
 namespace AzCfg.Cli.Tests.Commands;
 
@@ -75,31 +74,6 @@ public sealed class UseCommandTests
         public Task ResolveConflictAsync(ProjectBinding binding, ConfigEnvironment env, string key, ConflictResolution resolution, CancellationToken ct) => throw new NotSupportedException();
     }
 
-    private sealed class ScriptedInput(string text) : IAnsiConsoleInput
-    {
-        private readonly Queue<char> _keys = new(text);
-
-        public bool IsKeyAvailable() => _keys.Count > 0;
-
-        public ConsoleKeyInfo? ReadKey(bool intercept) => _keys.TryDequeue(out var c)
-            ? c == '\n' ? new('\r', ConsoleKey.Enter, false, false, false) : new(c, default, false, false, false)
-            : throw new InvalidOperationException("Unexpected prompt.");
-
-        public Task<ConsoleKeyInfo?> ReadKeyAsync(bool intercept, CancellationToken cancellationToken) => Task.FromResult(ReadKey(intercept));
-    }
-
-    private sealed class ScriptedConsole(IAnsiConsole inner, IAnsiConsoleInput input) : IAnsiConsole
-    {
-        public Profile Profile => inner.Profile;
-        public IAnsiConsoleCursor Cursor => inner.Cursor;
-        public IAnsiConsoleInput Input => input;
-        public IExclusivityMode ExclusivityMode => inner.ExclusivityMode;
-        public RenderPipeline Pipeline => inner.Pipeline;
-        public void Clear(bool home) => inner.Clear(home);
-        public void Write(IRenderable renderable) => inner.Write(renderable);
-        public void WriteAnsi(Action<AnsiWriter> action) => inner.WriteAnsi(action);
-    }
-
     private static ConfigEnvironment Env(string name, bool isProtected = false) => new(name, new Uri($"https://{name}.azconfig.io"), null, isProtected);
 
     private static async Task<(int Exit, string Output)> Run(Stubs s, string input, params string[] args)
@@ -110,6 +84,7 @@ public sealed class UseCommandTests
         var services = new ServiceCollection()
             .AddSingleton<IUserStateStore>(new StubState())
             .AddSingleton<IProjectService>(new StubProjects(s))
+            .AddSingleton<IProjectSettingsService>(new StubProjectSettings())
             .AddSingleton<ISyncService>(new StubSync(s))
             .AddSingleton<IEnvironmentResolver, SeparateStoresResolver>();
         var app = new CommandApp(new TypeRegistrar(services));

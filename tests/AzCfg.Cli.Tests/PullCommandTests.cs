@@ -1,5 +1,6 @@
 using AzCfg.Cli;
 using AzCfg.Cli.Commands;
+using AzCfg.Cli.Tests.Commands;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Environments;
 using AzCfg.Core.Model;
@@ -23,6 +24,7 @@ public sealed class PullCommandTests
         public PullResult Result { get; init; } = new("dev", 3, 1, false, []);
         public ProjectBinding? Bound { get; set; }
         public (ProjectBinding Binding, ConfigEnvironment Env, bool Force)? Pulled { get; set; }
+        public StubProjectSettings Settings { get; } = new();
     }
 
     private sealed class StubState(Stubs s) : IUserStateStore
@@ -79,13 +81,22 @@ public sealed class PullCommandTests
 
     private static async Task<(int Exit, string Output)> Run(Stubs s, params string[] args) => await Run("pull", s, args);
 
-    private static async Task<(int Exit, string Output)> Run(string command, Stubs s, params string[] args)
+    private static Task<(int Exit, string Output)> Run(string command, Stubs s, params string[] args) => RunWith(command, s, null, args);
+
+    /// <summary>Runs with <paramref name="input"/> typed into an interactive console (<c>\n</c> = Enter), or a plain console when <c>null</c>.</summary>
+    private static async Task<(int Exit, string Output)> RunWith(string command, Stubs s, string? input, params string[] args)
     {
         var writer = new StringWriter();
-        var console = AnsiConsole.Create(new() { Ansi = AnsiSupport.No, ColorSystem = ColorSystemSupport.NoColors, Out = new AnsiConsoleOutput(writer) });
+        IAnsiConsole console = input is null
+            ? AnsiConsole.Create(new() { Ansi = AnsiSupport.No, ColorSystem = ColorSystemSupport.NoColors, Out = new AnsiConsoleOutput(writer) })
+            : new ScriptedConsole(
+                AnsiConsole.Create(new() { Out = new AnsiConsoleOutput(writer), Interactive = InteractionSupport.Yes, Ansi = AnsiSupport.Yes, ColorSystem = ColorSystemSupport.NoColors, Enrichment = new() { UseDefaultEnrichers = false } }),
+                new ScriptedInput(input));
+        console.Profile.Width = 200;
         var services = new ServiceCollection()
             .AddSingleton<IUserStateStore>(new StubState(s))
             .AddSingleton<IProjectService>(new StubProjects(s))
+            .AddSingleton<IProjectSettingsService>(s.Settings)
             .AddSingleton<ISyncService>(new StubSync(s))
             .AddSingleton<IEnvironmentResolver, SeparateStoresResolver>();
         var app = new CommandApp(new TypeRegistrar(services));
@@ -400,5 +411,73 @@ public sealed class PullCommandTests
         var (_, output) = await Run("use", Bound(result), "stage", "--json");
 
         Assert.Equal(CliJson.Serialize(result), output.Trim());
+    }
+
+    [Theory]
+    [InlineData("y\n", true)]
+    [InlineData("\n", false)]
+    [InlineData("n\n", false)]
+    public async Task Wizard_offers_to_save_azcfg_json_default_no(string answer, bool shared)
+    {
+        var s = new Stubs();
+
+        // Enter picks the first values target, Enter the only safe secrets target, then the answer to "save as azcfg.json".
+        var (exit, output) = await RunWith("pull", s, "\n\n" + answer);
+
+        Assert.Equal(0, exit);
+        Assert.NotNull(s.Bound);
+        Assert.Contains("azcfg.json for the team", output);
+        if (shared)
+        {
+            Assert.Equal((Path.GetFullPath("."), ProjectSettingKeys.Shared, "true"), Assert.Single(s.Settings.Sets));
+            Assert.Contains(ProjectSettingKeys.SharedHint, output);
+        }
+        else
+        {
+            Assert.Empty(s.Settings.Sets);
+        }
+    }
+
+    [Fact]
+    public async Task Wizard_share_failure_is_a_warning_and_the_pull_continues()
+    {
+        var s = new Stubs();
+        s.Settings.SetError = new InvalidOperationException("Cannot share 'values': project is outside the manifest folder.");
+
+        var (exit, output) = await RunWith("pull", s, "\n\ny\n");
+
+        Assert.Equal(0, exit);
+        Assert.Single(s.Settings.Sets);
+        Assert.Contains("Could not save azcfg.json", output);
+        Assert.Contains("outside the manifest folder", output);
+        Assert.NotNull(s.Pulled);
+    }
+
+    [Theory]
+    [InlineData("--yes")]
+    [InlineData("--json")]
+    public async Task Yes_or_json_never_offers_or_writes_azcfg_json(string flag)
+    {
+        var s = new Stubs();
+
+        var (exit, output) = await RunWith("pull", s, "", flag);
+
+        Assert.Equal(0, exit);
+        Assert.NotNull(s.Bound);
+        Assert.Empty(s.Settings.Sets);
+        Assert.DoesNotContain("azcfg.json", output);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task Service_switched_by_manifest_is_reported_in_human_output_only(bool json, bool reported)
+    {
+        var s = new Stubs { Resolution = new([], true, [], Binding(), "/r/azcfg.json", "billing") };
+
+        var (_, output) = json ? await Run(s, "--json") : await Run(s);
+
+        Assert.Equal(reported, output.Contains("(was 'billing')", StringComparison.Ordinal));
+        Assert.NotNull(s.Pulled);
     }
 }

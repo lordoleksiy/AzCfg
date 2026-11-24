@@ -11,7 +11,7 @@ namespace AzCfg.Cli.Commands;
 /// upsert by default, <c>--delete</c> also plans remote deletes. Warnings are shown even without changes. Needs a bound project; always exits 0.
 /// </summary>
 public sealed class PlanCommand(IProjectService projects, ISyncService sync, IUserStateStore state, IEnvironmentResolver resolver, IAnsiConsole console)
-    : EnvironmentCommandBase<PlanSettings>(projects, state, resolver)
+    : EnvironmentCommandBase<PlanSettings>(projects, state, resolver, console)
 {
     public override async Task<int> ExecuteAsync(CommandContext context, PlanSettings settings, CancellationToken ct)
     {
@@ -20,17 +20,17 @@ public sealed class PlanCommand(IProjectService projects, ISyncService sync, IUs
 
         if (settings.Json)
         {
-            console.Profile.Out.Writer.WriteLine(CliJson.Serialize(plan));
+            Console.Profile.Out.Writer.WriteLine(CliJson.Serialize(plan));
             return 0;
         }
 
         if (plan.Changes.Count == 0 && plan.Conflicts.Count == 0)
         {
-            console.MarkupLine("No changes.");
+            Console.MarkupLine("No changes.");
         }
 
-        PlanView.Render(console, plan);
-        WarningsView.RenderNoActiveEnvironment(console, binding);
+        PlanView.Render(Console, plan);
+        WarningsView.RenderNoActiveEnvironment(Console, binding);
         return 0;
     }
 }

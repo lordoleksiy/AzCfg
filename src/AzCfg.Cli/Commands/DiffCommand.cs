@@ -21,7 +21,9 @@ public sealed class DiffCommand(IProjectService projects, ISyncService sync, ICo
     {
         var profile = await state.LoadProfileAsync(ct) ?? throw new InvalidOperationException("No profile found. Run 'azcfg init' first.");
         var repo = Path.GetFullPath(settings.Project);
-        var binding = (await projects.ResolveAsync(repo, ct)).Existing ?? throw new InvalidOperationException("This project is not bound yet. Run 'azcfg pull' first.");
+        var resolution = await projects.ResolveAsync(repo, ct);
+        ManifestNoticeView.Render(console, resolution, settings.Json);
+        var binding = resolution.Existing ?? throw new InvalidOperationException("This project is not bound yet. Run 'azcfg pull' first.");
         var environments = resolver.Resolve(profile);
 
         return settings.Missing ? await MissingAsync(binding, environments, settings, ct) : await CompareAsync(binding, environments, settings, ct);

@@ -25,6 +25,8 @@ public sealed class ConfigSetCommand(IUserSettingsService userSettings, IProject
         console.WriteLine($"{setting.Key} = {setting.Value ?? UserSettingsView.None}");
         if (ProjectSettingKeys.Hint(settings.Key) is { } hint)
             console.WriteLine(hint);
+        if (setting.Hint is { } shared)
+            console.WriteLine(setting.Source is null ? shared : $"{shared} ({setting.Source})");
         return 0;
     }
 }

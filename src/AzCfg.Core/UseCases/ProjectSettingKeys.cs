@@ -13,6 +13,18 @@ public static class ProjectSettingKeys
     public const string Ignore = "project.ignore";
     public const string VaultPrefix = "project.vault.";
 
+    /// <summary>
+    /// Whether the shared fields live in a git-tracked <c>azcfg.json</c> (ADR 0012 amendment 2): <c>true</c> (the setting's
+    /// <see cref="UserSetting.Source"/> is the manifest path) or <c>false</c>. Settable only to <c>true</c>.
+    /// </summary>
+    public const string Shared = "project.shared";
+
+    /// <summary>The <c>project.shared</c> value in <c>config list</c> when the manifest cannot be read (its path is the source).</summary>
+    public const string SharedInvalid = "invalid";
+
+    /// <summary>The <see cref="UserSetting.Hint"/> of a change written to the shared <c>azcfg.json</c>.</summary>
+    public const string SharedHint = "Shared via azcfg.json — commit it.";
+
     /// <summary>The value of <c>project.values</c> / <c>project.secrets</c> for <paramref name="target"/>: <c>&lt;target&gt;:&lt;project path&gt;</c>.</summary>
     public static string TargetValue(LocalTargetBinding target) =>
         $"{ProjectLookup.KindNames.First(k => k.Kind == target.Kind).Name}:{target.ProjectPath}";
