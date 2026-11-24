@@ -60,6 +60,9 @@ public sealed class HealthServiceTests
 
         public HealthService With(IConfigStore store) =>
             new(State, new SeparateStoresResolver(), store, Sync, KeyVault, Probe, [], Detector, new FakeAccessErrorClassifier(), Tracked, Manifests);
+
+        public HealthService With(IProjectManifestStore manifests) =>
+            new(State, new SeparateStoresResolver(), Config, Sync, KeyVault, Probe, [new FakeLocalTarget(LocalTargetKind.UserSecrets), new FakeLocalTarget(LocalTargetKind.AppSettingsLocal)], Detector, new FakeAccessErrorClassifier(), Tracked, manifests);
     }
 
     private sealed class ListDetector(List<ProjectInfo> projects) : IProjectDetector
@@ -566,6 +569,10 @@ public sealed class HealthServiceTests
     [InlineData("Github:TOKEN")]
     [InlineData("Maps:ApiKey")]
     [InlineData("ConnectionStrings:Default")]
+    [InlineData("ApiKeys:0")]
+    [InlineData("Secrets:Github")]
+    [InlineData("Tokens:Admin")]
+    [InlineData("Secrets:Path")]
     public async Task CheckAsync_SecretLikeKeyWithValueInTrackedFile_Warns(string key)
     {
         var rig = new Rig(Binding);
@@ -584,8 +591,8 @@ public sealed class HealthServiceTests
 
     [Theory]
     [InlineData("Auth:Token:Issuer")]
-    [InlineData("Secrets:Path")]
     [InlineData("Logging:LogLevel:Default")]
+    [InlineData("Hosts:0")]
     public async Task CheckAsync_SecretWordOnlyInParentSegment_NoFinding(string key)
     {
         var rig = new Rig(Binding);
@@ -600,7 +607,10 @@ public sealed class HealthServiceTests
     public async Task CheckAsync_SecretLikeKeyWithoutValueOrPlainKey_NoFinding()
     {
         var rig = new Rig(Binding);
-        rig.Tracked.Keys.AddRange([new("appsettings.json", "Db:Password", false), new("appsettings.json", "Logging:LogLevel:Default", true)]);
+        rig.Tracked.Keys.AddRange([
+            new("appsettings.json", "Db:Password", false),
+            new("appsettings.json", "Identity:PasswordRequireDigit", false), // a bool: the reader reports no value
+            new("appsettings.json", "Logging:LogLevel:Default", true)]);
 
         var report = await rig.CheckAsync();
 
@@ -706,6 +716,59 @@ public sealed class HealthServiceTests
 
         Assert.Contains(report.Findings, f => f.Kind == HealthCheckKind.ManifestInvalid);
         Assert.DoesNotContain(canary, Json(report));
+    }
+
+    [Fact]
+    public async Task CheckAsync_FromRepoRoot_FindsInvalidManifestOfBoundProject()
+    {
+        const string nested = "/repo/Orders/azcfg.json";
+        var store = new RuleManifestStore(path => path.Contains("Orders", StringComparison.Ordinal) ? Rejected("not json").WithFilePath(nested) : null);
+
+        var report = await new Rig(Binding).With(store).CheckAsync("/repo", Ct);
+
+        Assert.Contains("/repo", store.Calls);
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(HealthCheckKind.ManifestInvalid, finding.Kind);
+        Assert.Contains(nested, finding.Message);
+    }
+
+    [Fact]
+    public async Task CheckAsync_SameInvalidManifestFromSeveralPaths_ReportedOnce()
+    {
+        var store = new RuleManifestStore(_ => Rejected("not json"));
+
+        var report = await new Rig(Binding).With(store).CheckAsync("/repo", Ct);
+
+        Assert.True(store.Calls.Count >= 2);
+        Assert.Single(report.Findings, f => f.Kind == HealthCheckKind.ManifestInvalid);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ManifestStoreFails_WarnsSkippedWithTypeOnly()
+    {
+        var store = new RuleManifestStore(_ => throw new IOException("boom, value=CANARY"));
+
+        var report = await new Rig(Binding).With(store).CheckAsync("/repo", Ct);
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal(HealthCheckKind.ManifestInvalid, finding.Kind);
+        Assert.Equal(HealthSeverity.Warning, finding.Severity);
+        Assert.Contains(nameof(IOException), finding.Message);
+        Assert.DoesNotContain("CANARY", Json(report));
+    }
+
+    /// <summary>Throws the exception <paramref name="rule"/> returns for a path (or what it throws); otherwise no manifest.</summary>
+    private sealed class RuleManifestStore(Func<string, ManifestException?> rule) : IProjectManifestStore
+    {
+        public List<string> Calls { get; } = [];
+
+        public Task<ManifestLocation?> FindAsync(string path, CancellationToken ct)
+        {
+            Calls.Add(path);
+            return rule(path) is { } error ? throw error : Task.FromResult<ManifestLocation?>(null);
+        }
+
+        public Task SaveAsync(string filePath, ProjectManifest manifest, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private sealed class CancellingStore : IConfigStore

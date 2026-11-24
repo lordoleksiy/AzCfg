@@ -29,6 +29,7 @@ public sealed class HealthService(
     private const string GitIgnoreFix = "azcfg config set gitignoreLocalFiles true";
     private const string UpdateFix = "dotnet tool update --global AzCfg";
     private static readonly string[] SecretLikeMarkers = ["password", "secret", "token", "apikey", "connectionstring"];
+    private static readonly string[] SecretSections = ["ApiKeys", "Secrets", "Tokens", "Passwords", "ConnectionStrings"];
     private readonly ILogger _log = logger ?? NullLogger<HealthService>.Instance;
 
     public async Task<HealthReport> CheckAsync(string repoPath, CancellationToken ct)
@@ -49,7 +50,7 @@ public sealed class HealthService(
                 await CheckTargetProjectsAsync(binding, findings, ct);
             }
 
-            await CheckManifestAsync(repoPath, findings, ct);
+            await CheckManifestAsync(repoPath, binding, findings, ct);
             await CheckTrackedSettingsAsync(repoPath, findings, ct);
             return new(who, [.. environments.Select(e => new EnvironmentCheck(e.Name, EnvironmentAccess.AuthRequired, "Not signed in to Azure."))], findings);
         }
@@ -73,40 +74,83 @@ public sealed class HealthService(
             await CheckBindingAsync(binding, environments, reachable, findings, ct);
         }
 
-        await CheckManifestAsync(repoPath, findings, ct);
+        await CheckManifestAsync(repoPath, binding, findings, ct);
         await CheckTrackedSettingsAsync(repoPath, findings, ct);
         return new(who, checks, findings);
     }
 
     /// <summary>
-    /// The nearest <c>azcfg.json</c> is unreadable, fails the schema or needs a newer azcfg (ADR 0012, health). The finding carries
-    /// the file path and the manifest error messages, which never contain field values; absent or valid → no finding.
+    /// A project manifest <c>azcfg.json</c> is unreadable, fails the schema or needs a newer azcfg (ADR 0012, health). The nearest
+    /// manifest is looked up from <paramref name="repoPath"/>, from each bound target project and from each detected project, so a
+    /// per-service manifest is found from the repository root; one finding per distinct file. The finding carries the file path
+    /// and the manifest error messages, which never contain field values; absent or valid → no finding. Any other failure of the
+    /// store → one warning that the check was skipped (exception type only).
     /// </summary>
-    private async Task CheckManifestAsync(string repoPath, List<HealthFinding> findings, CancellationToken ct)
+    private async Task CheckManifestAsync(string repoPath, ProjectBinding? binding, List<HealthFinding> findings, CancellationToken ct)
     {
-        try
+        HashSet<string> reported = new(StringComparer.Ordinal);
+        var skipped = false;
+        foreach (var path in await ManifestSearchPathsAsync(repoPath, binding, ct))
         {
-            await manifests.FindAsync(repoPath, ct);
-        }
-        catch (ManifestException ex)
-        {
-            var file = ex.FilePath ?? IProjectManifestStore.FileName;
-            var details = string.Join("; ", ex.Errors.Select(e => e.Message));
-            findings.Add(ex.Kind switch
+            try
             {
-                ManifestErrorKind.Unreadable => new(HealthCheckKind.ManifestInvalid, HealthSeverity.Error, $"The project manifest '{file}' is unreadable: {details} Fix the JSON or delete the file."),
-                ManifestErrorKind.UnsupportedVersion => new(HealthCheckKind.ManifestInvalid, HealthSeverity.Error, $"The project manifest '{file}' needs a newer azcfg: {details}", Fix: UpdateFix),
-                _ => new(HealthCheckKind.ManifestInvalid, HealthSeverity.Error, $"The project manifest '{file}' does not match the schema: {details}"),
-            });
-        }
-        catch (Exception ex) when (Handled(ex, ct, "manifest"))
-        {
+                await manifests.FindAsync(path, ct);
+            }
+            catch (ManifestException ex)
+            {
+                var file = ex.FilePath ?? IProjectManifestStore.FileName;
+                if (reported.Add(file))
+                {
+                    findings.Add(ManifestFinding(ex, file));
+                }
+            }
+            catch (Exception ex) when (Handled(ex, ct, "manifest"))
+            {
+                if (!skipped)
+                {
+                    skipped = true;
+                    findings.Add(new(HealthCheckKind.ManifestInvalid, HealthSeverity.Warning, $"The project manifest check was skipped ({ex.GetType().Name})."));
+                }
+            }
         }
     }
 
+    private static HealthFinding ManifestFinding(ManifestException ex, string file)
+    {
+        var details = string.Join("; ", ex.Errors.Select(e => e.Message));
+        return ex.Kind switch
+        {
+            ManifestErrorKind.Unreadable => new(HealthCheckKind.ManifestInvalid, HealthSeverity.Error, $"The project manifest '{file}' is unreadable: {details} Fix the JSON or delete the file."),
+            ManifestErrorKind.UnsupportedVersion => new(HealthCheckKind.ManifestInvalid, HealthSeverity.Error, $"The project manifest '{file}' needs a newer azcfg: {details}", Fix: UpdateFix),
+            _ => new(HealthCheckKind.ManifestInvalid, HealthSeverity.Error, $"The project manifest '{file}' does not match the schema: {details}"),
+        };
+    }
+
+    /// <summary>The repository path, the bound target projects and the detected projects, without duplicates.</summary>
+    private async Task<IReadOnlyList<string>> ManifestSearchPathsAsync(string repoPath, ProjectBinding? binding, CancellationToken ct)
+    {
+        List<string> paths = [repoPath];
+        if (binding is not null)
+        {
+            paths.Add(Resolve(binding.RepoPath, binding.ValuesTarget.ProjectPath));
+            paths.Add(Resolve(binding.RepoPath, binding.SecretsTarget.ProjectPath));
+        }
+
+        try
+        {
+            paths.AddRange((await detector.DetectAsync(repoPath, ct)).Select(p => Resolve(repoPath, p.CsprojPath)));
+        }
+        catch (Exception ex) when (Handled(ex, ct, "manifest project lookup"))
+        {
+        }
+
+        return [.. paths.Distinct(StringComparer.Ordinal)];
+    }
+
+    private static string Resolve(string root, string path) => Path.IsPathRooted(path) ? path : Path.Combine(root, path);
+
     /// <summary>
-    /// A git-tracked <c>appsettings*.json</c> with a value under a key whose last segment contains a secret-like word, or any key
-    /// under <c>ConnectionStrings</c> (ADR 0012, health).
+    /// A git-tracked <c>appsettings*.json</c> with a value under a secret-like key (see <see cref="IsSecretLike"/>; ADR 0012, health).
     /// The reader never returns values; the finding names the file and the key only.
     /// </summary>
     private async Task CheckTrackedSettingsAsync(string repoPath, List<HealthFinding> findings, CancellationToken ct)
@@ -127,12 +171,17 @@ public sealed class HealthService(
         }
     }
 
-    /// <summary>The last key segment names a secret, or the key sits under a <c>ConnectionStrings</c> section.</summary>
+    /// <summary>
+    /// The last non-numeric key segment names a secret (<c>Db:Password</c>, <c>ApiKeys:0</c>), or a parent section has the plural
+    /// section form (<c>Secrets:Github</c>, <c>Tokens:Admin</c>, <c>ConnectionStrings:Default</c>). A singular parent alone does
+    /// not count (<c>Auth:Token:Issuer</c>).
+    /// </summary>
     private static bool IsSecretLike(string key)
     {
-        var segments = key.Split(':');
-        return segments[..^1].Any(s => s.Equals("ConnectionStrings", StringComparison.OrdinalIgnoreCase))
-            || SecretLikeMarkers.Any(m => segments[^1].Contains(m, StringComparison.OrdinalIgnoreCase));
+        var segments = key.Split(':').Where(s => !s.All(char.IsAsciiDigit)).ToArray();
+        return segments.Length > 0
+            && (SecretLikeMarkers.Any(m => segments[^1].Contains(m, StringComparison.OrdinalIgnoreCase))
+                || segments[..^1].Any(s => SecretSections.Contains(s, StringComparer.OrdinalIgnoreCase)));
     }
 
     private async Task<AzureAccountCheck> ProbeAccountAsync(CancellationToken ct)

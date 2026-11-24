@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AzCfg.Core.Abstractions;
 using AzCfg.Core.Model;
 using Microsoft.Extensions.Logging;
@@ -16,7 +17,7 @@ namespace AzCfg.Infrastructure.Local;
 /// <c>__X__</c>, <c>{X}</c>). Outside a git repository (or without git, or when git fails or times out) the result is empty;
 /// an unreadable or invalid file is skipped.
 /// </summary>
-public sealed class GitTrackedSettingsReader(ILogger<GitTrackedSettingsReader>? logger = null) : ITrackedSettingsReader
+public sealed partial class GitTrackedSettingsReader(ILogger<GitTrackedSettingsReader>? logger = null) : ITrackedSettingsReader
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(15);
     private static readonly JsonDocumentOptions Options = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
@@ -85,11 +86,11 @@ public sealed class GitTrackedSettingsReader(ILogger<GitTrackedSettingsReader>? 
     private static bool HasValue(JsonElement element) =>
         element.ValueKind == JsonValueKind.String && element.GetString() is { } value && !string.IsNullOrWhiteSpace(value) && !IsPlaceholder(value.Trim());
 
-    private static bool IsPlaceholder(string value) =>
-        (value.StartsWith("#{", StringComparison.Ordinal) && value.EndsWith("}#", StringComparison.Ordinal))
-        || (value.StartsWith("${", StringComparison.Ordinal) && value.EndsWith('}'))
-        || (value.Length > 4 && value.StartsWith("__", StringComparison.Ordinal) && value.EndsWith("__", StringComparison.Ordinal))
-        || (value.StartsWith('{') && value.EndsWith('}'));
+    /// <summary>A token-replacement placeholder with an identifier body: <c>{X}</c>, <c>${X}</c>, <c>#{X}#</c>, <c>__X__</c>.</summary>
+    private static bool IsPlaceholder(string value) => PlaceholderPattern().IsMatch(value);
+
+    [GeneratedRegex(@"^(\{[\w.:\-]+\}|\$\{[\w.:\-]+\}|#\{[\w.:\-]+\}#|__\w+__)$", RegexOptions.CultureInvariant)]
+    private static partial Regex PlaceholderPattern();
 
     /// <summary>Paths relative to <paramref name="repoPath"/> with <c>/</c> separators; empty outside git or when git fails.</summary>
     private async Task<IReadOnlyList<string>> ListTrackedAsync(string repoPath, CancellationToken ct)
@@ -97,6 +98,9 @@ public sealed class GitTrackedSettingsReader(ILogger<GitTrackedSettingsReader>? 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(GitTimeout);
         Process? process = null;
+        var started = false;
+        Task<string>? output = null;
+        Task<string>? error = null;
         try
         {
             var startInfo = new ProcessStartInfo("git")
@@ -115,10 +119,10 @@ public sealed class GitTrackedSettingsReader(ILogger<GitTrackedSettingsReader>? 
             }
 
             process = new Process { StartInfo = startInfo };
-            process.Start();
+            started = process.Start();
             process.StandardInput.Close();
-            var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var error = process.StandardError.ReadToEndAsync(timeout.Token);
+            output = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            error = process.StandardError.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
             var files = await output;
             var stderr = await error;
@@ -136,7 +140,6 @@ public sealed class GitTrackedSettingsReader(ILogger<GitTrackedSettingsReader>? 
         }
         catch (OperationCanceledException)
         {
-            Kill(process);
             if (ct.IsCancellationRequested)
             {
                 throw;
@@ -153,22 +156,33 @@ public sealed class GitTrackedSettingsReader(ILogger<GitTrackedSettingsReader>? 
         }
         finally
         {
+            if (started)
+            {
+                Kill(process!);
+            }
+
+            // A read abandoned on timeout, cancellation or failure must not surface as an unobserved task exception.
+            Observe(output);
+            Observe(error);
             process?.Dispose();
         }
     }
 
-    private static void Kill(Process? process)
+    private static void Kill(Process process)
     {
         try
         {
-            if (process is { HasExited: false })
+            if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
         {
-            // Already exited or never started.
+            // Already exited.
         }
     }
+
+    private static void Observe(Task? task) =>
+        task?.ContinueWith(t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
 }

@@ -76,6 +76,22 @@ public sealed class GitTrackedSettingsReaderTests : IDisposable
         Assert.Equal([new TrackedSettingKey("appsettings.json", "Password", false)], keys);
     }
 
+    [Theory]
+    [InlineData("{p@ss}")]
+    [InlineData("{\"key\":\"abc123\",\"region\":\"eu\"}")]
+    [InlineData("${not an identifier}")]
+    [InlineData("__")]
+    public async Task ReadKeysAsync_BracedValueThatIsNotAPlaceholder_HasValue(string value)
+    {
+        InitRepo();
+        Write("appsettings.json", JsonSerializer.Serialize(new Dictionary<string, string> { ["ApiKey"] = value }));
+        RunGit("add", ".");
+
+        var keys = await _reader.ReadKeysAsync(_root, CancellationToken.None);
+
+        Assert.Equal([new TrackedSettingKey("appsettings.json", "ApiKey", true)], keys);
+    }
+
     [Fact]
     public async Task ReadKeysAsync_NonAsciiFolder_ListsUnquotedPath()
     {
